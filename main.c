@@ -526,13 +526,14 @@ static bool IsKeyword(const char* w)
     return false;
 }
 
-static void Tok(const char* s, int len, float x, float y, float fs, Color c)
+/* draw each character in its own fixed-width cell so code always lines up */
+static void Tok(const char* s, int len, float x, float y, float fs, float cw, Color c)
 {
-    char buf[256];
-    if (len > 255) len = 255;
-    memcpy(buf, s, len);
-    buf[len] = 0;
-    DrawTextEx(fCode, buf, (Vector2) { x, y }, fs, 0, c);
+    for (int k = 0; k < len; k++) {
+        if (s[k] == ' ') continue;
+        char b[2] = { s[k], 0 };
+        DrawTextEx(fCode, b, (Vector2) { x + k * cw, y }, fs, 0, c);
+    }
 }
 
 static void HighlightLine(const char* line, float x, float y, float fs, float cw)
@@ -576,7 +577,7 @@ static void HighlightLine(const char* line, float x, float y, float fs, float cw
             while (j < n && (isdigit((unsigned char)line[j]) || line[j] == '.')) j++;
             col = (Color){ 130, 220, 220, 255 };
         }
-        Tok(line + i, j - i, x, y, fs, col);
+        Tok(line + i, j - i, x, y, fs, cw, col);
         x += (j - i) * cw;
         i = j;
     }
@@ -1659,7 +1660,7 @@ static void DrawBattle(void)
     /* ---- problem ---- */
     Txt(fBold, "PROBLEM", 36, 212, 13, ac);
     int qEnd = Wrapped(fBold, Q->q, 36, 230, W - 72, 22, TXT);
-    DrawCode(Q->code, 36, (float)(qEnd + 4), W - 72, 16, "problem");
+    DrawCode(Q->code, 36, (float)(qEnd + 4), W - 72, 18, "problem");
 
     if (bPhase == 1) {
         for (int i = 0; i < 4; i++) {
@@ -1713,7 +1714,7 @@ int main(void)
     fReg = LoadF("LiberationSerif-Regular.ttf", 64);
     fMed = LoadF("LiberationSerif-Bold.ttf", 64);
     fBold = LoadF("LiberationSerif-Bold.ttf", 64);
-    fCode = LoadF("DejaVuSansMono.ttf", 48);
+    fCode = LoadF("DejaVuSansMono.ttf", 18);   /* code is always drawn at size 18 */
     LoadProgress();
     BuildMaps();
     WorldEnter();                           /* start in the campus sim */

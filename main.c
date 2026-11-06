@@ -15,6 +15,8 @@
  * Campus mode: click "Walk the campus" on the menu to explore as a student. Enter C Hall or
  *   C++ Hall through the door, walk into a classroom and press Space next to a teacher.
  *
+ * Quizzes: use the toggle at the top right to switch between multiple choice and typing your answer.
+ *
  * Battle Arena: the orange building. Challenge a rival to a head-to-head coding duel.
  *
  * Controls: mouse to click, mouse wheel to scroll, LEFT/RIGHT arrows to change
@@ -1485,6 +1487,9 @@ static int lang = 0, lessonIdx = 0, page = 0;
 static int qi = 0, sel = -1, score = 0;
 static float scroll = 0.0f;
 static bool quit = false;
+static bool quizTyped = false;          /* quiz mode: false = multiple choice, true = type the answer */
+static char tbuf[96] = "";             /* what the player has typed so far */
+static int tlen = 0;
 static bool fromWorld = false;            /* lesson/quiz opened from the campus? */
 #define BACKL (fromWorld ? "< Campus" : "< Menu")
 static void WorldEnter(void);
@@ -1787,7 +1792,7 @@ static int DrawCode(const char* code, float x, float y, float w, float fs, const
 /*  Navigation helpers                                                 */
 /* ------------------------------------------------------------------ */
 static void GoMenu(void) { screen = fromWorld ? SCR_WORLD : SCR_MENU; scroll = 0; }
-static void StartQuiz(void) { screen = SCR_QUIZ; qi = 0; sel = -1; score = 0; }
+static void StartQuiz(void) { screen = SCR_QUIZ; qi = 0; sel = -1; score = 0; tlen = 0; tbuf[0] = 0; }
 static void StartLesson(int idx) { lessonIdx = idx; page = 0; scroll = 0; screen = SCR_LESSON; }
 
 /* ------------------------------------------------------------------ */
@@ -1910,11 +1915,72 @@ static void DrawLesson(Color accent)
     }
 }
 
+/* ---- typed answers ----
+ * Each question has an answer spec: alternatives separated by '|'.
+ *   plain alternative  -> the typed text must match it exactly
+ *   '~' alternative    -> the typed text must CONTAIN it (good for sentence answers)
+ * Capitals and spaces are ignored, so "Stdio.h" or "next case" are forgiving. */
+static const char* TYPED[2][NLESSONS][3] = {
+  { /* C */
+    { "stdio.h|<stdio.h>|stdio", "~success|~no error|~without error|~finished ok", "%d|d|%i" },
+    { "5|five", "~fall|~next case", "~assign|~always true" },
+    { "0|zero", "3|three", "~value|~copy|~copies" },
+    { "~address", "~value|~dereference", "~caller|~original|~address|~pointer|~reference|~modify|~change" },
+    { "->", "null", "~leak" }
+  },
+  { /* C++ */
+    { "<<", "~memory|~manage|~size|~length|~safer|~resiz|~grows", "~deduce|~infer|~type" },
+    { "~alias|~another name|~other name", "push_back|v.push_back|v.push_back(x)|~push_back", "~copy|~copies|~read-only|~readonly|~not modify" },
+    { "private", "~creat|~made|~instantiat|~declared|~constructed|~built", "~destructor|~cleanup|~clean up" },
+    { "~:public animal", "~derived|~dynamic|~polymorph|~runtime|~override|~real type|~actual type", "~pure virtual|~=0" },
+    { "~many types|~any type|~generic|~different types|~multiple types|~every type|~all types", "std::map|map", "~free|~delete|~automatic|~memory|~leak|~cleanup" }
+  }
+};
+
+/* lower-case, drop spaces, drop trailing . ! ? */
+static void Squash(const char* in, char* out, int cap)
+{
+    int n = 0;
+    for (; *in && n < cap - 1; in++) {
+        unsigned char c = (unsigned char)*in;
+        if (isspace(c)) continue;
+        out[n++] = (char)tolower(c);
+    }
+    while (n > 0 && (out[n - 1] == '.' || out[n - 1] == '!' || out[n - 1] == '?')) n--;
+    out[n] = 0;
+}
+
+static bool TypedOk(const char* input, const char* spec)
+{
+    char a[160];
+    Squash(input, a, sizeof a);
+    if (!a[0]) return false;
+    const char* p = spec;
+    while (*p) {
+        char alt[96];
+        int n = 0;
+        while (*p && *p != '|' && n < 95) alt[n++] = *p++;
+        alt[n] = 0;
+        if (*p == '|') p++;
+        bool contains = (alt[0] == '~');
+        char b[96];
+        Squash(contains ? alt + 1 : alt, b, sizeof b);
+        if (!b[0]) continue;
+        if (contains ? (strstr(a, b) != NULL) : (strcmp(a, b) == 0)) return true;
+    }
+    return false;
+}
+
+static void ClearTyped(void) { tlen = 0; tbuf[0] = 0; }
+
 static void DrawQuiz(Color accent)
 {
     const Lesson* L = &LESSONS[lang][lessonIdx];
     const Question* Q = &L->qs[qi];
     const float x0 = 150, cw = 900;
+    float dt = GetFrameTime();
+    if (dt > 0.05f) dt = 0.05f;
+    bool wasAnswered = sel >= 0;          /* answered in an earlier frame? */
 
     TopBar();
     if (Button((Rectangle) { 24, 14, 104, 44 }, BACKL, SURF2, 16)) GoMenu();
@@ -1925,55 +1991,121 @@ static void DrawQuiz(Color accent)
     DrawRectangle(0, 72, W * (qi + (sel >= 0 ? 1 : 0)) / L->nQ, 4, accent);
 
     Txt(fBold, TextFormat("QUESTION %d OF %d", qi + 1, L->nQ), x0, 106, 14, accent);
-    int qEnd = Wrapped(fBold, Q->q, x0, 134, cw, 28, TXT);
+
+    /* toggle: multiple choice / type answer */
+    Rectangle tg = { W - 36 - 330.0f, 96, 330, 38 };
+    Panel(tg, 0.3f, SURF, BORDER);
+    static const char* modeName[2] = { "Multiple choice", "Type answer" };
+    for (int m = 0; m < 2; m++) {
+        Rectangle r = { tg.x + 3 + m * 162.0f, tg.y + 3, 162, 32 };
+        bool active = (quizTyped == (m == 1));
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+        if (hov && sel < 0) hand = true;
+        if (active) DrawRectangleRounded(r, 0.3f, 8, accent);
+        CenterFit(fBold, modeName[m], r.x + r.width / 2, r.y + 6, 15, r.width - 16, active ? WHITE : DIM);
+        if (hov && sel < 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) quizTyped = (m == 1);
+    }
+
+    int qEnd = Wrapped(fBold, Q->q, x0, 142, cw, 28, TXT);
     float yOpt = qEnd + 14 > 240 ? (float)(qEnd + 14) : 240;
 
-    for (int i = 0; i < 4; i++) {
-        Rectangle r = { x0, yOpt + i * 72, cw, 60 };
-        bool hov = CheckCollisionPointRec(GetMousePosition(), r);
-        Color fill = SURF, border = BORDER, badge = SURF2, text = TXT;
-        if (sel < 0 && hov) { fill = SURF2; border = accent; hand = true; }
-        if (sel >= 0) {
-            if (i == Q->correct) { fill = Fade(GOOD, 0.13f); border = GOOD; badge = GOOD; }
-            else if (i == sel) { fill = Fade(BAD, 0.13f);  border = BAD;  badge = BAD; }
-            else { text = DIM; }
+    /* keyboard text input (always drained so stray keys never pile up) */
+    bool accepting = quizTyped && sel < 0;
+    int ch;
+    while ((ch = GetCharPressed()) > 0)
+        if (accepting && ch >= 32 && ch <= 126 && tlen < 60) { tbuf[tlen++] = (char)ch; tbuf[tlen] = 0; }
+    static float bsT = 0;
+    if (accepting) {
+        if (IsKeyPressed(KEY_BACKSPACE)) { if (tlen > 0) tbuf[--tlen] = 0; bsT = 0; }
+        else if (IsKeyDown(KEY_BACKSPACE)) {
+            bsT += dt;
+            if (bsT > 0.4f) { if (tlen > 0) tbuf[--tlen] = 0; bsT = 0.36f; }
         }
-        Panel(r, 0.22f, fill, border);
-        DrawCircle((int)r.x + 38, (int)r.y + 30, 18, badge);
-        CenterTxt(fBold, TextFormat("%c", 'A' + i), r.x + 38, r.y + 19, 18, sel >= 0 && badge.a == 255 && (i == Q->correct || i == sel) ? WHITE : DIM);
-        TxtFit(fReg, Q->opts[i], r.x + 74, r.y + 16, 20, cw - 100, text);
+        else bsT = 0;
+    }
 
-        if (sel < 0 && ((hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) ||
-            IsKeyPressed(KEY_ONE + i) || IsKeyPressed(KEY_A + i))) {
-            sel = i;
-            if (i == Q->correct) score++;
+    float fy;                              /* where the feedback panel goes */
+    if (!quizTyped) {
+        fy = yOpt + 4 * 72 - 4;
+        for (int i = 0; i < 4; i++) {
+            Rectangle r = { x0, yOpt + i * 72, cw, 60 };
+            bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+            Color fill = SURF, border = BORDER, badge = SURF2, text = TXT;
+            if (sel < 0 && hov) { fill = SURF2; border = accent; hand = true; }
+            if (sel >= 0) {
+                if (i == Q->correct) { fill = Fade(GOOD, 0.13f); border = GOOD; badge = GOOD; }
+                else if (i == sel) { fill = Fade(BAD, 0.13f);  border = BAD;  badge = BAD; }
+                else { text = DIM; }
+            }
+            Panel(r, 0.22f, fill, border);
+            DrawCircle((int)r.x + 38, (int)r.y + 30, 18, badge);
+            CenterTxt(fBold, TextFormat("%c", 'A' + i), r.x + 38, r.y + 19, 18,
+                (sel >= 0 && (i == Q->correct || i == sel)) ? WHITE : DIM);
+            TxtFit(fReg, Q->opts[i], r.x + 74, r.y + 16, 20, cw - 100, text);
+
+            if (sel < 0 && ((hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) ||
+                IsKeyPressed(KEY_ONE + i) || IsKeyPressed(KEY_A + i))) {
+                sel = i;
+                if (i == Q->correct) score++;
+            }
+        }
+    }
+    else {
+        fy = yOpt + 84;
+        Rectangle box = { x0, yOpt, cw, 64 };
+        if (sel < 0) {
+            Panel(box, 0.2f, SURF, accent);
+            float room = cw - 200;
+            float fs = FitSize(fReg, tbuf, 22, room);
+            if (tlen == 0) Txt(fReg, "Type your answer here...", x0 + 22, yOpt + 18, 20, DIM);
+            else           Txt(fReg, tbuf, x0 + 22, yOpt + 17 + (22 - fs) * 0.5f, fs, TXT);
+            if (((int)(GetTime() * 2)) & 1)
+                DrawRectangle((int)(x0 + 24 + (tlen ? TxtW(fReg, tbuf, fs) : 0)), (int)yOpt + 14, 2, 36, TXT);
+            TxtFit(fReg, "Press Enter to submit. Capitals and spaces don't matter - spelling does.",
+                x0, yOpt + 76, 15, cw, DIM);
+            if ((Button((Rectangle) { x0 + cw - 150, yOpt + 8, 138, 48 }, "Submit", accent, 16)
+                || IsKeyPressed(KEY_ENTER)) && tlen > 0) {
+                bool ok = TypedOk(tbuf, TYPED[lang][lessonIdx][qi]);
+                sel = ok ? Q->correct : (Q->correct + 1) % 4;   /* any wrong index = wrong */
+                if (ok) score++;
+            }
+        }
+        else {
+            bool ok = (sel == Q->correct);
+            Color col = ok ? GOOD : BAD;
+            Panel(box, 0.2f, Fade(col, 0.13f), col);
+            TxtFit(fReg, TextFormat("Your answer:  %s", tbuf), x0 + 22, yOpt + 17, 22, cw - 44, TXT);
         }
     }
 
     DrawRectangle(0, 684, W, H - 684, SURF);
     DrawLine(0, 684, W, 684, BORDER);
     if (sel < 0) {
-        CenterTxt(fReg, "Click an answer, or press 1-4", W / 2.0f, 710, 14, DIM);
+        CenterTxt(fReg, quizTyped ? "Type your answer, then press Enter" : "Click an answer, or press 1-4",
+            W / 2.0f, 710, 14, DIM);
     }
     else {
         bool ok = (sel == Q->correct);
         Color col = ok ? GOOD : BAD;
-        float fy = yOpt + 4 * 72 - 4;
-        float ph = 46 + WrapH(fReg, Q->expl, cw - 44, 16) + 8;
+        char ebuf[600];
+        if (quizTyped && !ok) snprintf(ebuf, sizeof ebuf, "Expected answer: %s.   %s", Q->opts[Q->correct], Q->expl);
+        else                  snprintf(ebuf, sizeof ebuf, "%s", Q->expl);
+
+        float ph = 46 + WrapH(fReg, ebuf, cw - 44, 16) + 8;
         Panel((Rectangle) { x0, fy, cw, ph }, 0.12f, Fade(col, 0.10f), col);
         Txt(fBold, ok ? "Correct!" : "Not quite", x0 + 22, fy + 12, 20, col);
-        Wrapped(fReg, Q->expl, x0 + 22, fy + 44, cw - 44, 16, (Color) { 205, 211, 228, 255 });
+        Wrapped(fReg, ebuf, x0 + 22, fy + 44, cw - 44, 16, (Color) { 205, 211, 228, 255 });
 
         bool lastQ = (qi == L->nQ - 1);
         if (Button((Rectangle) { W - 196, 698, 160, 48 }, lastQ ? "Finish" : "Next >", accent, 16)
-            || IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)) {
+            || (wasAnswered && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)))) {
             if (lastQ) {
                 if (score > prog.best[lang][lessonIdx]) prog.best[lang][lessonIdx] = score;
                 SaveProgress();
                 screen = SCR_RESULT;
             }
             else {
-                qi++; sel = -1;
+                qi++; sel = -1; ClearTyped();
             }
         }
     }

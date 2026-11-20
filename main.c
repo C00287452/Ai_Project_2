@@ -15,6 +15,15 @@
  * Campus mode: click "Walk the campus" on the menu to explore as a student. Enter C Hall or
  *   C++ Hall through the door, walk into a classroom and press Space next to a teacher.
  *
+ * Shop: earn credits from quizzes, quests and more, then dress your student. Use the pink SHOP building
+ *   on campus or the Shop button on the study menu.
+ *
+ * Lawn Mower Farm: a 'The Farmer Was Replaced' style game - program a ride-on mower in C (red barn on campus or Mower Farm button).
+ * Coding Lab: write real C / C++ code, press Run, see the output (needs gcc / g++ installed).
+ *   Open it from the study menu or the teal Coding Lab building on campus.
+ *
+ * Daily Coding Quest: the little gold hut by the path. Face its door and press Space.
+ *
  * Quizzes: use the toggle at the top right to switch between multiple choice and typing your answer.
  *
  * Battle Arena: the orange building. Challenge a rival to a head-to-head coding duel.
@@ -23,6 +32,9 @@
  *           lesson page, ESC to go back (or quit from the menu).
  */
 
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L   /* popen / mkdir for the Coding Lab */
+#endif
 #include "raylib.h"
  /* ---- embedded fonts (no external files needed) ---- */
  /* Embedded fonts (ASCII subset) so the program needs no external font files.
@@ -1199,6 +1211,15 @@ static const unsigned char FONT_MONO[] = {
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
+#include <time.h>
+#include <stdlib.h>
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#endif
 #include <stdbool.h>
 
 #define W 1200
@@ -1480,7 +1501,7 @@ static const Color ACCENTS[2] = { { 64, 156, 255, 255 }, { 160, 112, 255, 255 } 
 #define SPC 0.2f          /* letter spacing for the UI font */
 #define UI_SCALE 1.14f    /* serif fonts look smaller than sans at the same size */
 
-typedef enum { SCR_MENU, SCR_LESSON, SCR_QUIZ, SCR_RESULT, SCR_WORLD, SCR_BATTLE } Screen;
+typedef enum { SCR_MENU, SCR_LESSON, SCR_QUIZ, SCR_RESULT, SCR_WORLD, SCR_BATTLE, SCR_QUEST, SCR_LAB, SCR_SHOP, SCR_FARM } Screen;
 
 static Screen screen = SCR_MENU;
 static int lang = 0, lessonIdx = 0, page = 0;
@@ -1493,6 +1514,12 @@ static int tlen = 0;
 static bool fromWorld = false;            /* lesson/quiz opened from the campus? */
 #define BACKL (fromWorld ? "< Campus" : "< Menu")
 static void WorldEnter(void);
+static void StartLab(void);
+static void StartFarm(void);
+static void StartShop(void);
+static void GainCredits(int n, const char* why);
+static void DrawCreditsChip(float rx, float y);
+static bool ibeam = false;                /* show text cursor this frame */
 static bool hand = false;                 /* show pointer cursor this frame */
 static Font fReg, fMed, fBold, fCode;     /* Liberation Serif + DejaVu Sans Mono */
 
@@ -1654,7 +1681,15 @@ static int WrapH(Font f, const char* t, float maxW, float fs)
 /* ------------------------------------------------------------------ */
 static void Panel(Rectangle r, float rd, Color fill, Color border)
 {
+    DrawRectangleRounded((Rectangle) { r.x, r.y + 4, r.width, r.height }, rd, 10, Fade(BLACK, 0.22f));
     DrawRectangleRounded(r, rd, 10, border);
+    if (fill.a < 255) {            /* blend a see-through fill over the dark background, not over the border */
+        float al = fill.a / 255.0f;
+        fill.r = (unsigned char)(fill.r * al + 20 * (1 - al));
+        fill.g = (unsigned char)(fill.g * al + 24 * (1 - al));
+        fill.b = (unsigned char)(fill.b * al + 36 * (1 - al));
+        fill.a = 255;
+    }
     Rectangle in = { r.x + 1, r.y + 1, r.width - 2, r.height - 2 };
     DrawRectangleRounded(in, rd, 10, fill);
 }
@@ -1663,7 +1698,9 @@ static bool Button(Rectangle r, const char* label, Color col, float fs)
 {
     bool hov = CheckCollisionPointRec(GetMousePosition(), r);
     if (hov) hand = true;
+    DrawRectangleRounded((Rectangle) { r.x, r.y + 3, r.width, r.height }, 0.28f, 10, Fade(BLACK, 0.35f));
     DrawRectangleRounded(r, 0.28f, 10, hov ? ColorBrightness(col, 0.18f) : col);
+    DrawRectangleRounded((Rectangle) { r.x + 2, r.y + 2, r.width - 4, r.height * 0.42f }, 0.5f, 8, Fade(WHITE, 0.09f));
     fs = FitSize(fBold, label, fs, r.width - 20);
     CenterTxt(fBold, label, r.x + r.width / 2, r.y + (r.height - fs * UI_SCALE) / 2 - 1, fs, WHITE);
     return hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
@@ -1817,6 +1854,7 @@ static void DrawMenu(Color accent)
     Txt(fMed, pt, W - 36 - 300, 14, 15, DIM);
     DrawRectangleRounded((Rectangle) { W - 36 - 300, 42, 300, 8 }, 0.5f, 10, SURF2);
     if (done) DrawRectangleRounded((Rectangle) { W - 36 - 300, 42, 300.0f * done / total, 8 }, 0.5f, 10, accent);
+    DrawCreditsChip(W - 36 - 300 - 20, 16);
 
     /* segmented language control */
     Panel((Rectangle) { 36, 96, 300, 48 }, 0.3f, SURF, BORDER);
@@ -1828,8 +1866,10 @@ static void DrawMenu(Color accent)
         CenterTxt(fMed, LANG_NAME[l], r.x + r.width / 2, r.y + 8, 20, l == lang ? WHITE : DIM);
         if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) lang = l;
     }
-    Txt(fReg, TextFormat("%d lessons  |  %d quiz questions", NLESSONS, NLESSONS * 3), 362, 108, 16, DIM);
+    if (Button((Rectangle) { 526, 96, 160, 48 }, "Mower Farm", (Color) { 70, 150, 70, 255 }, 16)) StartFarm();
+    if (Button((Rectangle) { 362, 96, 150, 48 }, "Shop", (Color) { 200, 80, 150, 255 }, 16)) StartShop();
     if (Button((Rectangle) { W - 36 - 260, 96, 260, 48 }, "Walk the campus  >", accent, 16)) WorldEnter();
+    if (Button((Rectangle) { W - 36 - 260 - 16 - 190, 96, 190, 48 }, "Coding Lab", (Color) { 40, 150, 145, 255 }, 16)) StartLab();
 
     /* lesson cards */
     for (int i = 0; i < NLESSONS; i++) {
@@ -1900,7 +1940,7 @@ static void DrawLesson(Color accent)
     CenterTxt(fReg, "Use the left / right arrow keys to change page", W / 2.0f, 710, 14, DIM);
 
     bool last = (page == L->nPages - 1);
-    if (last && !prog.read[lang][lessonIdx]) { prog.read[lang][lessonIdx] = 1; SaveProgress(); }
+    if (last && !prog.read[lang][lessonIdx]) { prog.read[lang][lessonIdx] = 1; SaveProgress(); GainCredits(5, "Lesson complete"); }
 
     if (page > 0 && (Button((Rectangle) { 36, 698, 150, 48 }, "< Previous", SURF2, 16) || IsKeyPressed(KEY_LEFT))) {
         page--; scroll = 0;
@@ -2100,7 +2140,13 @@ static void DrawQuiz(Color accent)
         if (Button((Rectangle) { W - 196, 698, 160, 48 }, lastQ ? "Finish" : "Next >", accent, 16)
             || (wasAnswered && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)))) {
             if (lastQ) {
-                if (score > prog.best[lang][lessonIdx]) prog.best[lang][lessonIdx] = score;
+                int ob = prog.best[lang][lessonIdx];
+                if (score > ob) {                              /* credits only for beating your best */
+                    int gain = (score - (ob < 0 ? 0 : ob)) * 8;
+                    if (score == L->nQ) gain += 10;
+                    prog.best[lang][lessonIdx] = score;
+                    GainCredits(gain, "Quiz score");
+                }
                 SaveProgress();
                 screen = SCR_RESULT;
             }
@@ -2149,6 +2195,8 @@ static void DrawResult(Color accent)
 #define TROW 3           /* row where teachers / rivals stand */
 #define AW 21            /* battle arena size in tiles */
 #define AH 11
+#define HUT_X 12         /* Daily Quest hut (top-left tile) */
+#define HUT_Y 17
 
 typedef struct { const char* name, * greet; Color shirt, hair; int dir; } Teacher;
 
@@ -2165,10 +2213,10 @@ static Teacher TEACH[2][5] = {
     { "Mr. Template",   "Write it once, use it for every type. Templates are pure magic.",                   { 235, 190, 80, 255 },  { 90, 60, 40, 255 }, 0 } }
 };
 
-static const struct { int x, y, lang; const char* name; } BLD[3] = {
-    { 5, 4, 0, "C HALL" }, { 24, 4, 1, "C++ HALL" }, { 14, 4, 2, "BATTLE ARENA" }
+static const struct { int x, y, lang; const char* name; } BLD[5] = {
+    { 5, 4, 0, "C HALL" }, { 24, 4, 1, "C++ HALL" }, { 14, 4, 2, "BATTLE ARENA" }, { 28, 16, 3, "CODING LAB" }, { 2, 16, 4, "SHOP" }
 };
-static const Color ROOFC[3] = { { 58, 110, 200, 255 }, { 125, 84, 205, 255 }, { 225, 95, 70, 255 } };
+static const Color ROOFC[7] = { { 58, 110, 200, 255 }, { 125, 84, 205, 255 }, { 225, 95, 70, 255 }, { 222, 170, 60, 255 }, { 40, 170, 165, 255 }, { 205, 84, 150, 255 }, { 176, 52, 52, 255 } };
 static const Color ARENA_C = { 240, 120, 80, 255 };
 
 static Teacher RIVT[3] = {
@@ -2178,6 +2226,279 @@ static Teacher RIVT[3] = {
 };
 
 static void StartBattle(int r);
+static void StartQuest(void);
+
+/* Daily Coding Quest save data (its own file, so lesson progress is never touched) */
+static struct { int day, lastActive, streak, bestStreak, xp; unsigned char state[3]; } quest;
+
+static int TodayIndex(void)             /* whole days since 1970, in local time */
+{
+    time_t t = time(NULL);
+    struct tm g = *gmtime(&t);
+    g.tm_isdst = -1;
+    long off = (long)(t - mktime(&g));  /* seconds between UTC and local time */
+    return (int)((t + off) / 86400);
+}
+
+static void LoadQuest(void)
+{
+    memset(&quest, 0, sizeof quest);
+    FILE* f = fopen("quest.dat", "rb");
+    if (!f) return;
+    if (fread(&quest, sizeof quest, 1, f) != 1) memset(&quest, 0, sizeof quest);
+    fclose(f);
+}
+
+static void SaveQuest(void)
+{
+    FILE* f = fopen("quest.dat", "wb");
+    if (!f) return;
+    fwrite(&quest, sizeof quest, 1, f);
+    fclose(f);
+}
+
+static bool QuestDoneToday(void)
+{
+    return quest.day == TodayIndex() && quest.state[0] && quest.state[1] && quest.state[2];
+}
+
+/* ------------------------------------------------------------------ */
+/*  Credits, shop items and the student's look                         */
+/* ------------------------------------------------------------------ */
+typedef struct { const char* name; int price; Color a, b; int kind; } Item;
+#define NCAT 5
+#define MAXIT 8
+static const char* CATNAME[NCAT] = { "Outfits", "Hats", "Hair", "Bags", "Trails" };
+static const int ITEMN[NCAT] = { 8, 8, 7, 6, 5 };
+
+static const Item ITEMS[NCAT][MAXIT] = {
+  { /* outfits: a = top, b = trousers.  kind: 0 plain, 1 stripes, 2 hoodie, 3 lab coat */
+    { "Student Red",   0,   { 225, 85, 85, 255 },   { 55, 70, 120, 255 }, 0 },
+    { "Ocean Blue",    60,  { 70, 140, 230, 255 },  { 40, 50, 90, 255 }, 0 },
+    { "Forest Green",  60,  { 70, 170, 100, 255 },  { 80, 62, 50, 255 }, 0 },
+    { "Sunny Stripes", 120, { 240, 190, 70, 255 },  { 70, 70, 90, 255 }, 1 },
+    { "Cozy Hoodie",   160, { 125, 130, 148, 255 }, { 50, 55, 80, 255 }, 2 },
+    { "Royal Stripes", 200, { 150, 100, 220, 255 }, { 40, 40, 70, 255 }, 1 },
+    { "Lab Coat",      280, { 236, 239, 246, 255 }, { 60, 70, 100, 255 }, 3 },
+    { "Hacker Hoodie", 350, { 34, 38, 52, 255 },    { 24, 26, 36, 255 }, 2 } },
+  { /* hats: a = main colour, b = accent.  kind: 0 none, 1 cap, 2 wizard, 3 beanie, 4 crown, 5 headphones, 6 grad cap, 7 top hat */
+    { "No hat",        0,   { 0, 0, 0, 0 },         { 0, 0, 0, 0 }, 0 },
+    { "Red Cap",       40,  { 215, 60, 60, 255 },   { 140, 30, 30, 255 }, 1 },
+    { "Blue Beanie",   60,  { 80, 160, 210, 255 },  { 230, 240, 250, 255 }, 3 },
+    { "Headphones",    90,  { 60, 64, 80, 255 },    { 90, 200, 190, 255 }, 5 },
+    { "Grad Cap",      150, { 30, 30, 40, 255 },    { 240, 190, 60, 255 }, 6 },
+    { "Top Hat",       220, { 32, 32, 40, 255 },    { 200, 60, 70, 255 }, 7 },
+    { "Wizard Hat",    300, { 110, 70, 190, 255 },  { 255, 215, 90, 255 }, 2 },
+    { "Golden Crown",  500, { 250, 205, 70, 255 },  { 230, 70, 90, 255 }, 4 } },
+  { /* hair: a = colour.  kind: 0 short, 1 long, 2 spiky */
+    { "Brown Short",   0,   { 70, 45, 30, 255 },    { 0, 0, 0, 0 }, 0 },
+    { "Black Short",   30,  { 32, 32, 40, 255 },    { 0, 0, 0, 0 }, 0 },
+    { "Silver Short",  90,  { 200, 205, 216, 255 }, { 0, 0, 0, 0 }, 0 },
+    { "Ginger Spikes", 50,  { 222, 112, 50, 255 },  { 0, 0, 0, 0 }, 2 },
+    { "Blue Spikes",   120, { 70, 130, 240, 255 },  { 0, 0, 0, 0 }, 2 },
+    { "Blonde Long",   70,  { 232, 202, 112, 255 }, { 0, 0, 0, 0 }, 1 },
+    { "Pink Long",     100, { 240, 122, 182, 255 }, { 0, 0, 0, 0 }, 1 } },
+  { /* bags: a = colour.  kind: 0 backpack, 1 cape, 2 jetpack */
+    { "School Bag",    0,   { 235, 140, 50, 255 },  { 0, 0, 0, 0 }, 0 },
+    { "Black Bag",     40,  { 40, 40, 48, 255 },    { 0, 0, 0, 0 }, 0 },
+    { "Green Bag",     50,  { 60, 160, 90, 255 },   { 0, 0, 0, 0 }, 0 },
+    { "Purple Bag",    60,  { 140, 90, 210, 255 },  { 0, 0, 0, 0 }, 0 },
+    { "Red Cape",      180, { 200, 40, 60, 255 },   { 0, 0, 0, 0 }, 1 },
+    { "Jetpack",       350, { 150, 156, 172, 255 }, { 0, 0, 0, 0 }, 2 } },
+  { /* trails: kind = particle type (1 sparkles, 2 leaves, 3 pixels, 4 hearts) */
+    { "No trail",      0,   { 0, 0, 0, 0 },         { 0, 0, 0, 0 }, 0 },
+    { "Gold Sparkles", 100, { 255, 205, 90, 255 },  { 0, 0, 0, 0 }, 1 },
+    { "Falling Leaves",140, { 90, 180, 90, 255 },   { 0, 0, 0, 0 }, 2 },
+    { "Pixel Dust",    200, { 90, 220, 230, 255 },  { 0, 0, 0, 0 }, 3 },
+    { "Love Hearts",   260, { 245, 110, 150, 255 }, { 0, 0, 0, 0 }, 4 } }
+};
+
+/* saved in game.dat */
+static struct {
+    int credits, earned;
+    unsigned char owned[NCAT][MAXIT];
+    unsigned char eq[NCAT];
+    unsigned char labDone[2][9];
+} gm;
+
+static void SaveGame(void)
+{
+    FILE* f = fopen("game.dat", "wb");
+    if (!f) return;
+    fwrite(&gm, sizeof gm, 1, f);
+    fclose(f);
+}
+
+static void LoadGame(void)
+{
+    memset(&gm, 0, sizeof gm);
+    FILE* f = fopen("game.dat", "rb");
+    bool ok = false;
+    if (f) { ok = fread(&gm, sizeof gm, 1, f) == 1; fclose(f); }
+    if (!ok) { memset(&gm, 0, sizeof gm); gm.credits = 30; }       /* welcome gift for new players */
+    for (int c = 0; c < NCAT; c++) {
+        gm.owned[c][0] = 1;
+        if (gm.eq[c] >= ITEMN[c] || !gm.owned[c][gm.eq[c]]) gm.eq[c] = 0;
+    }
+}
+
+/* everything needed to draw a character */
+typedef struct {
+    Color shirt, pants, hair, hatA, hatB, packC, skin;
+    int outfit, hairStyle, hat, pack;          /* pack: -1 = none */
+    bool glasses;
+} Look;
+
+static Look LookFrom(const unsigned char* eq)
+{
+    const Item* o = &ITEMS[0][eq[0]], * h = &ITEMS[1][eq[1]], * hr = &ITEMS[2][eq[2]], * pk = &ITEMS[3][eq[3]];
+    Look L;
+    L.shirt = o->a; L.pants = o->b; L.outfit = o->kind;
+    L.hatA = h->a; L.hatB = h->b; L.hat = h->kind;
+    L.hair = hr->a; L.hairStyle = hr->kind;
+    L.packC = pk->a; L.pack = pk->kind;
+    L.skin = (Color){ 240, 200, 160, 255 };
+    L.glasses = false;
+    return L;
+}
+
+/* ---- little pop-up messages ("+25 credits - Quiz score") ---- */
+typedef struct { char text[96]; float t; Color c; } Notice;
+static Notice notices[4];
+
+static void Notify(const char* msg, Color c)
+{
+    int slot = 0;
+    float oldest = 1e9f;
+    for (int i = 0; i < 4; i++) {
+        if (notices[i].t <= 0) { slot = i; break; }
+        if (notices[i].t < oldest) { oldest = notices[i].t; slot = i; }
+    }
+    snprintf(notices[slot].text, sizeof notices[slot].text, "%s", msg);
+    notices[slot].t = 3.4f;
+    notices[slot].c = c;
+}
+
+static void GainCredits(int n, const char* why)
+{
+    if (n <= 0) return;
+    gm.credits += n;
+    gm.earned += n;
+    SaveGame();
+    char b[96];
+    snprintf(b, sizeof b, "+%d credits  -  %s", n, why);
+    Notify(b, (Color) { 255, 205, 90, 255 });
+}
+
+static void DrawCoin(float x, float y, float r)
+{
+    DrawCircle((int)x, (int)y, r, (Color) { 176, 118, 24, 255 });
+    DrawCircle((int)x, (int)y, r * 0.82f, (Color) { 255, 205, 70, 255 });
+    DrawCircle((int)x, (int)y, r * 0.55f, (Color) { 255, 228, 130, 255 });
+    DrawRectangle((int)(x - r * 0.08f), (int)(y - r * 0.38f), (int)(r * 0.16f + 1), (int)(r * 0.76f), (Color) { 200, 140, 30, 255 });
+}
+
+static void DrawCreditsChip(float rx, float y)
+{
+    const char* t = TextFormat("%d", gm.credits);
+    float w = TxtW(fBold, t, 18) + 62;
+    Panel((Rectangle) { rx - w, y, w, 40 }, 0.5f, Fade(SURF, 0.96f), (Color) { 130, 98, 30, 255 });
+    DrawCoin(rx - w + 24, y + 20, 11);
+    Txt(fBold, t, rx - w + 44, y + 8, 18, (Color) { 255, 215, 100, 255 });
+}
+
+static void DrawNotices(float dt)
+{
+    int row = 0;
+    for (int i = 0; i < 4; i++) {
+        if (notices[i].t <= 0) continue;
+        notices[i].t -= dt;
+        float a = notices[i].t < 0.6f ? (notices[i].t < 0 ? 0 : notices[i].t / 0.6f) : 1.0f;
+        float w = TxtW(fMed, notices[i].text, 16) + 44, x = W - 24 - w, y = 84.0f + row * 46;
+        float slide = notices[i].t > 3.1f ? (notices[i].t - 3.1f) * 3.3f * 60 : 0;
+        DrawRectangleRounded((Rectangle) { x + slide, y + 3, w, 38 }, 0.4f, 8, Fade(BLACK, 0.3f * a));
+        DrawRectangleRounded((Rectangle) { x + slide, y, w, 38 }, 0.4f, 8, Fade((Color) { 28, 32, 48, 255 }, 0.97f * a));
+        DrawRectangleRounded((Rectangle) { x + slide, y, 5, 38 }, 0.5f, 6, Fade(notices[i].c, a));
+        Txt(fMed, notices[i].text, x + 20 + slide, y + 9, 16, Fade(notices[i].c, a));
+        row++;
+    }
+}
+
+/* ---- soft additive glow (lamps, windows, sparkles) ---- */
+static void Glow(float cx, float cy, float r, Color c, float a)
+{
+    BeginBlendMode(BLEND_ADDITIVE);
+    for (int i = 16; i >= 1; i--) DrawCircle((int)cx, (int)cy, r * i / 16.0f, Fade(c, a * 0.036f));   /* many faint layers = smooth falloff */
+    EndBlendMode();
+}
+
+/* ---- trail particles behind the student ---- */
+typedef struct { float x, y, vx, vy, life, max; int kind; } Trail;
+static Trail trail[96];
+static float trailT = 0;
+
+static void SpawnTrail(int kind, float x, float y)
+{
+    for (int i = 0; i < 96; i++) {
+        if (trail[i].life > 0) continue;
+        Trail* t = &trail[i];
+        t->kind = kind; t->x = x; t->y = y;
+        t->vx = GetRandomValue(-18, 18); t->vy = GetRandomValue(-45, -15);
+        t->max = 0.7f;
+        if (kind == 2) { t->vy = GetRandomValue(8, 24); t->max = 1.3f; }
+        if (kind == 4) { t->vy = GetRandomValue(-50, -30); t->max = 1.0f; }
+        if (kind == 5) { t->vy = GetRandomValue(-14, -4); t->max = 0.4f; }
+        t->life = t->max;
+        return;
+    }
+}
+
+static void UpdateTrail(float dt)
+{
+    for (int i = 0; i < 96; i++) {
+        if (trail[i].life <= 0) continue;
+        trail[i].life -= dt;
+        trail[i].x += trail[i].vx * dt;
+        trail[i].y += trail[i].vy * dt;
+        if (trail[i].kind == 2) trail[i].vx = sinf(trail[i].life * 7.0f + i) * 22;
+    }
+}
+
+static void DrawTrailBit(const Trail* t, float sx, float sy)
+{
+    float a = t->life / t->max;
+    switch (t->kind) {
+    case 1: {   /* sparkle */
+        Color g = ITEMS[4][1].a;
+        float r = 1.5f + 3.0f * a;
+        DrawRectangle((int)(sx - r), (int)(sy - 0.7f), (int)(r * 2), 2, Fade(g, a));
+        DrawRectangle((int)(sx - 0.7f), (int)(sy - r), 2, (int)(r * 2), Fade(g, a));
+        DrawCircle((int)sx, (int)sy, 1.6f, Fade(WHITE, a));
+    } break;
+    case 2:     /* leaf */
+        DrawEllipse((int)sx, (int)sy, 4, 2.5f, Fade(((int)t->max * 100 + (int)(t->x)) & 1 ? ITEMS[4][2].a : (Color) { 200, 150, 60, 255 }, a));
+        break;
+    case 3: {   /* pixel dust */
+        Color c = (((int)(t->x * 3)) & 1) ? ITEMS[4][3].a : (Color) { 230, 110, 220, 255 };
+        DrawRectangle((int)sx, (int)sy, 5, 5, Fade(c, a));
+    } break;
+    case 4: {   /* heart */
+        Color p = ITEMS[4][4].a;
+        DrawCircle((int)(sx - 2.5f), (int)sy, 3, Fade(p, a));
+        DrawCircle((int)(sx + 2.5f), (int)sy, 3, Fade(p, a));
+        DrawTriangle((Vector2) { sx - 5.4f, sy + 1 }, (Vector2) { sx, sy + 8 }, (Vector2) { sx + 5.4f, sy + 1 }, Fade(p, a));
+    } break;
+    case 5:     /* dust puff */
+        DrawCircle((int)sx, (int)sy, 3 + (1 - a) * 6, Fade((Color) { 225, 205, 160, 255 }, a * 0.45f));
+        break;
+    default: break;
+    }
+}
+
+/* ---- time of day: one full day lasts about 7 minutes ---- */
+static float dayT = 0.32f;                 /* 0 = midnight, 0.25 = sunrise, 0.5 = noon */
+static float Daylight(void) { return 0.5f + 0.5f * sinf((dayT - 0.25f) * 6.2831853f); }
+
 
 static const int DX[4] = { 0, -1, 1, 0 };     /* dir: 0 down, 1 left, 2 right, 3 up */
 static const int DY[4] = { 1, 0, 0, -1 };
@@ -2219,15 +2540,27 @@ static void BuildMaps(void)
     PlaceBuilding(5, 4, 'R', 'k', 'D');
     PlaceBuilding(24, 4, 'r', 'l', 'E');
     PlaceBuilding(14, 4, 'Q', 'm', 'A');
+    PlaceBuilding(28, 16, 'N', 'n', 'L');                         /* Coding Lab */
+    for (int y = 20; y <= 22; y++) campus[y][31] = '_';
+    for (int x = 19; x <= 31; x++) campus[22][x] = '_';
+    PlaceBuilding(2, 16, 'S', 's', 'P');                          /* Shop */
+    PlaceBuilding(19, 9, 'Y', 'y', 'Z');                          /* Mower Farm barn */
+    campus[13][22] = '_';
+    for (int x = 5; x <= 12; x++) campus[20][x] = '_';
+    campus[17][16] = 'i'; campus[17][19] = 'i'; campus[20][19] = 'i'; campus[13][9] = 'i'; campus[13][26] = 'i';   /* lamp posts */
+    for (int j = 0; j < 3; j++)                                   /* Daily Quest hut: 3 wide, 3 tall */
+        for (int i = 0; i < 3; i++) campus[HUT_Y + j][HUT_X + i] = (j < 2) ? 'V' : 'v';
+    campus[HUT_Y + 2][HUT_X + 1] = 'G';
+    for (int x = HUT_X + 1; x <= 16; x++) campus[HUT_Y + 3][x] = '_';   /* path from the hut door to the main path */
     for (int y = 8; y <= 14; y++) { campus[y][8] = '_'; campus[y][17] = '_'; campus[y][27] = '_'; }
     for (int x = 8; x <= 27; x++) { campus[14][x] = '_'; campus[15][x] = '_'; }
     for (int y = 16; y <= 22; y++) { campus[y][17] = '_'; campus[y][18] = '_'; }
     for (int y = 18; y <= 21; y++) for (int x = 22; x <= 27; x++) campus[y][x] = 'w';
     campus[13][12] = 'B'; campus[13][23] = 'B';
     static const int trees[][2] = {
-        {2,3},{3,5},{2,8},{3,11},{2,14},{4,18},{2,20},{7,11},{9,11},{13,3},{16,3},
-        {21,3},{20,9},{15,10},{29,11},{32,3},{33,6},{32,9},{33,12},{31,16},{33,19},{30,21},
-        {12,18},{14,20},{10,19},{6,17},{9,21},{4,15},{29,9}
+        {2,3},{3,5},{2,8},{3,11},{2,14},{2,20},{7,11},{9,11},{13,3},{16,3},
+        {21,3},{15,10},{29,11},{32,3},{33,6},{32,9},{33,12},{30,21},
+        {10,19},{9,21},{4,15},{29,9}
     };
     for (size_t i = 0; i < sizeof trees / sizeof trees[0]; i++) campus[trees[i][1]][trees[i][0]] = 'T';
 
@@ -2266,7 +2599,7 @@ static char TileAt(int x, int y)
     return inside < 0 ? campus[y][x] : (inside == 2 ? arena[y][x] : inter[y][x]);
 }
 
-static bool IsSolid(char c) { return c == 0 || strchr("TwkRlrQm#hBu", c) != NULL; }
+static bool IsSolid(char c) { return c == 0 || strchr("TwkRlrQm#hBuVvGNnLSsPiYyZ", c) != NULL; }
 
 /* index of the teacher / rival standing on tile (x, y), or -1 */
 static int NpcAt(int x, int y)
@@ -2330,6 +2663,7 @@ static void OnArrive(void)
 static void UpdateWorld(float dt)
 {
     if (toastT > 0) toastT -= dt;
+    UpdateTrail(dt);
 
     if (fadeDir != 0) {
         if (fadeDir == 1) {
@@ -2389,6 +2723,15 @@ static void UpdateWorld(float dt)
     if (wmoving) {
         wt += dt * (wrun ? 9.0f : 5.5f);
         walkPhase += dt * (wrun ? 15.0f : 10.0f);
+        trailT += dt;
+        if (trailT > (wrun ? 0.05f : 0.08f)) {                    /* trail particles / dust behind the student */
+            trailT = 0;
+            float tfx = wx * TS + DX[wdir] * wt * TS + TS / 2.0f + GetRandomValue(-6, 6);
+            float tfy = wy * TS + DY[wdir] * wt * TS + TS - 6;
+            int tk = ITEMS[4][gm.eq[4]].kind;
+            if (tk) SpawnTrail(tk, tfx, tfy);
+            else if (wrun) SpawnTrail(5, tfx, tfy);
+        }
         if (wt >= 1) {
             wt = 0; wmoving = false; wx = wtx; wy = wty;
             OnArrive();
@@ -2409,6 +2752,18 @@ static void UpdateWorld(float dt)
                 wtx = nx; wty = ny; wmoving = true; wt = 0;
             }
         }
+        else if (confirm && inside < 0 && TileAt(wx + DX[wdir], wy + DY[wdir]) == 'G') {
+            StartQuest();
+        }
+        else if (confirm && inside < 0 && TileAt(wx + DX[wdir], wy + DY[wdir]) == 'L') {
+            fromWorld = true; StartLab();
+        }
+        else if (confirm && inside < 0 && TileAt(wx + DX[wdir], wy + DY[wdir]) == 'P') {
+            fromWorld = true; StartShop();
+        }
+        else if (confirm && inside < 0 && TileAt(wx + DX[wdir], wy + DY[wdir]) == 'Z') {
+            fromWorld = true; StartFarm();
+        }
         else if (confirm && inside >= 0) {
             int n = NpcAt(wx + DX[wdir], wy + DY[wdir]);
             if (n >= 0) {
@@ -2421,51 +2776,206 @@ static void UpdateWorld(float dt)
 }
 
 /* ---- drawing ---- */
-static void DrawPerson(float x, float fy, int dir, Color shirt, Color hair, Color pants,
-    bool glasses, bool pack, float ph)
+/* ---- characters ---- */
+static void OutRR(float x, float y, float w, float h, float rd, Color fill, float o)
 {
-    Color skin = { 240, 200, 160, 255 }, ink = { 30, 30, 40, 255 }, bagc = { 235, 140, 50, 255 };
-    float s = sinf(ph) * 3.0f, bob = fabsf(sinf(ph)) * 1.5f;
-    float offL = s > 0 ? s : 0, offR = s < 0 ? -s : 0;
-
-    DrawEllipse((int)x, (int)fy, 14, 6, Fade(BLACK, 0.28f));
-    DrawRectangleRounded((Rectangle) { x - 9, fy - 13 - offL, 8, 13 }, 0.3f, 4, pants);
-    DrawRectangleRounded((Rectangle) { x + 1, fy - 13 - offR, 8, 13 }, 0.3f, 4, pants);
-
-    float by = fy - 33 - bob;
-    if (pack && (dir == 1 || dir == 2))
-        DrawRectangleRounded((Rectangle) { dir == 1 ? x + 8 : x - 16, by + 3, 8, 16 }, 0.4f, 4, bagc);
-    DrawRectangleRounded((Rectangle) { x - 13, by, 26, 22 }, 0.3f, 6, shirt);
-    if (pack && dir == 3)
-        DrawRectangleRounded((Rectangle) { x - 10, by + 2, 20, 17 }, 0.3f, 6, bagc);
-    DrawRectangleRounded((Rectangle) { x - 19, by + 3 + s * 0.5f, 6, 15 }, 0.5f, 4, shirt);
-    DrawRectangleRounded((Rectangle) { x + 13, by + 3 - s * 0.5f, 6, 15 }, 0.5f, 4, shirt);
-    DrawCircle((int)x - 16, (int)(by + 20 + s * 0.5f), 3, skin);
-    DrawCircle((int)x + 16, (int)(by + 20 - s * 0.5f), 3, skin);
-
-    float hy = fy - 44 - bob;
-    DrawCircle((int)x, (int)hy, 12, hair);
-    if (dir == 0) {
-        DrawCircle((int)x, (int)hy + 2, 10, skin);
-        DrawCircle((int)x - 4, (int)hy + 3, 2, ink);
-        DrawCircle((int)x + 4, (int)hy + 3, 2, ink);
-        if (glasses) { DrawCircleLines((int)x - 4, (int)hy + 3, 4, ink); DrawCircleLines((int)x + 4, (int)hy + 3, 4, ink); }
-    }
-    else if (dir == 1 || dir == 2) {
-        float o = dir == 1 ? -1.0f : 1.0f;
-        DrawCircle((int)(x + o * 3), (int)hy + 2, 9, skin);
-        DrawCircle((int)(x + o * 7), (int)hy + 3, 2, ink);
-        if (glasses) DrawCircleLines((int)(x + o * 7), (int)hy + 3, 4, ink);
-    }
+    DrawRectangleRounded((Rectangle) { x - o, y - o, w + 2 * o, h + 2 * o }, rd, 6, (Color) { 24, 22, 34, 255 });
+    DrawRectangleRounded((Rectangle) { x, y, w, h }, rd, 6, fill);
 }
 
-static void DrawGrass(int x, int y, int sx, int sy)
+static void OutTri(Vector2 t, Vector2 l, Vector2 r, Color fill, float o)
 {
-    unsigned h = Hash(x, y) & 255;
-    DrawRectangle(sx, sy, TS, TS, ((x + y) & 1) ? (Color) { 90, 162, 79, 255 } : (Color) { 96, 170, 84, 255 });
-    if (h < 40)  DrawRectangle(sx + (int)(h % 34) + 4, sy + (int)((h / 2) % 30) + 8, 2, 6, (Color) { 70, 140, 62, 255 });
-    if (h > 244) { DrawCircle(sx + 16, sy + 28, 3, (Color) { 250, 250, 250, 255 }); DrawCircle(sx + 16, sy + 28, 1, (Color) { 250, 210, 60, 255 }); }
-    if (h > 230 && h <= 238) { DrawCircle(sx + 30, sy + 18, 3, (Color) { 245, 130, 170, 255 }); DrawCircle(sx + 30, sy + 18, 1, (Color) { 250, 230, 120, 255 }); }
+    DrawTriangle((Vector2) { t.x, t.y - o * 1.6f }, (Vector2) { l.x - o * 1.4f, l.y + o }, (Vector2) { r.x + o * 1.4f, r.y + o }, (Color) { 24, 22, 34, 255 });
+    DrawTriangle(t, l, r, fill);
+}
+
+/* x = centre, fy = feet. dir: 0 down, 1 left, 2 right, 3 up. sc = size. ph = walk phase (0 = standing still) */
+static void DrawPersonEx(float x, float fy, int dir, float sc, float ph, const Look* L)
+{
+#define K(v) ((v) * sc)
+    const Color ink = { 24, 22, 34, 255 }, shoe = { 58, 40, 36, 255 };
+    const float o = 1.3f * sc;
+    float s = sinf(ph) * K(3.0f), bob = fabsf(sinf(ph)) * K(1.5f);
+    float offL = s > 0 ? s : 0, offR = s < 0 ? -s : 0;
+    float by = fy - K(33) - bob, hy = fy - K(44) - bob;
+    bool moving = ph != 0;
+    Color sk = L->skin, shirt = L->shirt;
+
+    DrawEllipse((int)x, (int)fy, K(16), K(6), Fade(BLACK, 0.20f));
+    DrawEllipse((int)x, (int)fy, K(11), K(4), Fade(BLACK, 0.25f));
+
+    /* things that hang behind the body */
+    if (L->pack == 1 && dir != 3) {                                   /* cape */
+        float sway = s * 0.6f;
+        OutRR(x - K(13) + sway, by + K(2), K(26), K(33), 0.2f, L->packC, o);
+        DrawRectangle((int)(x - K(12) + sway), (int)(by + K(29)), (int)K(24), (int)K(5), ColorBrightness(L->packC, -0.25f));
+    }
+    if (L->pack == 0 && (dir == 1 || dir == 2))
+        OutRR(dir == 1 ? x + K(8) : x - K(16), by + K(3), K(8), K(17), 0.4f, L->packC, o);
+    if (L->pack == 2 && dir != 3) {                                   /* jetpack tanks */
+        OutRR(x - K(12), by + K(1), K(9), K(21), 0.4f, L->packC, o);
+        OutRR(x + K(3), by + K(1), K(9), K(21), 0.4f, L->packC, o);
+    }
+    if (L->pack == 2 && moving)                                       /* jetpack flames */
+        for (int k = 0; k < 2; k++) {
+            float fx = x + (k ? K(7.5f) : -K(7.5f)), fl = K(3.5f) + K(2) * sinf(ph * 3.0f + k);
+            DrawCircle((int)fx, (int)(by + K(25)), fl, (Color) { 255, 150, 50, 255 });
+            DrawCircle((int)fx, (int)(by + K(25)), fl * 0.55f, (Color) { 255, 236, 160, 255 });
+        }
+
+    /* legs and shoes */
+    OutRR(x - K(9), fy - K(13) - offL, K(8), K(13), 0.3f, L->pants, o);
+    OutRR(x + K(1), fy - K(13) - offR, K(8), K(13), 0.3f, L->pants, o);
+    DrawRectangleRounded((Rectangle) { x - K(10), fy - K(4) - offL, K(10), K(4) }, 0.5f, 4, shoe);
+    DrawRectangleRounded((Rectangle) { x, fy - K(4) - offR, K(10), K(4) }, 0.5f, 4, shoe);
+
+    /* body */
+    OutRR(x - K(13), by, K(26), K(22), 0.3f, shirt, o);
+    if (L->outfit == 3) {                                             /* lab coat: longer, with a collar */
+        OutRR(x - K(13), by + K(12), K(26), K(14), 0.2f, shirt, o);
+        if (dir == 0) {
+            DrawRectangle((int)(x - K(0.8f)), (int)by, (int)(K(1.6f) + 1), (int)K(26), (Color) { 190, 196, 210, 255 });
+            DrawRectangle((int)(x - K(4)), (int)by, (int)K(8), (int)K(5), (Color) { 90, 140, 220, 255 });
+            DrawRectangle((int)(x + K(5)), (int)(by + K(15)), (int)K(5), (int)K(5), (Color) { 205, 210, 224, 255 });
+        }
+    }
+    if (L->outfit == 1)                                               /* stripes */
+        for (int k = 0; k < 4; k++)
+            DrawRectangle((int)(x - K(12)), (int)(by + K(3) + k * K(5.5f)), (int)K(24), (int)K(2.4f), ColorBrightness(shirt, -0.28f));
+    if (L->outfit == 2) {                                             /* hoodie: hood, pocket, strings */
+        DrawCircle((int)x, (int)(by + K(1)), K(9.5f) + o, ink);
+        DrawCircle((int)x, (int)(by + K(1)), K(9.5f), ColorBrightness(shirt, -0.18f));
+        if (dir == 0) {
+            DrawRectangleRounded((Rectangle) { x - K(7), by + K(13), K(14), K(7) }, 0.3f, 4, ColorBrightness(shirt, -0.16f));
+            DrawRectangle((int)(x - K(4)), (int)(by + K(3)), (int)(K(1.6f) + 1), (int)K(8), Fade(WHITE, 0.8f));
+            DrawRectangle((int)(x + K(2.4f)), (int)(by + K(3)), (int)(K(1.6f) + 1), (int)K(8), Fade(WHITE, 0.8f));
+        }
+    }
+
+    /* arms */
+    OutRR(x - K(19), by + K(3) + s * 0.5f, K(6), K(15), 0.5f, shirt, o);
+    OutRR(x + K(13), by + K(3) - s * 0.5f, K(6), K(15), 0.5f, shirt, o);
+    DrawCircle((int)(x - K(16)), (int)(by + K(20) + s * 0.5f), K(3), sk);
+    DrawCircle((int)(x + K(16)), (int)(by + K(20) - s * 0.5f), K(3), sk);
+
+    /* things worn on the back, seen from behind */
+    if (dir == 3) {
+        if (L->pack == 0) {
+            OutRR(x - K(10), by + K(2), K(20), K(17), 0.3f, L->packC, o);
+            DrawRectangle((int)(x - K(8)), (int)(by + K(9)), (int)K(16), (int)K(2), ColorBrightness(L->packC, -0.25f));
+        }
+        if (L->pack == 1) {
+            OutRR(x - K(14), by + K(1), K(28), K(35), 0.2f, L->packC, o);
+            DrawRectangle((int)(x - K(13)), (int)(by + K(30)), (int)K(26), (int)K(5), ColorBrightness(L->packC, -0.25f));
+        }
+        if (L->pack == 2) {
+            OutRR(x - K(12), by + K(1), K(9), K(21), 0.4f, L->packC, o);
+            OutRR(x + K(3), by + K(1), K(9), K(21), 0.4f, L->packC, o);
+        }
+    }
+
+    /* head: long hair behind, then the head, then spikes / face */
+    if (L->hairStyle == 1) OutRR(x - K(12), hy - K(2), K(24), K(25), 0.35f, L->hair, o);
+    DrawCircle((int)x, (int)hy, K(12) + o, ink);
+    DrawCircle((int)x, (int)hy, K(12), L->hair);
+    if (L->hairStyle == 2)
+        for (int k = -1; k <= 1; k++) {
+            float cx = x + k * K(7), tipY = hy - K(19) - (k == 0 ? K(3) : 0);
+            OutTri((Vector2) { cx + k * K(1.5f), tipY }, (Vector2) { cx - K(5), hy - K(6) }, (Vector2) { cx + K(5), hy - K(6) }, L->hair, o);
+        }
+    if (dir == 0) {
+        DrawCircle((int)x, (int)(hy + K(2)), K(10), sk);
+        DrawCircle((int)(x - K(4)), (int)(hy + K(3)), K(2), ink);
+        DrawCircle((int)(x + K(4)), (int)(hy + K(3)), K(2), ink);
+        DrawCircle((int)(x - K(3.4f)), (int)(hy + K(2.3f)), K(0.7f), WHITE);
+        DrawCircle((int)(x + K(4.6f)), (int)(hy + K(2.3f)), K(0.7f), WHITE);
+        DrawCircle((int)(x - K(6.5f)), (int)(hy + K(6)), K(1.6f), Fade((Color) { 240, 110, 130, 255 }, 0.45f));
+        DrawCircle((int)(x + K(6.5f)), (int)(hy + K(6)), K(1.6f), Fade((Color) { 240, 110, 130, 255 }, 0.45f));
+        DrawRectangle((int)(x - K(2)), (int)(hy + K(7)), (int)K(4), (int)(K(1) + 1), (Color) { 190, 110, 100, 255 });
+        if (L->glasses) { DrawCircleLines((int)(x - K(4)), (int)(hy + K(3)), K(4), ink); DrawCircleLines((int)(x + K(4)), (int)(hy + K(3)), K(4), ink); }
+        if (L->hairStyle == 1) {
+            DrawRectangle((int)(x - K(12)), (int)(hy + K(1)), (int)K(3), (int)K(17), L->hair);
+            DrawRectangle((int)(x + K(9)), (int)(hy + K(1)), (int)K(3), (int)K(17), L->hair);
+        }
+    }
+    else if (dir == 1 || dir == 2) {
+        float sg = dir == 1 ? -1.0f : 1.0f;
+        DrawCircle((int)(x + sg * K(3)), (int)(hy + K(2)), K(9), sk);
+        DrawCircle((int)(x + sg * K(7)), (int)(hy + K(3)), K(2), ink);
+        DrawCircle((int)(x + sg * K(6.4f)), (int)(hy + K(2.3f)), K(0.7f), WHITE);
+        DrawCircle((int)(x + sg * K(11.5f)), (int)(hy + K(4.5f)), K(1.3f), sk);
+        if (L->glasses) DrawCircleLines((int)(x + sg * K(7)), (int)(hy + K(3)), K(4), ink);
+    }
+    else if (L->hairStyle == 1) {
+        DrawCircle((int)x, (int)(hy + K(3)), K(11), L->hair);
+    }
+
+    /* hats */
+    switch (L->hat) {
+    case 1:     /* cap */
+        OutRR(x - K(12), hy - K(15), K(24), K(12), 0.7f, L->hatA, o);
+        if (dir == 0)      OutRR(x - K(13), hy - K(6), K(26), K(4), 0.5f, L->hatB, o * 0.8f);
+        else if (dir == 1) OutRR(x - K(21), hy - K(6), K(15), K(4), 0.5f, L->hatB, o * 0.8f);
+        else if (dir == 2) OutRR(x + K(6), hy - K(6), K(15), K(4), 0.5f, L->hatB, o * 0.8f);
+        break;
+    case 2:     /* wizard */
+        OutTri((Vector2) { x + K(2), hy - K(42) }, (Vector2) { x - K(14), hy - K(7) }, (Vector2) { x + K(14), hy - K(7) }, L->hatA, o);
+        DrawEllipse((int)x, (int)(hy - K(7)), K(19) + o, K(5) + o, ink);
+        DrawEllipse((int)x, (int)(hy - K(7)), K(19), K(5), ColorBrightness(L->hatA, -0.15f));
+        DrawCircle((int)(x + K(1)), (int)(hy - K(22)), K(2.6f), L->hatB);
+        DrawCircle((int)(x - K(5)), (int)(hy - K(13)), K(1.6f), L->hatB);
+        break;
+    case 3:     /* beanie */
+        OutRR(x - K(12.5f), hy - K(15), K(25), K(11), 0.6f, L->hatA, o);
+        DrawRectangle((int)(x - K(12)), (int)(hy - K(8)), (int)K(24), (int)K(4), L->hatB);
+        DrawCircle((int)x, (int)(hy - K(17)), K(4) + o, ink);
+        DrawCircle((int)x, (int)(hy - K(17)), K(4), L->hatB);
+        break;
+    case 4:     /* crown */
+        OutRR(x - K(10), hy - K(14), K(20), K(7), 0.2f, L->hatA, o);
+        for (int k = -1; k <= 1; k++)
+            OutTri((Vector2) { x + k * K(7.5f), hy - K(22) }, (Vector2) { x + k * K(7.5f) - K(3.5f), hy - K(13) }, (Vector2) { x + k * K(7.5f) + K(3.5f), hy - K(13) }, L->hatA, o);
+        DrawCircle((int)x, (int)(hy - K(10.5f)), K(1.7f), L->hatB);
+        DrawCircle((int)(x - K(6)), (int)(hy - K(10.5f)), K(1.3f), (Color) { 90, 170, 240, 255 });
+        DrawCircle((int)(x + K(6)), (int)(hy - K(10.5f)), K(1.3f), (Color) { 90, 170, 240, 255 });
+        break;
+    case 5:     /* headphones */
+        DrawRing((Vector2) { x, hy - K(1) }, K(11.5f), K(14.5f), 180, 360, 18, L->hatA);
+        OutRR(x - K(16), hy - K(4), K(6), K(11), 0.4f, L->hatA, o);
+        OutRR(x + K(10), hy - K(4), K(6), K(11), 0.4f, L->hatA, o);
+        DrawCircle((int)(x - K(13)), (int)(hy + K(1.5f)), K(1.5f), L->hatB);
+        DrawCircle((int)(x + K(13)), (int)(hy + K(1.5f)), K(1.5f), L->hatB);
+        break;
+    case 6:     /* graduation cap */
+        OutRR(x - K(11), hy - K(11), K(22), K(6), 0.3f, L->hatA, o);
+        OutTri((Vector2) { x, hy - K(19) }, (Vector2) { x - K(17), hy - K(12) }, (Vector2) { x, hy - K(5.5f) }, L->hatA, o * 0.6f);
+        DrawTriangle((Vector2) { x, hy - K(19) }, (Vector2) { x, hy - K(5.5f) }, (Vector2) { x + K(17), hy - K(12) }, L->hatA);
+        DrawRectangle((int)(x + K(11)), (int)(hy - K(12)), (int)(K(1.4f) + 1), (int)K(12), L->hatB);
+        DrawCircle((int)(x + K(11.7f)), (int)(hy + K(1)), K(2), L->hatB);
+        break;
+    case 7:     /* top hat */
+        OutRR(x - K(9), hy - K(28), K(18), K(20), 0.15f, L->hatA, o);
+        DrawRectangle((int)(x - K(9)), (int)(hy - K(14)), (int)K(18), (int)K(4), L->hatB);
+        OutRR(x - K(14), hy - K(9), K(28), K(4), 0.4f, L->hatA, o);
+        break;
+    default: break;
+    }
+#undef K
+}
+
+/* teachers and rivals use simple looks */
+static void DrawPerson(float x, float fy, int dir, Color shirt, Color hair, Color pants, bool glasses, bool pack, float ph)
+{
+    Look L = { shirt, pants, hair, { 0, 0, 0, 0 }, { 0, 0, 0, 0 }, { 235, 140, 50, 255 }, { 240, 200, 160, 255 },
+               0, 0, 0, pack ? 0 : -1, glasses };
+    DrawPersonEx(x, fy, dir, 1.0f, ph, &L);
+}
+
+/* the student, wearing whatever was bought in the shop */
+static void DrawPlayer(float x, float fy, int dir, float sc, float ph)
+{
+    Look L = LookFrom(gm.eq);
+    DrawPersonEx(x, fy, dir, sc, ph, &L);
 }
 
 static int BldIdx(char c)
@@ -2473,64 +2983,228 @@ static int BldIdx(char c)
     if (c == 'R' || c == 'k' || c == 'D') return 0;
     if (c == 'r' || c == 'l' || c == 'E') return 1;
     if (c == 'Q' || c == 'm' || c == 'A') return 2;
+    if (c == 'V' || c == 'v' || c == 'G') return 3;
+    if (c == 'N' || c == 'n' || c == 'L') return 4;
+    if (c == 'S' || c == 's' || c == 'P') return 5;
+    if (c == 'Y' || c == 'y' || c == 'Z') return 6;
     return -1;
 }
 
-static bool IsRoof(char c) { return c == 'R' || c == 'r' || c == 'Q'; }
+static bool IsRoof(char c) { return c == 'R' || c == 'r' || c == 'Q' || c == 'V' || c == 'N' || c == 'S' || c == 'Y'; }
+static bool IsWallCh(char c) { return BldIdx(c) >= 0 && !IsRoof(c); }
+static bool Grassy(char c) { return c == '.' || c == 'T' || c == 'B' || c == 'i' || c == 0; }
+
+static const Color WALLC[7] = {
+    { 226, 230, 242, 255 }, { 234, 226, 242, 255 }, { 244, 222, 210, 255 },
+    { 176, 128, 82, 255 },  { 214, 236, 234, 255 }, { 248, 230, 236, 255 }, { 196, 84, 70, 255 }
+};
+
+/* a soft shadow on the ground just below a building wall */
+static void GroundShade(int x, int y, int sx, int sy)
+{
+    if (IsWallCh(TileAt(x, y - 1))) DrawRectangleGradientV(sx, sy, TS, 18, Fade(BLACK, 0.30f), Fade(BLACK, 0.0f));
+}
+
+static void DrawGrass(int x, int y, int sx, int sy)
+{
+    unsigned h = Hash(x, y) & 255;
+    int v = (int)(h % 9) - 4;
+    Color base = { (unsigned char)(92 + v), (unsigned char)(164 + v), (unsigned char)(82 + v / 2), 255 };
+    if ((x + y) & 1) base = ColorBrightness(base, -0.018f);
+    DrawRectangle(sx, sy, TS, TS, base);
+
+    Color dk = ColorBrightness(base, -0.22f), lt = ColorBrightness(base, 0.18f);
+    for (int k = 0; k < 4; k++) {                                        /* grass blades */
+        unsigned q = Hash(x * 5 + k, y * 11 + k * 3) & 1023;
+        int bx = sx + 3 + (int)(q % 42), by = sy + 6 + (int)((q >> 5) % 34);
+        Color bc = (k & 1) ? lt : dk;
+        DrawRectangle(bx, by, 2, 5, bc);
+        DrawRectangle(bx + 1, by - 2, 1, 3, bc);
+    }
+    if (h > 244) {                                                       /* daisy */
+        DrawRectangle(sx + 16, sy + 30, 1, 6, (Color) { 60, 130, 60, 255 });
+        DrawCircle(sx + 16, sy + 28, 3.2f, (Color) { 250, 250, 250, 255 });
+        DrawCircle(sx + 16, sy + 28, 1.3f, (Color) { 250, 210, 60, 255 });
+    }
+    else if (h > 230 && h <= 238) {                                    /* pink flower */
+        DrawRectangle(sx + 31, sy + 20, 1, 6, (Color) { 60, 130, 60, 255 });
+        DrawCircle(sx + 31, sy + 18, 3.2f, (Color) { 245, 130, 170, 255 });
+        DrawCircle(sx + 31, sy + 18, 1.3f, (Color) { 250, 230, 120, 255 });
+    }
+}
+
+static void DrawPathTile(int x, int y, int sx, int sy)
+{
+    unsigned h = Hash(x, y) & 255;
+    int v = (int)(h % 7) - 3;
+    Color base = { (unsigned char)(216 + v), (unsigned char)(192 + v), (unsigned char)(142 + v), 255 };
+    DrawRectangle(sx, sy, TS, TS, base);
+    if (h < 90) DrawRectangle(sx + (int)(h % 36) + 4, sy + (int)((h / 3) % 36) + 4, 4, 3, (Color) { 192, 167, 117, 255 });
+    if (h > 180) DrawRectangle(sx + (int)(h % 30) + 8, sy + (int)((h / 2) % 28) + 10, 3, 2, (Color) { 236, 216, 170, 255 });
+    Color edge = { 176, 148, 96, 255 }, rim = { 236, 218, 172, 255 };
+    if (Grassy(TileAt(x - 1, y))) { DrawRectangle(sx, sy, 3, TS, edge); DrawRectangle(sx + 3, sy, 2, TS, rim); }
+    if (Grassy(TileAt(x + 1, y))) { DrawRectangle(sx + TS - 3, sy, 3, TS, edge); DrawRectangle(sx + TS - 5, sy, 2, TS, rim); }
+    if (Grassy(TileAt(x, y - 1))) { DrawRectangle(sx, sy, TS, 3, edge); DrawRectangle(sx, sy + 3, TS, 2, rim); }
+    if (Grassy(TileAt(x, y + 1))) { DrawRectangle(sx, sy + TS - 3, TS, 3, edge); DrawRectangle(sx, sy + TS - 5, TS, 2, rim); }
+    GroundShade(x, y, sx, sy);
+}
+
+static void DrawWaterTile(int x, int y, int sx, int sy)
+{
+    unsigned h = Hash(x, y) & 255;
+    float t = (float)GetTime();
+    Color base = { 66, (unsigned char)(136 + h % 10), 222, 255 };
+    base = ColorBrightness(base, sinf(t * 1.3f + x * 0.9f + y * 0.7f) * 0.05f);
+    DrawRectangle(sx, sy, TS, TS, base);
+    int off = (int)(4 * sinf(t * 2.0f + x + y));
+    DrawRectangle(sx + 8 + off, sy + 14, 18, 2, (Color) { 150, 202, 255, 255 });
+    DrawRectangle(sx + 22 - off, sy + 34, 16, 2, (Color) { 130, 186, 250, 255 });
+    if ((((int)(t * 2.0f) + x * 3 + y * 5) % 7) == 0) {                  /* sparkle */
+        int px = sx + 6 + (int)(h % 34), py = sy + 6 + (int)((h / 2) % 30);
+        DrawRectangle(px - 2, py, 5, 1, Fade(WHITE, 0.9f));
+        DrawRectangle(px, py - 2, 1, 5, Fade(WHITE, 0.9f));
+    }
+    Color foam = Fade(WHITE, 0.6f), foam2 = Fade(WHITE, 0.22f);         /* shoreline foam */
+    if (TileAt(x - 1, y) != 'w') { DrawRectangle(sx, sy, 3, TS, foam); DrawRectangle(sx + 3, sy, 4, TS, foam2); }
+    if (TileAt(x + 1, y) != 'w') { DrawRectangle(sx + TS - 3, sy, 3, TS, foam); DrawRectangle(sx + TS - 7, sy, 4, TS, foam2); }
+    if (TileAt(x, y - 1) != 'w') { DrawRectangle(sx, sy, TS, 3, foam); DrawRectangle(sx, sy + 3, TS, 4, foam2); }
+    if (TileAt(x, y + 1) != 'w') { DrawRectangle(sx, sy + TS - 3, TS, 3, foam); DrawRectangle(sx, sy + TS - 7, TS, 4, foam2); }
+}
+
+/* the leafy top of a tree: drawn AFTER the characters, so you can walk behind trees */
+static void DrawCanopy(int x, int y, int sx, int sy)
+{
+    unsigned h = Hash(x, y) & 255;
+    float sw = sinf((float)GetTime() * 1.2f + x * 0.7f) * 1.5f;
+    Color dk = (h & 1) ? (Color) { 30, 96, 58, 255 } : (Color) { 34, 104, 62, 255 };
+    Color md = ColorBrightness(dk, 0.18f), lt = ColorBrightness(dk, 0.38f);
+    float cx = sx + 24 + sw, cy = sy + 10;
+    DrawCircle((int)(cx - 11), (int)(cy + 4), 14, dk);
+    DrawCircle((int)(cx + 11), (int)(cy + 4), 14, dk);
+    DrawCircle((int)cx, (int)(cy - 3), 18, dk);
+    DrawCircle((int)(cx - 8), (int)(cy + 1), 12, md);
+    DrawCircle((int)(cx + 8), (int)(cy + 1), 12, md);
+    DrawCircle((int)cx, (int)(cy - 5), 14, md);
+    DrawCircle((int)(cx - 5), (int)(cy - 8), 7, lt);
+    DrawCircle((int)(cx + 6), (int)(cy - 3), 4, lt);
+    DrawCircle((int)(cx - 12), (int)(cy + 2), 3, lt);
+}
+
+static void DrawWindow(int sx, int sy, int bi, bool lit)
+{
+    Color frame = { 74, 62, 62, 255 };
+    DrawRectangle(sx + 8, sy + 7, 32, 28, frame);
+    Color g1 = lit ? (Color) { 255, 226, 130, 255 } : (bi == 4 ? (Color) { 96, 190, 186, 255 } : (Color) { 160, 208, 248, 255 });
+    Color g2 = lit ? (Color) { 255, 170, 70, 255 } : (bi == 4 ? (Color) { 56, 140, 150, 255 } : (Color) { 110, 160, 226, 255 });
+    DrawRectangleGradientV(sx + 10, sy + 9, 28, 24, g1, g2);
+    DrawRectangle(sx + 23, sy + 9, 2, 24, frame);
+    DrawRectangle(sx + 10, sy + 20, 28, 2, frame);
+    DrawRectangle(sx + 6, sy + 35, 36, 4, ColorBrightness(frame, 0.35f));
+    if (!lit) DrawRectangle(sx + 12, sy + 11, 6, 2, Fade(WHITE, 0.55f));
+    if (bi == 4) {                                                        /* the lab: code on the screens */
+        DrawRectangle(sx + 12, sy + 13, 9, 1, Fade(WHITE, 0.6f));
+        DrawRectangle(sx + 14, sy + 16, 6, 1, Fade(WHITE, 0.6f));
+        DrawRectangle(sx + 27, sy + 25, 8, 1, Fade(WHITE, 0.6f));
+    }
+    if (lit) {
+        BeginBlendMode(BLEND_ADDITIVE);
+        DrawRectangle(sx + 2, sy + 2, 44, 42, Fade((Color) { 255, 190, 90, 255 }, 0.13f));
+        EndBlendMode();
+    }
+}
+
+static void DrawDoor(int sx, int sy, Color rc)
+{
+    Color wood = { 125, 82, 48, 255 };
+    DrawRectangle(sx + 4, sy, 40, TS - 2, (Color) { 70, 46, 30, 255 });
+    DrawRectangleGradientV(sx + 8, sy + 4, 32, TS - 6, ColorBrightness(wood, 0.12f), wood);
+    DrawRectangle(sx + 12, sy + 9, 11, 13, ColorBrightness(wood, -0.14f));
+    DrawRectangle(sx + 25, sy + 9, 11, 13, ColorBrightness(wood, -0.14f));
+    DrawRectangle(sx + 12, sy + 26, 24, 10, ColorBrightness(wood, -0.1f));
+    DrawCircle(sx + 34, sy + 30, 2.6f, (Color) { 244, 204, 84, 255 });
+    DrawRectangle(sx + 4, sy, 40, 5, rc);
+    DrawRectangle(sx + 2, sy + TS - 4, 44, 4, (Color) { 150, 146, 150, 255 });     /* stone step */
+}
 
 static void DrawCampusTile(char c, int x, int y, int sx, int sy)
 {
     unsigned h = Hash(x, y) & 255;
-    if (c == '.' || c == 'T' || c == 'B') DrawGrass(x, y, sx, sy);
+    if (c == '.') { DrawGrass(x, y, sx, sy); return; }
+    if (c == '_') { DrawPathTile(x, y, sx, sy); return; }
+    if (c == 'w') { DrawWaterTile(x, y, sx, sy); return; }
 
-    if (c == '_') {
-        DrawRectangle(sx, sy, TS, TS, (Color) { 214, 190, 140, 255 });
-        if (h < 50) DrawRectangle(sx + (int)(h % 36) + 4, sy + (int)((h / 3) % 36) + 4, 4, 3, (Color) { 190, 165, 115, 255 });
+    if (c == 'T') {                                          /* trunk + shadow (the canopy is drawn later) */
+        DrawGrass(x, y, sx, sy);
+        DrawEllipse(sx + 28, sy + 44, 22, 8, Fade(BLACK, 0.28f));
+        DrawRectangle(sx + 19, sy + 26, 10, 20, (Color) { 96, 64, 38, 255 });
+        DrawRectangle(sx + 19, sy + 26, 3, 20, (Color) { 124, 86, 54, 255 });
+        DrawRectangle(sx + 26, sy + 30, 3, 14, (Color) { 74, 48, 30, 255 });
+        DrawRectangle(sx + 16, sy + 44, 16, 3, (Color) { 84, 56, 34, 255 });
+        (void)h;
+        return;
     }
-    else if (c == 'w') {
-        DrawRectangle(sx, sy, TS, TS, (Color) { 70, 140, 220, 255 });
-        int off = (int)(4 * sinf((float)GetTime() * 2.0f + x + y));
-        DrawRectangle(sx + 8 + off, sy + 14, 18, 2, (Color) { 150, 200, 255, 255 });
-        DrawRectangle(sx + 22 - off, sy + 34, 16, 2, (Color) { 150, 200, 255, 255 });
+    if (c == 'B') {                                          /* bench */
+        DrawGrass(x, y, sx, sy);
+        DrawEllipse(sx + 24, sy + 40, 22, 5, Fade(BLACK, 0.22f));
+        DrawRectangle(sx + 8, sy + 26, 4, 12, (Color) { 70, 48, 30, 255 });
+        DrawRectangle(sx + 36, sy + 26, 4, 12, (Color) { 70, 48, 30, 255 });
+        DrawRectangleRounded((Rectangle) { (float)sx + 4, (float)sy + 12, 40, 7 }, 0.4f, 4, (Color) { 158, 108, 62, 255 });
+        DrawRectangleRounded((Rectangle) { (float)sx + 4, (float)sy + 22, 40, 7 }, 0.4f, 4, (Color) { 140, 94, 54, 255 });
+        return;
     }
-    else if (c == 'T') {
-        DrawRectangle(sx + 20, sy + 28, 8, 18, (Color) { 105, 70, 40, 255 });
-        DrawCircle(sx + 24, sy + 20, 20, (Color) { 40, 110, 60, 255 });
-        DrawCircle(sx + 24, sy + 17, 16, (Color) { 56, 140, 74, 255 });
-        DrawCircle(sx + 18, sy + 12, 5, (Color) { 90, 180, 100, 255 });
+    if (c == 'i') {                                          /* lamp post */
+        DrawGrass(x, y, sx, sy);
+        bool lit = Daylight() < 0.5f;
+        DrawEllipse(sx + 24, sy + 44, 11, 4, Fade(BLACK, 0.26f));
+        DrawRectangle(sx + 22, sy + 14, 4, 30, (Color) { 52, 54, 68, 255 });
+        DrawRectangle(sx + 17, sy + 42, 14, 4, (Color) { 64, 66, 82, 255 });
+        DrawRectangleRounded((Rectangle) { (float)sx + 15, (float)sy + 4, 18, 14 }, 0.3f, 4, (Color) { 60, 62, 78, 255 });
+        DrawRectangleRounded((Rectangle) { (float)sx + 18, (float)sy + 7, 12, 9 }, 0.3f, 4,
+            lit ? (Color) { 255, 228, 140, 255 } : (Color) { 196, 206, 220, 255 });
+        return;
     }
-    else if (c == 'B') {
-        DrawRectangleRounded((Rectangle) { (float)sx + 4, (float)sy + 14, 40, 12 }, 0.3f, 4, (Color) { 140, 95, 55, 255 });
-        DrawRectangle(sx + 8, sy + 26, 4, 10, (Color) { 90, 60, 35, 255 });
-        DrawRectangle(sx + 36, sy + 26, 4, 10, (Color) { 90, 60, 35, 255 });
-    }
-    else if (IsRoof(c)) {
-        Color rc = ROOFC[BldIdx(c)], dk = ColorBrightness(rc, -0.22f);
-        DrawRectangle(sx, sy, TS, TS, rc);
-        for (int k = 0; k < 4; k++) DrawRectangle(sx, sy + k * 12 + 10, TS, 2, dk);
-        if (!IsRoof(TileAt(x, y - 1))) DrawRectangle(sx, sy, TS, 5, dk);
-    }
-    else if (BldIdx(c) >= 0) {
-        int bi = BldIdx(c);
-        Color rc = ROOFC[bi], dk = ColorBrightness(rc, -0.2f);
-        bool door = (c == 'D' || c == 'E' || c == 'A');
-        bool upper = IsRoof(TileAt(x, y - 1));
-        DrawRectangle(sx, sy, TS, TS, (Color) { 232, 226, 210, 255 });
-        if (upper && !door && (bi == 1 ? !(x & 1) : (x & 1))) {
-            DrawRectangle(sx + 9, sy + 8, 30, 26, (Color) { 60, 70, 100, 255 });
-            DrawRectangle(sx + 11, sy + 10, 26, 22, (Color) { 150, 200, 245, 255 });
-            DrawRectangle(sx + 23, sy + 10, 2, 22, (Color) { 60, 70, 100, 255 });
-            DrawRectangle(sx + 11, sy + 20, 26, 2, (Color) { 60, 70, 100, 255 });
+
+    int bi = BldIdx(c);
+    if (bi < 0) return;
+    Color rc = ROOFC[bi];
+    bool door = (c == 'D' || c == 'E' || c == 'A' || c == 'G' || c == 'L' || c == 'P' || c == 'Z');
+
+    if (IsRoof(c)) {
+        DrawRectangleGradientV(sx, sy, TS, TS, ColorBrightness(rc, 0.12f), ColorBrightness(rc, -0.14f));
+        for (int r = 0; r < 4; r++) {                                         /* shingles */
+            int yy = sy + r * 12;
+            DrawRectangle(sx, yy + 10, TS, 2, ColorBrightness(rc, -0.28f));
+            for (int xx = (r & 1) ? 0 : 8; xx < TS; xx += 16) DrawRectangle(sx + xx, yy, 1, 10, ColorBrightness(rc, -0.22f));
+            DrawRectangle(sx, yy + 12 > sy + TS ? sy + TS - 1 : yy + 12, TS, 1, Fade(WHITE, 0.10f));
         }
-        if (door) {
-            DrawRectangle(sx + 6, sy + 2, 36, TS - 2, (Color) { 95, 60, 35, 255 });
-            DrawRectangle(sx + 10, sy + 7, 28, TS - 7, (Color) { 125, 82, 48, 255 });
-            DrawCircle(sx + 33, sy + 30, 3, (Color) { 240, 200, 80, 255 });
-            DrawRectangle(sx + 4, sy, 40, 5, rc);
+        if (!IsRoof(TileAt(x, y - 1))) {                                       /* ridge */
+            DrawRectangle(sx, sy, TS, 6, ColorBrightness(rc, -0.32f));
+            DrawRectangle(sx, sy, TS, 2, ColorBrightness(rc, 0.28f));
         }
-        else if (!upper) {
-            DrawRectangle(sx, sy + TS - 6, TS, 6, dk);
+        if (!IsRoof(TileAt(x, y + 1))) DrawRectangle(sx, sy + TS - 5, TS, 5, ColorBrightness(rc, -0.38f));   /* eave */
+        return;
+    }
+
+    Color wall = WALLC[bi];
+    bool upper = IsRoof(TileAt(x, y - 1));
+    DrawRectangle(sx, sy, TS, TS, wall);
+    if (bi == 3 || bi == 6) for (int k = 8; k < TS; k += 8) DrawRectangle(sx + k, sy, 1, TS, Fade(BLACK, 0.16f));   /* planks */
+    else         for (int k = 8; k < TS; k += 8) DrawRectangle(sx, sy + k, TS, 1, Fade(BLACK, 0.06f));    /* siding */
+    if (upper) DrawRectangleGradientV(sx, sy, TS, 14, Fade(BLACK, 0.30f), Fade(BLACK, 0.0f));             /* shadow under the eave */
+    if (upper && !door && bi != 3 && bi != 6 && (bi == 1 ? !(x & 1) : (x & 1)))
+        DrawWindow(sx, sy, bi, Daylight() < 0.47f);
+    if (door) DrawDoor(sx, sy, rc);
+    else if (!upper) {
+        DrawRectangle(sx, sy + TS - 7, TS, 7, ColorBrightness(wall, -0.2f));
+        DrawRectangle(sx, sy + TS - 7, TS, 1, Fade(WHITE, 0.25f));
+    }
+    if (bi == 5 && !upper) {                                                  /* the shop's striped awning */
+        for (int k = 0; k < 6; k++) {
+            Color ac = (k & 1) ? (Color) { 250, 246, 248, 255 } : (Color) { 214, 70, 120, 255 };
+            DrawRectangle(sx + k * 8, sy, 8, 11, ac);
+            DrawCircle(sx + k * 8 + 4, sy + 11, 4, ac);
         }
+        DrawRectangle(sx, sy, TS, 2, Fade(WHITE, 0.3f));
     }
 }
 
@@ -2538,24 +3212,26 @@ static void DrawArenaTile(char c, int x, int y, int sx, int sy)
 {
     unsigned h = Hash(x, y) & 255;
     if (c == '#') {
-        DrawRectangle(sx, sy, TS, TS, (Color) { 40, 28, 44, 255 });
+        DrawRectangleGradientV(sx, sy, TS, TS, (Color) { 52, 36, 58, 255 }, (Color) { 34, 24, 40, 255 });
         DrawRectangle(sx, sy + TS - 5, TS, 5, ARENA_C);
         return;
     }
-    if (c == 'u') {                                   /* crowd */
+    if (c == 'u') {                                   /* cheering crowd */
         DrawRectangle(sx, sy, TS, TS, (Color) { 52, 38, 66, 255 });
+        float cheer = sinf((float)GetTime() * 5.0f + x * 1.7f) * 2.0f;
         for (int k = 0; k < 3; k++) {
             Color body = { (unsigned char)(110 + (h * (k + 1)) % 120), (unsigned char)(80 + (h * 7 * (k + 2)) % 130),
                            (unsigned char)(100 + (h * 3 * (k + 3)) % 120), 255 };
-            int hx = sx + 9 + k * 15, hy = sy + 14 + (int)((h >> k) & 3);
+            int hx = sx + 9 + k * 15, hy = sy + 14 + (int)((h >> k) & 3) - (int)(cheer * (((h >> k) & 1) ? 1 : -1) * 0.5f);
             DrawRectangle(hx - 5, hy + 6, 11, 14, body);
             DrawCircle(hx, hy, 6, (Color) { 240, 200, 160, 255 });
         }
         return;
     }
     Color base = ((x + y) & 1) ? (Color) { 44, 48, 70, 255 } : (Color) { 40, 44, 64, 255 };
-    if (c == 'o') base = ((x + y) & 1) ? (Color) { 96, 54, 48, 255 } : (Color) { 88, 48, 42, 255 };
+    if (c == 'o') base = ((x + y) & 1) ? (Color) { 104, 58, 50, 255 } : (Color) { 94, 52, 44, 255 };
     DrawRectangle(sx, sy, TS, TS, base);
+    if (c == 'o') DrawRectangle(sx, sy, TS, 1, Fade((Color) { 255, 180, 120, 255 }, 0.25f));
     if (c == 'X') {
         DrawRectangle(sx + 4, sy + 10, TS - 8, TS - 14, (Color) { 120, 55, 50, 255 });
         CenterTxt(fBold, "EXIT", (float)sx + TS / 2, (float)sy + 14, 14, WHITE);
@@ -2567,13 +3243,19 @@ static void DrawInteriorTile(char c, int x, int y, int sx, int sy, Color accent)
     if (inside == 2) { DrawArenaTile(c, x, y, sx, sy); return; }
     unsigned h = Hash(x, y) & 255;
     if (c == '#') {
-        DrawRectangle(sx, sy, TS, TS, (Color) { 58, 64, 92, 255 });
+        DrawRectangleGradientV(sx, sy, TS, TS, (Color) { 68, 75, 106, 255 }, (Color) { 50, 56, 84, 255 });
+        DrawRectangle(sx + TS / 2, sy + 8, 1, TS - 16, Fade(BLACK, 0.18f));
         DrawRectangle(sx, sy, TS, 6, (Color) { 82, 90, 124, 255 });
         DrawRectangle(sx, sy + TS - 4, TS, 4, (Color) { 40, 45, 68, 255 });
         return;
     }
     if (c == ',' || c == 'X') {
         DrawRectangle(sx, sy, TS, TS, ((x + y) & 1) ? (Color) { 143, 153, 178, 255 } : (Color) { 150, 160, 185, 255 });
+        if (c == ',' && y == 9) {                                   /* red carpet down the hallway */
+            DrawRectangle(sx, sy + 6, TS, TS - 12, (Color) { 150, 52, 64, 255 });
+            DrawRectangle(sx, sy + 6, TS, 3, (Color) { 224, 184, 84, 255 });
+            DrawRectangle(sx, sy + TS - 9, TS, 3, (Color) { 224, 184, 84, 255 });
+        }
         if (c == 'X') {
             DrawRectangle(sx + 4, sy + 10, TS - 8, TS - 14, (Color) { 120, 55, 50, 255 });
             CenterTxt(fBold, "EXIT", (float)sx + TS / 2, (float)sy + 14, 14, WHITE);
@@ -2584,6 +3266,16 @@ static void DrawInteriorTile(char c, int x, int y, int sx, int sy, Color accent)
     Color fl = (room & 1) ? (Color) { 196, 170, 130, 255 } : (Color) { 203, 178, 140, 255 };
     if ((x + y) & 1) fl = ColorBrightness(fl, -0.04f);
     DrawRectangle(sx, sy, TS, TS, fl);
+    {   /* a rug in front of each teacher's desk */
+        int lx = (x - 1) % 6;
+        if (c == '.' && lx >= 1 && lx <= 3 && (y == 5 || y == 6)) {
+            DrawRectangle(sx, sy, TS, TS, (Color) { 92, 72, 132, 255 });
+            if (lx == 1) DrawRectangle(sx, sy, 4, TS, (Color) { 224, 184, 84, 255 });
+            if (lx == 3) DrawRectangle(sx + TS - 4, sy, 4, TS, (Color) { 224, 184, 84, 255 });
+            if (y == 5) DrawRectangle(sx, sy, TS, 4, (Color) { 224, 184, 84, 255 });
+            if (y == 6) DrawRectangle(sx, sy + TS - 4, TS, 4, (Color) { 224, 184, 84, 255 });
+        }
+    }
     if (c == '.' && h < 20) DrawRectangle(sx + 8, sy + 20, 14, 2, ColorBrightness(fl, -0.1f));
     if (c == 'h') {
         DrawRectangleRounded((Rectangle) { (float)sx + 3, (float)sy + 10, 42, 28 }, 0.2f, 6, (Color) { 120, 78, 45, 255 });
@@ -2620,12 +3312,12 @@ static void DrawNpcs(float camX, float camY)
         float cx = tx * TS - camX + TS / 2.0f, fy = TROW * TS - camY + TS - 6;
         DrawPerson(cx, fy, t->dir, t->shirt, t->hair, (Color) { 50, 55, 80, 255 }, INHALL, false, 0);
         if (INHALL) {
-            if (!prog.read[inside][i]) DrawBubble(cx, fy - 72, "!", (Color) { 250, 205, 70, 255 });
-            else if (prog.best[inside][i] == LESSONS[inside][i].nQ) DrawBubble(cx, fy - 72, "*", GOOD);
+            if (!prog.read[inside][i]) DrawBubble(cx, fy - 76, "!", (Color) { 250, 205, 70, 255 });
+            else if (prog.best[inside][i] == LESSONS[inside][i].nQ) DrawBubble(cx, fy - 76, "*", GOOD);
         }
         else {
-            if (!prog.won[i]) DrawBubble(cx, fy - 72, "!", (Color) { 240, 100, 90, 255 });
-            else              DrawBubble(cx, fy - 72, "*", GOOD);
+            if (!prog.won[i]) DrawBubble(cx, fy - 76, "!", (Color) { 240, 100, 90, 255 });
+            else              DrawBubble(cx, fy - 76, "*", GOOD);
         }
     }
 }
@@ -2635,6 +3327,8 @@ static void DrawWorld(void)
     float dt = GetFrameTime();
     if (dt > 0.05f) dt = 0.05f;
     UpdateWorld(dt);
+    float t = (float)GetTime();
+    if (inside < 0) { dayT += dt / 420.0f; if (dayT >= 1.0f) dayT -= 1.0f; }
 
     Color accent = inside == 2 ? ARENA_C : ACCENTS[inside >= 0 ? inside : lang];
     int mw = MapW() * TS, mh = MapH() * TS;
@@ -2645,7 +3339,7 @@ static void DrawWorld(void)
     camY = mh <= H ? (mh - H) / 2.0f : (camY < 0 ? 0 : (camY > mh - H ? (float)(mh - H) : camY));
     camX = floorf(camX); camY = floorf(camY);
 
-    ClearBackground(inside < 0 ? (Color) { 60, 120, 56, 255 } : BG);
+    ClearBackground(inside < 0 ? (Color) { 52, 104, 50, 255 } : (Color) { 12, 13, 20, 255 });
 
     int tx0 = (int)(camX / TS), ty0 = (int)(camY / TS);
     if (tx0 < 0) tx0 = 0;
@@ -2661,9 +3355,26 @@ static void DrawWorld(void)
             else            DrawInteriorTile(TileAt(x, y), x, y, sx, sy, accent);
         }
 
+    /* ---- signs, decorations ---- */
     if (inside < 0) {
-        for (int b = 0; b < 3; b++)
+        for (int b = 0; b < 5; b++)
             CenterFit(fBold, BLD[b].name, (BLD[b].x + 3.5f) * TS - camX, BLD[b].y * TS - camY + 34, 22, 7 * TS - 20, WHITE);
+        {   /* Daily Quest hut: chimney, smoke, sign and a bubble */
+            float hx = HUT_X * TS - camX, hy = HUT_Y * TS - camY;
+            DrawRectangle((int)hx + 104, (int)hy - 12, 16, 30, (Color) { 140, 70, 55, 255 });
+            DrawRectangle((int)hx + 102, (int)hy - 14, 20, 5, (Color) { 110, 52, 42, 255 });
+            for (int k = 0; k < 3; k++) {
+                float p = fmodf(t * 0.5f + k * 0.33f, 1.0f);
+                DrawCircle((int)(hx + 112 + sinf(p * 6.0f + k) * 7), (int)(hy - 18 - p * 46), 5 + p * 6,
+                    Fade((Color) { 235, 235, 240, 255 }, 0.55f * (1 - p)));
+            }
+            CenterFit(fBold, "DAILY QUEST", hx + 1.5f * TS, hy + 30, 15, 3 * TS - 18, (Color) { 80, 45, 20, 255 });
+            bool qd = QuestDoneToday();
+            DrawBubble(hx + 1.5f * TS - 10, hy - 34, qd ? "*" : "!", qd ? GOOD : (Color) { 255, 205, 90, 255 });
+        }
+        CenterFit(fBold, "MOWER FARM", 22.5f * TS - camX, 9 * TS - camY + 34, 22, 7 * TS - 20, WHITE);
+        DrawBubble(22.5f * TS - camX, 9 * TS - camY - 14, "~", (Color) { 130, 214, 110, 255 });
+        DrawBubble((BLD[4].x + 3.5f) * TS - camX, BLD[4].y * TS - camY - 14, "$", (Color) { 255, 205, 90, 255 });
     }
     else if (INHALL) {
         for (int r = 0; r < 5; r++) {
@@ -2671,28 +3382,97 @@ static void DrawWorld(void)
             DrawBoard(TextFormat("ROOM %d", r + 1), LESSONS[inside][r].name + 3,
                 x0 * TS - camX + 6, 8 - camY, 5 * TS - 12, 2 * TS - 20);
         }
+        for (int k = 1; k <= 4; k++) {                                         /* wall lamps */
+            float lx = 6 * k * TS + TS / 2.0f - camX, ly = 4 * TS + 14 - camY;
+            DrawRectangle((int)lx - 4, (int)ly, 8, 16, (Color) { 176, 134, 60, 255 });
+            DrawCircle((int)lx, (int)ly - 2, 6, (Color) { 255, 226, 140, 255 });
+            Glow(lx, ly - 2, 74, (Color) { 255, 200, 110, 255 }, 0.75f);
+        }
     }
     else {
         CenterFit(fBold, "BATTLE ARENA", AW * TS / 2.0f - camX, 8 - camY, 26, 420, (Color) { 255, 205, 90, 255 });
         CenterTxt(fBold, "VS", 10 * TS + TS / 2.0f - camX, 6 * TS - camY, 40, Fade((Color) { 255, 205, 90, 255 }, 0.55f));
+        Glow(10.5f * TS - camX, 6.5f * TS - camY, 230, (Color) { 255, 150, 90, 255 }, 0.45f + 0.15f * sinf(t * 2.0f));
+        for (int i = 0; i < 3; i++)
+            Glow((i == 0 ? 4 : (i == 1 ? 10 : 16)) * TS + TS / 2.0f - camX, TROW * TS + TS / 2.0f - camY, 70,
+                i == 0 ? (Color) { 110, 190, 120, 255 } : (i == 1 ? (Color) { 90, 130, 240, 255 } : (Color) { 240, 90, 110, 255 }), 0.5f);
     }
 
-    /* people, drawn back to front (teachers / rivals all stand on row TROW) */
+    /* ---- trail particles ---- */
+    for (int i = 0; i < 96; i++)
+        if (trail[i].life > 0) DrawTrailBit(&trail[i], trail[i].x - camX, trail[i].y - camY);
+
+    /* ---- people, drawn back to front (teachers / rivals all stand on row TROW) ---- */
     float px = ppx - camX + TS / 2.0f, py = ppy - camY + TS - 6;
     bool front = ppy >= TROW * TS;
     if (inside >= 0 && front) DrawNpcs(camX, camY);
-    DrawPerson(px, py, wdir, (Color) { 225, 85, 85, 255 }, (Color) { 70, 45, 30, 255 },
-        (Color) {
-        55, 70, 120, 255
-    }, false, true, wmoving ? walkPhase : 0);
+    DrawPlayer(px, py, wdir, 1.0f, wmoving ? walkPhase : 0);
     if (inside >= 0 && !front) DrawNpcs(camX, camY);
 
-    /* HUD */
-    const char* loc = inside < 0 ? "Campus" : (inside == 0 ? "C Hall" : (inside == 1 ? "C++ Hall" : "Battle Arena"));
+    /* ---- tree tops (over the characters, so you can walk behind trees) ---- */
+    if (inside < 0) {
+        int yEnd = ty1 + 1 < CH ? ty1 + 1 : CH - 1;
+        for (int y = ty0; y <= yEnd; y++)
+            for (int x = tx0; x <= tx1; x++)
+                if (campus[y][x] == 'T') DrawCanopy(x, y, (int)(x * TS - camX), (int)(y * TS - camY));
+
+        /* drifting cloud shadows */
+        for (int k = 0; k < 4; k++) {
+            float cxp = fmodf(t * (14.0f + k * 6.0f) + k * 520.0f, (float)(mw + 700)) - 350.0f;
+            float cyp = 160.0f + k * 300.0f;
+            DrawEllipse((int)(cxp - camX), (int)(cyp - camY), 190 + k * 20, 70, Fade(BLACK, 0.06f));
+            DrawEllipse((int)(cxp + 110 - camX), (int)(cyp + 24 - camY), 120, 50, Fade(BLACK, 0.06f));
+        }
+
+        /* day / night */
+        float L = Daylight();
+        float dark = powf(1.0f - L, 1.5f) * 0.50f;
+        if (dark > 0.005f) DrawRectangle(0, 0, W, H, Fade((Color) { 10, 16, 56, 255 }, dark));
+        float golden = 1.0f - fabsf(L - 0.5f) * 3.5f;
+        if (golden > 0) DrawRectangle(0, 0, W, H, Fade((Color) { 255, 150, 60, 255 }, 0.10f * golden));
+        if (L < 0.55f) {
+            float gs = (0.55f - L) / 0.35f;
+            if (gs > 1.0f) gs = 1.0f;
+            for (int y = ty0; y <= ty1; y++)
+                for (int x = tx0; x <= tx1; x++)
+                    if (campus[y][x] == 'i')
+                        Glow(x * TS + TS / 2.0f - camX, y * TS + 12 - camY, 105, (Color) { 255, 205, 125, 255 }, gs);
+            if (L < 0.42f)                                                     /* fireflies */
+                for (int k = 0; k < 16; k++) {
+                    float fx = fmodf(k * 137.5f + sinf(t * 0.7f + k) * 40.0f + 1200.0f, (float)W);
+                    float fy = fmodf(k * 91.3f + cosf(t * 0.6f + k * 1.3f) * 36.0f + 900.0f, (float)H);
+                    float tw = 0.5f + 0.5f * sinf(t * 3.0f + k * 2.1f);
+                    Glow(fx, fy, 10, (Color) { 200, 255, 120, 255 }, 0.9f * tw);
+                }
+        }
+        else {                                                               /* falling leaves by day */
+            for (int k = 0; k < 9; k++) {
+                float lx = fmodf(k * 191.0f + t * 26.0f + sinf(t + k) * 30.0f, (float)(W + 60)) - 30;
+                float ly = fmodf(k * 97.0f + t * (30.0f + k * 2.0f), (float)(H + 40)) - 20;
+                DrawEllipse((int)lx, (int)ly, 5, 3, Fade(k & 1 ? (Color) { 214, 150, 60, 255 } : (Color) { 150, 190, 80, 255 }, 0.8f));
+            }
+        }
+    }
+
+    /* ---- screen edges darken a little, like a game camera ---- */
+    DrawRectangleGradientV(0, 0, W, 110, Fade(BLACK, 0.30f), Fade(BLACK, 0.0f));
+    DrawRectangleGradientV(0, H - 110, W, 110, Fade(BLACK, 0.0f), Fade(BLACK, 0.30f));
+    DrawRectangleGradientH(0, 0, 130, H, Fade(BLACK, 0.26f), Fade(BLACK, 0.0f));
+    DrawRectangleGradientH(W - 130, 0, 130, H, Fade(BLACK, 0.0f), Fade(BLACK, 0.26f));
+
+    /* ---- HUD ---- */
+    char loc[64];
+    const char* place = inside < 0 ? "Campus" : (inside == 0 ? "C Hall" : (inside == 1 ? "C++ Hall" : "Battle Arena"));
+    if (inside < 0) {
+        int mins = (int)(dayT * 24.0f * 60.0f);
+        snprintf(loc, sizeof loc, "%s   %02d:%02d", place, mins / 60, mins % 60);
+    }
+    else snprintf(loc, sizeof loc, "%s", place);
     float lw = TxtW(fMed, loc, 18) + 70;
-    Panel((Rectangle) { 20, 20, lw, 44 }, 0.3f, Fade(SURF, 0.92f), BORDER);
-    DrawCircle(42, 42, 6, accent);
-    Txt(fMed, loc, 58, 31, 18, TXT);
+    Panel((Rectangle) { 20, 20, lw, 40 }, 0.5f, Fade(SURF, 0.94f), BORDER);
+    DrawCircle(42, 40, 6, accent);
+    Txt(fMed, loc, 58, 29, 18, TXT);
+    DrawCreditsChip(W - 20, 20);
 
     if (dlg == DLG_NONE) {
         const char* hint = "Arrows / WASD move    Shift run    Space talk    Esc study menu";
@@ -2891,10 +3671,7 @@ static void DrawFighter(float x, float y, float w, const char* name, float hp, b
     Teacher* t, const char* status)
 {
     Panel((Rectangle) { x, y, w, 96 }, 0.12f, SURF, BORDER);
-    if (you) DrawPerson(x + 44, y + 88, 0, (Color) { 225, 85, 85, 255 }, (Color) { 70, 45, 30, 255 },
-        (Color) {
-        55, 70, 120, 255
-    }, false, true, 0);
+    if (you) DrawPlayer(x + 44, y + 88, 0, 1.0f, 0);
     else     DrawPerson(x + 44, y + 88, 0, t->shirt, t->hair, (Color) { 50, 55, 80, 255 }, false, false, 0);
 
     TxtFit(fBold, name, x + 90, y + 10, 20, w - 110, TXT);
@@ -2991,7 +3768,12 @@ static void DrawBattle(void)
             || IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)) {
             if (over) {
                 bWon = bRHP <= 0 || (bPHP > 0 && bPHP > bRHP);
-                if (bWon) { prog.won[bRival] = 1; SaveProgress(); }
+                if (bWon) {
+                    bool first = !prog.won[bRival];
+                    static const int fw[3] = { 60, 100, 150 };
+                    prog.won[bRival] = 1; SaveProgress();
+                    GainCredits(first ? fw[bRival] : 20, first ? "First arena win!" : "Arena win");
+                }
                 bPhase = 3;
             }
             else {
@@ -3002,8 +3784,2586 @@ static void DrawBattle(void)
 }
 
 /* ------------------------------------------------------------------ */
+/*  Daily Coding Quest: 3 new questions every day (easy / medium / hard) */
+/* ------------------------------------------------------------------ */
+typedef struct { const char* q, * code; const char* opts[4]; int correct; const char* typed; const char* expl; } QQuestion;
+
+#define QPOOL 6
+static const char* QNAME[3] = { "EASY", "MEDIUM", "HARD" };
+static const char* QDESC[3] = {
+    "A quick warm-up question. Pick the right answer.",
+    "Read the code and work out what it does. Pick the right answer.",
+    "Read the code, then TYPE the exact output. No options to help you!"
+};
+static const int QXP[3] = { 10, 20, 40 };
+static const int QCR[3] = { 15, 30, 60 };       /* credits per quest */
+static const Color QCOL[3] = { { 52, 199, 120, 255 }, { 240, 180, 60, 255 }, { 240, 92, 104, 255 } };
+
+static const QQuestion QBANK[3][QPOOL] = {
+  { /* ---------- EASY ---------- */
+    { "Which symbol ends most statements in C and C++?", NULL, { ";", ":", ".", "," }, 0, NULL,
+      "A semicolon marks the end of a statement. Forgetting one is the most common beginner error." },
+    { "Which keyword makes a variable read-only?", NULL, { "static", "const", "final", "fixed" }, 1, NULL,
+      "const tells the compiler the value must not change after it is initialised." },
+    { "What does this print?", "printf(\"%d\", 10 % 3);", { "3", "1", "0", "3.33" }, 1, NULL,
+      "% is the remainder operator. 10 divided by 3 is 3 remainder 1." },
+    { "Which loop always runs its body at least once?", NULL, { "for", "while", "do-while", "if" }, 2, NULL,
+      "do-while checks its condition after the body, so the body runs once even if the condition is false." },
+    { "How do you write a single-line comment in C++?", NULL, { "# comment", "// comment", "-- comment", "<!-- comment -->" }, 1, NULL,
+      "// starts a comment that runs to the end of the line." },
+    { "Which header gives you std::cout?", NULL, { "<stdio.h>", "<iostream>", "<string>", "<vector>" }, 1, NULL,
+      "<iostream> provides the standard stream objects cin, cout and cerr." }
+  },
+  { /* ---------- MEDIUM ---------- */
+    { "What does this print?", "int a[] = {4, 8, 15, 16};\nprintf(\"%d\", a[1] + a[3]);", { "12", "20", "24", "31" }, 2, NULL,
+      "a[1] is 8 and a[3] is 16, so the sum is 24." },
+    { "What does this print?", "int x = 10;\nint *p = &x;\nint **q = &p;\nprintf(\"%d\", **q);", { "The address of x", "10", "0", "It will not compile" }, 1, NULL,
+      "q points to p and p points to x. Dereferencing twice gives x, which is 10." },
+    { "What does this print?", "std::string s = \"hello\";\ns[0] = 'J';\nstd::cout << s;", { "hello", "Jello", "J", "Compile error" }, 1, NULL,
+      "std::string is mutable and indexable: s[0] replaces the first character, giving Jello." },
+    { "What does this print?", "int i = 0;\nwhile (i < 5) {\n    i++;\n    if (i == 3) break;\n}\nprintf(\"%d\", i);", { "2", "3", "4", "5" }, 1, NULL,
+      "i reaches 3, break leaves the loop immediately, and 3 is printed." },
+    { "What happens when this is compiled?", "const int n = 5;\nn = 6;", { "n becomes 6", "Compile error: n is const", "n stays 5 silently", "It crashes at runtime" }, 1, NULL,
+      "Assigning to a const variable is a compile-time error." },
+    { "What does this print?", "std::vector<int> v = {1, 2, 3};\nfor (int x : v) x *= 2;\nstd::cout << v[0];", { "1", "2", "6", "Compile error" }, 0, NULL,
+      "x is a copy of each element. Use int &x to change the vector itself." }
+  },
+  { /* ---------- HARD (type the output) ---------- */
+    { "Type the exact output.", "int s = 0;\nfor (int i = 1; i <= 5; i++)\n    s += i;\nprintf(\"%d\", s);", { "", "", "", "" }, 0, "15",
+      "1 + 2 + 3 + 4 + 5 = 15." },
+    { "Type the exact output.", "int a = 6, b = 4;\nwhile (b != 0) {\n    int t = b;\n    b = a % b;\n    a = t;\n}\nprintf(\"%d\", a);", { "", "", "", "" }, 0, "2",
+      "This is Euclid's algorithm. It finds the greatest common divisor of 6 and 4, which is 2." },
+    { "Type the exact output.", "char s[] = \"recursion\";\nint n = 0;\nfor (int i = 0; s[i]; i++)\n    if (s[i] == 'r') n++;\nprintf(\"%d\", n);", { "", "", "", "" }, 0, "2",
+      "The letter r appears twice in recursion." },
+    { "Type the exact output.", "int f(int n) {\n    return n <= 1 ? 1 : n * f(n - 1);\n}\n\nprintf(\"%d\", f(4));", { "", "", "", "" }, 0, "24",
+      "f(4) = 4 * 3 * 2 * 1 = 24." },
+    { "Type the exact output.", "std::vector<int> v;\nfor (int i = 0; i < 4; i++)\n    v.push_back(i * i);\nstd::cout << v[3];", { "", "", "", "" }, 0, "9",
+      "The vector holds 0, 1, 4, 9, so v[3] is 9." },
+    { "Type the exact output.", "int a = 5;\nint &r = a;\nr += 3;\nstd::cout << a;", { "", "", "", "" }, 0, "8",
+      "r is a reference to a, so adding 3 to r changes a to 8." }
+  }
+};
+
+static int questToday = 0, questTier = 0, questPhase = 0, questSel = -1;   /* phase: 0 board, 1 asking, 2 answered */
+static bool questOk = false, questBonus = false;
+static char questDate[48] = "";
+
+/* the same question is picked all day, and a new one tomorrow */
+static const QQuestion* QPick(int tier) { return &QBANK[tier][Hash(questToday, tier * 13 + 5) % QPOOL]; }
+
+/* ---- confetti ---- */
+typedef struct { float x, y, vx, vy, life; Color c; } Spark;
+static Spark sparks[160];
+
+static void Burst(float x, float y, int n)
+{
+    static const Color pal[5] = { { 255, 205, 90, 255 }, { 52, 199, 120, 255 }, { 80, 160, 255, 255 },
+                                  { 240, 92, 104, 255 }, { 190, 140, 255, 255 } };
+    for (int i = 0; i < 160 && n > 0; i++) {
+        if (sparks[i].life > 0) continue;
+        sparks[i].x = x; sparks[i].y = y;
+        sparks[i].vx = GetRandomValue(-300, 300);
+        sparks[i].vy = GetRandomValue(-520, -120);
+        sparks[i].life = 1.2f + GetRandomValue(0, 80) / 100.0f;
+        sparks[i].c = pal[GetRandomValue(0, 4)];
+        n--;
+    }
+}
+
+static void UpdateSparks(float dt)
+{
+    for (int i = 0; i < 160; i++) {
+        if (sparks[i].life <= 0) continue;
+        sparks[i].life -= dt;
+        sparks[i].vy += 700 * dt;
+        sparks[i].x += sparks[i].vx * dt;
+        sparks[i].y += sparks[i].vy * dt;
+    }
+}
+
+static void DrawSparks(void)
+{
+    for (int i = 0; i < 160; i++)
+        if (sparks[i].life > 0)
+            DrawRectangle((int)sparks[i].x, (int)sparks[i].y, 7, 11, Fade(sparks[i].c, sparks[i].life > 1 ? 1.0f : sparks[i].life));
+}
+
+static void StartQuest(void)
+{
+    fromWorld = true;
+    screen = SCR_QUEST;
+    questToday = TodayIndex();
+    time_t t = time(NULL);
+    strftime(questDate, sizeof questDate, "%A %d %B %Y", localtime(&t));
+    if (quest.day != questToday) {                 /* a new day: fresh questions */
+        memset(quest.state, 0, sizeof quest.state);
+        quest.day = questToday;
+        SaveQuest();
+    }
+    questPhase = 0; questBonus = false;
+    ClearTyped();
+}
+
+static void FinishQuest(bool ok)
+{
+    quest.state[questTier] = ok ? 1 : 2;
+    questOk = ok; questPhase = 2; questBonus = false;
+
+    if (quest.lastActive != questToday) {          /* first answer today: update the streak */
+        quest.streak = (quest.lastActive == questToday - 1) ? quest.streak + 1 : 1;
+        quest.lastActive = questToday;
+        if (quest.streak > quest.bestStreak) quest.bestStreak = quest.streak;
+    }
+    if (ok) { quest.xp += QXP[questTier]; Burst(W / 2.0f, 260, 60); GainCredits(QCR[questTier], "Daily quest"); }
+    if (quest.state[0] == 1 && quest.state[1] == 1 && quest.state[2] == 1) {
+        quest.xp += 30; questBonus = true; GainCredits(50, "Perfect day!");
+        Burst(300, 300, 50); Burst(W - 300, 300, 50);
+    }
+    SaveQuest();
+}
+
+static void DrawQuest(void)
+{
+    float dt = GetFrameTime();
+    if (dt > 0.05f) dt = 0.05f;
+    const Color gold = { 255, 205, 90, 255 }, soft = { 205, 211, 228, 255 };
+    bool wasAnswered = (questPhase == 2);
+    bool typed = (questTier == 2);
+
+    /* keyboard text input for the hard question (always drained) */
+    bool accepting = (questPhase == 1 && typed);
+    int ch;
+    while ((ch = GetCharPressed()) > 0)
+        if (accepting && ch >= 32 && ch <= 126 && tlen < 60) { tbuf[tlen++] = (char)ch; tbuf[tlen] = 0; }
+    static float bsT = 0;
+    if (accepting) {
+        if (IsKeyPressed(KEY_BACKSPACE)) { if (tlen > 0) tbuf[--tlen] = 0; bsT = 0; }
+        else if (IsKeyDown(KEY_BACKSPACE)) {
+            bsT += dt;
+            if (bsT > 0.4f) { if (tlen > 0) tbuf[--tlen] = 0; bsT = 0.36f; }
+        }
+        else bsT = 0;
+    }
+
+    TopBar();
+    if (Button((Rectangle) { 24, 14, 124, 44 }, questPhase == 0 ? "< Campus" : "< Board", SURF2, 16)) {
+        if (questPhase == 0) { GoMenu(); return; }
+        questPhase = 0; ClearTyped();
+    }
+    Txt(fBold, "Daily Coding Quest", 168, 17, 25, gold);
+    int streak = (quest.lastActive >= questToday - 1) ? quest.streak : 0;
+    const char* stxt = TextFormat("Streak  %d", streak);
+    Txt(fMed, stxt, W - 36 - TxtW(fMed, stxt, 18), 22, 18, (Color) { 255, 150, 70, 255 });
+    DrawCreditsChip(W - 36 - TxtW(fMed, stxt, 18) - 24, 16);
+
+    if (questPhase == 0) {
+        /* ---------- quest board ---------- */
+        static const int thr[5] = { 0, 50, 150, 300, 600 };
+        static const char* rn[5] = { "Newbie", "Apprentice", "Coder", "Hacker", "Code Wizard" };
+        int xp = quest.xp, rk = 0;
+        for (int i = 0; i < 5; i++) if (xp >= thr[i]) rk = i;
+
+        Panel((Rectangle) { 36, 92, W - 72, 104 }, 0.1f, SURF, BORDER);
+        Txt(fBold, rn[rk], 60, 102, 30, gold);
+        Txt(fReg, TextFormat("%d XP total", xp), 60, 150, 17, DIM);
+        float bx = 330, bw = 460, frac = 1.0f;
+        const char* cap = "Top rank reached!";
+        if (rk < 4) {
+            frac = (float)(xp - thr[rk]) / (float)(thr[rk + 1] - thr[rk]);
+            cap = TextFormat("%d XP to %s", thr[rk + 1] - xp, rn[rk + 1]);
+        }
+        DrawRectangleRounded((Rectangle) { bx, 118, bw, 14 }, 0.5f, 8, SURF2);
+        if (bw * frac > 8) DrawRectangleRounded((Rectangle) { bx, 118, bw* frac, 14 }, 0.5f, 8, gold);
+        Txt(fReg, cap, bx, 142, 15, DIM);
+        Txt(fMed, questDate, W - 60 - TxtW(fMed, questDate, 18), 102, 18, TXT);
+        const char* bs = TextFormat("Best streak  %d", quest.bestStreak);
+        Txt(fReg, bs, W - 60 - TxtW(fReg, bs, 16), 140, 16, DIM);
+
+        int done = 0, good = 0;
+        for (int t = 0; t < 3; t++) { if (quest.state[t]) done++; if (quest.state[t] == 1) good++; }
+
+        for (int t = 0; t < 3; t++) {
+            Rectangle c = { 36 + t * 382.0f, 216, 362, 330 };
+            Color tc = QCOL[t];
+            bool hov = CheckCollisionPointRec(GetMousePosition(), c) && quest.state[t] == 0;
+            Panel(c, 0.07f, hov ? SURF2 : SURF, hov ? tc : BORDER);
+            DrawRectangle((int)c.x + 22, (int)c.y + 22, 5, 40, tc);
+            Txt(fBold, QNAME[t], c.x + 40, c.y + 20, 30, tc);
+            for (int k = 0; k < 3; k++)
+                DrawCircle((int)(c.x + c.width - 36 - k * 22), (int)c.y + 42, 7, k <= t ? tc : SURF2);
+            Txt(fMed, TextFormat("+%d XP", QXP[t]), c.x + 40, c.y + 66, 20, gold);
+            Wrapped(fReg, QDESC[t], c.x + 24, c.y + 108, c.width - 48, 17, soft);
+
+            if (quest.state[t] == 1)      CenterTxt(fBold, "Solved!", c.x + c.width / 2, c.y + 222, 26, GOOD);
+            else if (quest.state[t] == 2) CenterFit(fBold, "Missed - try again tomorrow", c.x + c.width / 2, c.y + 224, 20, c.width - 40, BAD);
+            else                          CenterTxt(fReg, "Not attempted yet", c.x + c.width / 2, c.y + 224, 18, DIM);
+
+            Rectangle b = { c.x + 24, c.y + c.height - 76, c.width - 48, 52 };
+            if (quest.state[t] == 0) {
+                if (Button(b, "Start", ColorBrightness(tc, -0.25f), 18)) {
+                    questTier = t; questPhase = 1; questSel = -1; questBonus = false; ClearTyped();
+                }
+            }
+            else {
+                DrawRectangleRounded(b, 0.28f, 10, SURF2);
+                CenterTxt(fMed, "Completed", b.x + b.width / 2, b.y + 12, 17, DIM);
+            }
+        }
+
+        Panel((Rectangle) { 36, 566, W - 72, 92 }, 0.1f, SURF, done == 3 ? gold : BORDER);
+        if (done == 3) {
+            TxtFit(fBold, good == 3 ? "Perfect day! You solved all three." : TextFormat("Day complete - %d of 3 solved.", good),
+                60, 580, 22, W - 120, gold);
+            TxtFit(fReg, "Come back tomorrow for a fresh set of questions and keep your streak going.", 60, 620, 17, W - 120, DIM);
+        }
+        else {
+            TxtFit(fBold, TextFormat("%d of 3 quests attempted today", done), 60, 580, 22, W - 120, TXT);
+            TxtFit(fReg, "Solve all three correctly for a +30 XP perfect-day bonus. New questions every day!", 60, 620, 17, W - 120, DIM);
+        }
+    }
+    else {
+        /* ---------- one question ---------- */
+        const QQuestion* Q = QPick(questTier);
+        Color tc = QCOL[questTier];
+        const float x0 = 60, cw = W - 120;
+
+        Txt(fBold, TextFormat("%s QUEST   -   +%d XP", QNAME[questTier], QXP[questTier]), x0, 92, 14, tc);
+        int qEnd = Wrapped(fBold, Q->q, x0, 114, cw, 26, TXT);
+        int cEnd = Q->code ? DrawCode(Q->code, x0, (float)(qEnd + 4), cw, 18, "quest") : qEnd;
+        float yOpt = (float)(cEnd + 18);
+        float fy = yOpt;
+
+        if (!typed) {
+            fy = yOpt + 138;
+            for (int i = 0; i < 4; i++) {
+                Rectangle r = { x0 + (i & 1) * 547.0f, yOpt + (i >> 1) * 66, 533, 56 };
+                bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+                Color fill = SURF, border = BORDER, badge = SURF2, text = TXT;
+                if (questPhase == 1 && hov) { fill = SURF2; border = tc; hand = true; }
+                if (questPhase == 2) {
+                    if (i == Q->correct) { fill = Fade(GOOD, 0.13f); border = GOOD; badge = GOOD; }
+                    else if (i == questSel) { fill = Fade(BAD, 0.13f);  border = BAD;  badge = BAD; }
+                    else { text = DIM; }
+                }
+                Panel(r, 0.22f, fill, border);
+                DrawCircle((int)r.x + 30, (int)r.y + 28, 16, badge);
+                CenterTxt(fBold, TextFormat("%c", 'A' + i), r.x + 30, r.y + 16, 16, TXT);
+                TxtFit(fReg, Q->opts[i], r.x + 60, r.y + 14, 20, r.width - 80, text);
+                if (questPhase == 1 && ((hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) ||
+                    IsKeyPressed(KEY_ONE + i) || IsKeyPressed(KEY_A + i))) {
+                    questSel = i;
+                    FinishQuest(i == Q->correct);
+                }
+            }
+        }
+        else {
+            fy = yOpt + 84;
+            Rectangle box = { x0, yOpt, cw, 64 };
+            if (questPhase == 1) {
+                Panel(box, 0.2f, SURF, tc);
+                float fs = FitSize(fReg, tbuf, 22, cw - 200);
+                if (tlen == 0) Txt(fReg, "Type the output here...", x0 + 22, yOpt + 18, 20, DIM);
+                else           Txt(fReg, tbuf, x0 + 22, yOpt + 17 + (22 - fs) * 0.5f, fs, TXT);
+                if (((int)(GetTime() * 2)) & 1)
+                    DrawRectangle((int)(x0 + 24 + (tlen ? TxtW(fReg, tbuf, fs) : 0)), (int)yOpt + 14, 2, 36, TXT);
+                TxtFit(fReg, "Press Enter to submit. Type exactly what the program would print.", x0, yOpt + 76, 15, cw, DIM);
+                if ((Button((Rectangle) { x0 + cw - 150, yOpt + 8, 138, 48 }, "Submit", ColorBrightness(tc, -0.25f), 16)
+                    || IsKeyPressed(KEY_ENTER)) && tlen > 0)
+                    FinishQuest(TypedOk(tbuf, Q->typed));
+            }
+            else {
+                Color col = questOk ? GOOD : BAD;
+                Panel(box, 0.2f, Fade(col, 0.13f), col);
+                TxtFit(fReg, TextFormat("Your answer:  %s", tbuf), x0 + 22, yOpt + 17, 22, cw - 44, TXT);
+            }
+        }
+
+        DrawRectangle(0, 684, W, H - 684, SURF);
+        DrawLine(0, 684, W, 684, BORDER);
+        if (questPhase == 1) {
+            CenterTxt(fReg, typed ? "Type your answer, then press Enter" : "Click an answer, or press 1-4", W / 2.0f, 710, 14, DIM);
+        }
+        else {
+            Color col = questOk ? GOOD : BAD;
+            char ebuf[700];
+            if (typed && !questOk) snprintf(ebuf, sizeof ebuf, "Expected output: %s.   %s", Q->typed, Q->expl);
+            else                   snprintf(ebuf, sizeof ebuf, "%s", Q->expl);
+            if (questBonus) strncat(ebuf, "   PERFECT DAY! +30 bonus XP.", sizeof ebuf - strlen(ebuf) - 1);
+
+            float ph = 46 + WrapH(fReg, ebuf, cw - 44, 16) + 8;
+            Panel((Rectangle) { x0, fy, cw, ph }, 0.12f, Fade(col, 0.10f), col);
+            Txt(fBold, questOk ? TextFormat("Correct!  +%d XP", QXP[questTier]) : "Not quite", x0 + 22, fy + 12, 20, col);
+            Wrapped(fReg, ebuf, x0 + 22, fy + 44, cw - 44, 16, soft);
+
+            if (Button((Rectangle) { W - 226, 698, 190, 48 }, "Back to board", ColorBrightness(tc, -0.25f), 16)
+                || (wasAnswered && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)))) {
+                questPhase = 0; ClearTyped();
+            }
+        }
+    }
+
+    UpdateSparks(dt);
+    DrawSparks();
+}
+
+/* ------------------------------------------------------------------ */
+/*  Coding Lab: write real C / C++ in the app, press Run, see output   */
+/*  Uses the gcc / g++ already installed on your computer.             */
+/* ------------------------------------------------------------------ */
+typedef struct { const char* title, * code, * input; } LabExample;
+#define LAB_NEX 9
+
+static const LabExample LAB_EX[2][LAB_NEX] = {
+  { /* ------------------------------ C ------------------------------ */
+    { "Hello, World!",
+      "#include <stdio.h>\n"
+      "\n"
+      "int main(void) {\n"
+      "    printf(\"Hello, World!\\n\");\n"
+      "    printf(\"Edit this code and press Run.\\n\");\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "Variables and input",
+      "#include <stdio.h>\n"
+      "\n"
+      "int main(void) {\n"
+      "    int age;\n"
+      "    printf(\"Enter your age: \");\n"
+      "    if (scanf(\"%d\", &age) != 1) {\n"
+      "        printf(\"Please type a number.\\n\");\n"
+      "        return 1;\n"
+      "    }\n"
+      "    printf(\"\\nIn 10 years you will be %d.\\n\", age + 10);\n"
+      "    return 0;\n"
+      "}\n", "7" },
+    { "Loops",
+      "#include <stdio.h>\n"
+      "\n"
+      "int main(void) {\n"
+      "    for (int i = 1; i <= 5; i++) {\n"
+      "        printf(\"%d x 3 = %d\\n\", i, i * 3);\n"
+      "    }\n"
+      "\n"
+      "    int n = 3;\n"
+      "    while (n > 0) {\n"
+      "        printf(\"Countdown: %d\\n\", n);\n"
+      "        n--;\n"
+      "    }\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "Functions",
+      "#include <stdio.h>\n"
+      "\n"
+      "int square(int n) {\n"
+      "    return n * n;\n"
+      "}\n"
+      "\n"
+      "int is_prime(int n) {\n"
+      "    if (n < 2) return 0;\n"
+      "    for (int i = 2; i * i <= n; i++) {\n"
+      "        if (n % i == 0) return 0;\n"
+      "    }\n"
+      "    return 1;\n"
+      "}\n"
+      "\n"
+      "int main(void) {\n"
+      "    printf(\"6 squared is %d\\n\", square(6));\n"
+      "    for (int n = 1; n <= 15; n++) {\n"
+      "        if (is_prime(n)) printf(\"%d is prime\\n\", n);\n"
+      "    }\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "Arrays and strings",
+      "#include <stdio.h>\n"
+      "#include <string.h>\n"
+      "\n"
+      "int main(void) {\n"
+      "    int nums[5] = {12, 7, 30, 4, 19};\n"
+      "    int sum = 0, max = nums[0];\n"
+      "    for (int i = 0; i < 5; i++) {\n"
+      "        sum += nums[i];\n"
+      "        if (nums[i] > max) max = nums[i];\n"
+      "    }\n"
+      "    printf(\"sum = %d, max = %d\\n\", sum, max);\n"
+      "    printf(\"average = %.1f\\n\", sum / 5.0);\n"
+      "\n"
+      "    char word[] = \"pointer\";\n"
+      "    printf(\"%s has %zu letters\\n\", word, strlen(word));\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "Pointers",
+      "#include <stdio.h>\n"
+      "\n"
+      "void swap(int *a, int *b) {\n"
+      "    int tmp = *a;\n"
+      "    *a = *b;\n"
+      "    *b = tmp;\n"
+      "}\n"
+      "\n"
+      "int main(void) {\n"
+      "    int x = 1, y = 2;\n"
+      "    printf(\"before: x=%d y=%d\\n\", x, y);\n"
+      "    swap(&x, &y);\n"
+      "    printf(\"after:  x=%d y=%d\\n\", x, y);\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "Structs and malloc",
+      "#include <stdio.h>\n"
+      "#include <stdlib.h>\n"
+      "\n"
+      "typedef struct {\n"
+      "    char name[20];\n"
+      "    int age;\n"
+      "} Student;\n"
+      "\n"
+      "int main(void) {\n"
+      "    Student *s = malloc(sizeof(Student));\n"
+      "    if (s == NULL) return 1;\n"
+      "\n"
+      "    snprintf(s->name, sizeof s->name, \"Ada\");\n"
+      "    s->age = 21;\n"
+      "    printf(\"%s is %d years old\\n\", s->name, s->age);\n"
+      "\n"
+      "    free(s);\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "Debug me! (has errors)",
+      "#include <stdio.h>\n"
+      "\n"
+      "int main(void) {\n"
+      "    int total = 0\n"
+      "    for (int i = 1; i <= 5; i++) {\n"
+      "        total += i;\n"
+      "    }\n"
+      "    printf(\"Total is %d\\n\", totl);\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "Blank sandbox",
+      "#include <stdio.h>\n"
+      "\n"
+      "int main(void) {\n"
+      "    // write your own code here\n"
+      "\n"
+      "    return 0;\n"
+      "}\n", "" }
+  },
+  { /* ----------------------------- C++ ----------------------------- */
+    { "Hello, C++!",
+      "#include <iostream>\n"
+      "\n"
+      "int main() {\n"
+      "    std::cout << \"Hello, C++!\" << std::endl;\n"
+      "    std::cout << \"Edit this code and press Run.\" << std::endl;\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "Input and strings",
+      "#include <iostream>\n"
+      "#include <string>\n"
+      "\n"
+      "int main() {\n"
+      "    std::string name;\n"
+      "    std::cout << \"Your name? \";\n"
+      "    std::cin >> name;\n"
+      "    std::cout << \"\\nHello, \" << name << \"! Your name has \"\n"
+      "              << name.size() << \" letters.\\n\";\n"
+      "    return 0;\n"
+      "}\n", "Ada" },
+    { "Vectors and loops",
+      "#include <iostream>\n"
+      "#include <vector>\n"
+      "\n"
+      "int main() {\n"
+      "    std::vector<int> v = {3, 1, 4, 1, 5};\n"
+      "    v.push_back(9);\n"
+      "\n"
+      "    int sum = 0;\n"
+      "    for (int n : v) {\n"
+      "        std::cout << n << \" \";\n"
+      "        sum += n;\n"
+      "    }\n"
+      "    std::cout << \"\\nsum = \" << sum << \", size = \" << v.size() << \"\\n\";\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "References",
+      "#include <iostream>\n"
+      "#include <string>\n"
+      "\n"
+      "void addOne(int &n) { n++; }\n"
+      "void shout(const std::string &s) { std::cout << s << \"!\\n\"; }\n"
+      "\n"
+      "int main() {\n"
+      "    int x = 5;\n"
+      "    addOne(x);\n"
+      "    std::cout << \"x = \" << x << \"\\n\";\n"
+      "    shout(\"references avoid copies\");\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "Classes",
+      "#include <iostream>\n"
+      "#include <string>\n"
+      "\n"
+      "class Player {\n"
+      "    std::string name;\n"
+      "    int score;\n"
+      "public:\n"
+      "    Player(std::string n) : name(n), score(0) {}\n"
+      "    void addPoints(int p) { score += p; }\n"
+      "    void show() const {\n"
+      "        std::cout << name << \" has \" << score << \" points\\n\";\n"
+      "    }\n"
+      "};\n"
+      "\n"
+      "int main() {\n"
+      "    Player p(\"Ada\");\n"
+      "    p.addPoints(10);\n"
+      "    p.addPoints(5);\n"
+      "    p.show();\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "Inheritance",
+      "#include <iostream>\n"
+      "\n"
+      "struct Shape {\n"
+      "    virtual double area() const = 0;\n"
+      "    virtual ~Shape() {}\n"
+      "};\n"
+      "\n"
+      "struct Circle : Shape {\n"
+      "    double r;\n"
+      "    Circle(double r) : r(r) {}\n"
+      "    double area() const override { return 3.14159 * r * r; }\n"
+      "};\n"
+      "\n"
+      "struct Square : Shape {\n"
+      "    double s;\n"
+      "    Square(double s) : s(s) {}\n"
+      "    double area() const override { return s * s; }\n"
+      "};\n"
+      "\n"
+      "int main() {\n"
+      "    Circle c(2);\n"
+      "    Square q(3);\n"
+      "    Shape *shapes[] = { &c, &q };\n"
+      "    for (Shape *s : shapes)\n"
+      "        std::cout << \"area = \" << s->area() << \"\\n\";\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "STL: sort and map",
+      "#include <iostream>\n"
+      "#include <string>\n"
+      "#include <vector>\n"
+      "#include <map>\n"
+      "#include <algorithm>\n"
+      "\n"
+      "int main() {\n"
+      "    std::vector<int> v = {5, 2, 9, 1};\n"
+      "    std::sort(v.begin(), v.end());\n"
+      "    for (int n : v) std::cout << n << \" \";\n"
+      "    std::cout << \"\\n\";\n"
+      "\n"
+      "    std::map<std::string, int> ages;\n"
+      "    ages[\"Ada\"] = 36;\n"
+      "    ages[\"Alan\"] = 41;\n"
+      "    for (const auto &p : ages)\n"
+      "        std::cout << p.first << \" is \" << p.second << \"\\n\";\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "Debug me! (has errors)",
+      "#include <iostream>\n"
+      "\n"
+      "int main() {\n"
+      "    int total = 0\n"
+      "    for (int i = 1; i <= 5; i++) {\n"
+      "        total += i;\n"
+      "    }\n"
+      "    std::cout << \"Total is \" << totl << \"\\n\";\n"
+      "    return 0;\n"
+      "}\n", "" },
+    { "Blank sandbox",
+      "#include <iostream>\n"
+      "\n"
+      "int main() {\n"
+      "    // write your own code here\n"
+      "\n"
+      "    return 0;\n"
+      "}\n", "" }
+  }
+};
+
+/* ---------------- engine: compile + run (no graphics in here) ---------------- */
+#define LAB_CAP 12000
+#define LAB_OUTCAP 40000
+
+enum { LAB_READY, LAB_COMPILING, LAB_OK, LAB_COMPILE_ERR, LAB_RUNTIME_ERR, LAB_TIMEOUT, LAB_NO_COMPILER };
+
+static char labBuf[LAB_CAP + 1];
+static int labLen = 0, labCur = 0, labAnc = 0, labWant = -1;
+static int labLang = 0, labEx = 0, labFocus = 0;
+static char labInput[160] = "";
+static int labInLen = 0;
+static char labOut[LAB_OUTCAP + 1];
+static int labOutLen = 0;
+static int labErr[8], labErrN = 0;
+static int labStatus = LAB_READY, labExit = 0;
+static char labRaw[LAB_OUTCAP * 2];
+
+/* a tiny C file linked into every program: stops it after 3 seconds and
+   switches stdout to unbuffered so output appears in the right order */
+static const char LAB_GUARD[] =
+"#include <stdio.h>\n"
+"#ifdef _WIN32\n"
+"#include <windows.h>\n"
+"static DWORD WINAPI lab_wd(LPVOID p) {\n"
+"    (void)p; Sleep(3000);\n"
+"    { const char m[] = \"\\n[Time limit reached: the program ran for more than 3 seconds and was stopped.]\\n\";\n"
+"      DWORD w; WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), m, sizeof m - 1, &w, NULL); }\n"
+"    ExitProcess(124); return 0;\n"
+"}\n"
+"__attribute__((constructor)) static void lab_init(void) {\n"
+"    setvbuf(stdout, NULL, _IONBF, 0); setvbuf(stderr, NULL, _IONBF, 0);\n"
+"    CreateThread(NULL, 0, lab_wd, NULL, 0, NULL);\n"
+"}\n"
+"#else\n"
+"#include <signal.h>\n"
+"#include <unistd.h>\n"
+"static void lab_alarm(int s) {\n"
+"    static const char m[] = \"\\n[Time limit reached: the program ran for more than 3 seconds and was stopped.]\\n\";\n"
+"    ssize_t r = write(1, m, sizeof m - 1); (void)r; (void)s; _exit(124);\n"
+"}\n"
+"__attribute__((constructor)) static void lab_init(void) {\n"
+"    setvbuf(stdout, NULL, _IONBF, 0); setvbuf(stderr, NULL, _IONBF, 0);\n"
+"    signal(SIGALRM, lab_alarm); alarm(3);\n"
+"}\n"
+"#endif\n";
+
+#ifdef _WIN32
+#define LAB_SEP "\\"
+#define LAB_POPEN _popen
+#define LAB_PCLOSE _pclose
+#define LAB_MKDIR(d) _mkdir(d)
+#define LAB_EXE "prog.exe"
+#define LAB_ENVP ""
+#else
+#define LAB_SEP "/"
+#define LAB_POPEN popen
+#define LAB_PCLOSE pclose
+#define LAB_MKDIR(d) mkdir(d, 0755)
+#define LAB_EXE "prog"
+#define LAB_ENVP "LC_ALL=C "          /* plain ASCII compiler messages */
+#endif
+
+static int RunCapture(const char* cmd, char* out, int cap, int* olen)
+{
+    char full[2000];
+#ifdef _WIN32
+    snprintf(full, sizeof full, "\"%s\"", cmd);     /* cmd.exe quote rule */
+#else
+    snprintf(full, sizeof full, "%s", cmd);
+#endif
+    * olen = 0; out[0] = 0;
+    FILE* p = LAB_POPEN(full, "r");
+    if (!p) return -1;
+    char buf[1024];
+    size_t n;
+    int len = 0;
+    while ((n = fread(buf, 1, sizeof buf, p)) > 0)        /* keep draining even when full */
+        for (size_t i = 0; i < n; i++) if (len < cap - 1) out[len++] = buf[i];
+    out[len] = 0;
+    *olen = len;
+    int st = LAB_PCLOSE(p);
+#ifdef _WIN32
+    return st;
+#else
+    if (WIFEXITED(st)) return WEXITSTATUS(st);
+    if (WIFSIGNALED(st)) return 128 + WTERMSIG(st);
+    return -1;
+#endif
+}
+
+static void StrRemove(char* s, const char* needle)
+{
+    size_t nl = strlen(needle);
+    char* p;
+    if (nl == 0) return;
+    while ((p = strstr(s, needle)) != NULL) memmove(p, p + nl, strlen(p + nl) + 1);
+}
+
+/* append text to the output pane, keeping only characters the font can draw */
+static void LabAppend(const char* s, int n)
+{
+    for (int i = 0; i < n && labOutLen < LAB_OUTCAP - 6; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '\r') continue;
+        if (c == '\t') { for (int k = 0; k < 4; k++) labOut[labOutLen++] = ' '; continue; }
+        if (c == '\n' || (c >= 32 && c < 127)) { labOut[labOutLen++] = (char)c; continue; }
+        if (c >= 0x80) {
+            int extra = (c >= 0xF0) ? 3 : (c >= 0xE0) ? 2 : (c >= 0xC0) ? 1 : 0;
+            char r = '?';
+            if (c == 0xE2 && i + 2 < n && (unsigned char)s[i + 1] == 0x80) {      /* curly quotes */
+                unsigned char d = (unsigned char)s[i + 2];
+                if (d == 0x98 || d == 0x99) r = '\'';
+                else if (d == 0x9C || d == 0x9D) r = '"';
+            }
+            labOut[labOutLen++] = r;
+            i += extra;
+        }
+    }
+    labOut[labOutLen] = 0;
+}
+
+static void LabAppendStr(const char* s) { LabAppend(s, (int)strlen(s)); }
+
+/* remember which editor lines the compiler complained about (main.c:LINE:COL: error) */
+static void LabParseErrors(const char* text)
+{
+    const char* p = text;
+    while (*p && labErrN < 8) {
+        const char* e = strchr(p, '\n');
+        int len = e ? (int)(e - p) : (int)strlen(p);
+        char line[300];
+        if (len > 299) len = 299;
+        memcpy(line, p, len);
+        line[len] = 0;
+        int ln = 0, col = 0;
+        if ((sscanf(line, "main.c:%d:%d:", &ln, &col) == 2 || sscanf(line, "main.cpp:%d:%d:", &ln, &col) == 2)
+            && ln > 0 && strstr(line, "error")) {
+            bool dup = false;
+            for (int i = 0; i < labErrN; i++) if (labErr[i] == ln) dup = true;
+            if (!dup) labErr[labErrN++] = ln;
+        }
+        p += len;
+        if (*p == '\n') p++;
+    }
+}
+
+static void LabRun(void)
+{
+    labErrN = 0; labOutLen = 0; labOut[0] = 0; labExit = 0;
+    const char* ext = labLang == 0 ? "c" : "cpp";
+
+    char dir[300];
+#ifdef _WIN32
+    const char* t = getenv("TEMP");
+    snprintf(dir, sizeof dir, "%s\\codequest_lab", t ? t : ".");
+#else
+    snprintf(dir, sizeof dir, "/tmp/codequest_lab");
+#endif
+    LAB_MKDIR(dir);
+
+    char src[360], gc[360], go[360], exe[360], inp[360], cmd[1800];
+    snprintf(src, sizeof src, "%s%smain.%s", dir, LAB_SEP, ext);
+    snprintf(gc, sizeof gc, "%s%sguard.c", dir, LAB_SEP);
+    snprintf(go, sizeof go, "%s%sguard.o", dir, LAB_SEP);
+    snprintf(exe, sizeof exe, "%s%s%s", dir, LAB_SEP, LAB_EXE);
+    snprintf(inp, sizeof inp, "%s%sinput.txt", dir, LAB_SEP);
+
+    FILE* f = fopen(src, "wb");
+    if (!f) { LabAppendStr("[Could not write the temporary file. Is the temp folder writable?]\n"); labStatus = LAB_RUNTIME_ERR; return; }
+    fwrite(labBuf, 1, (size_t)labLen, f);
+    fclose(f);
+
+    f = fopen(gc, "wb");                                  /* time-limit helper */
+    if (f) { fwrite(LAB_GUARD, 1, sizeof LAB_GUARD - 1, f); fclose(f); }
+
+    f = fopen(inp, "wb");                                 /* stdin: "\n" in the box means a new line */
+    if (f) {
+        for (int i = 0; i < labInLen; i++) {
+            if (labInput[i] == '\\' && i + 1 < labInLen && labInput[i + 1] == 'n') { fputc('\n', f); i++; }
+            else fputc(labInput[i], f);
+        }
+        fputc('\n', f);
+        fclose(f);
+    }
+
+    int rawLen = 0, rc;
+    FILE* chk = fopen(go, "rb");
+    if (chk) fclose(chk);
+    else {
+        snprintf(cmd, sizeof cmd, LAB_ENVP "gcc -c \"%s\" -o \"%s\" 2>&1", gc, go);
+        rc = RunCapture(cmd, labRaw, (int)sizeof labRaw, &rawLen);
+        if (rc != 0) goto compile_failed_setup;
+    }
+
+    remove(exe);
+    if (labLang == 0)
+        snprintf(cmd, sizeof cmd, LAB_ENVP "gcc -std=gnu11 -Wall -fdiagnostics-color=never \"%s\" \"%s\" -o \"%s\" -lm 2>&1", src, go, exe);
+    else
+        snprintf(cmd, sizeof cmd, LAB_ENVP "g++ -std=c++17 -Wall -fdiagnostics-color=never \"%s\" \"%s\" -o \"%s\" 2>&1", src, go, exe);
+    rc = RunCapture(cmd, labRaw, (int)sizeof labRaw, &rawLen);
+
+    {   /* show the file as "main.c" instead of its temp path */
+        char n1[320], n2[320];
+        snprintf(n1, sizeof n1, "%s/", dir);
+        snprintf(n2, sizeof n2, "%s\\", dir);
+        StrRemove(labRaw, n1);
+        StrRemove(labRaw, n2);
+        rawLen = (int)strlen(labRaw);
+    }
+
+    if (rc != 0) {
+    compile_failed_setup:
+        if (strstr(labRaw, "not found") || strstr(labRaw, "not recognized")) {
+            labStatus = LAB_NO_COMPILER;
+            LabAppendStr("[Could not run the compiler]\n\n");
+            LabAppendStr(labLang == 0 ? "This lab needs gcc installed and on your PATH.\n" : "This lab needs g++ installed and on your PATH.\n");
+            LabAppendStr("Install it (for example MinGW-w64 on Windows, or the Xcode command line tools on macOS), then try again.\n\n");
+            LabAppend(labRaw, rawLen);
+            return;
+        }
+        labStatus = LAB_COMPILE_ERR;
+        LabAppendStr("[Compile error - fix the problems below and run again]\n\n");
+        int start = labOutLen;
+        LabAppend(labRaw, rawLen);
+        LabParseErrors(labOut + start);
+        return;
+    }
+
+    bool warned = rawLen > 0;
+    if (warned) {
+        LabAppendStr("[Compiler warnings]\n");
+        LabAppend(labRaw, rawLen);
+        LabAppendStr("\n[Program output]\n");
+    }
+
+    snprintf(cmd, sizeof cmd, "\"%s\" < \"%s\" 2>&1", exe, inp);
+    int runLen = 0;
+    labExit = RunCapture(cmd, labRaw, (int)sizeof labRaw, &runLen);
+    int take = runLen;                                    /* keep room for the messages below */
+    if (labOutLen + take > LAB_OUTCAP - 1500) take = LAB_OUTCAP - 1500 - labOutLen;
+    if (take < 0) take = 0;
+    LabAppend(labRaw, take);
+    if (take < runLen) LabAppendStr("\n[Output was cut off because it was very long]\n");
+
+    if (labExit == 124) {                                 /* the guard stops programs after 3 seconds */
+        labStatus = LAB_TIMEOUT;
+        if (!strstr(labRaw, "Time limit reached"))
+            LabAppendStr("\n[Time limit reached: the program ran for more than 3 seconds and was stopped.]\n");
+        LabAppendStr("\nTip: an endless loop is the usual cause. Check your loop conditions.\n");
+    }
+    else if (labExit != 0) {
+        labStatus = LAB_RUNTIME_ERR;
+        const char* why = labExit == 139 ? "Segmentation fault - the program used memory it should not have (bad pointer or array index)."
+            : labExit == 134 ? "Aborted - an assertion failed or an exception was not caught."
+            : labExit == 136 ? "Arithmetic error - for example a division by zero."
+            : NULL;
+        char msg[300];
+        if (why) snprintf(msg, sizeof msg, "\n[Program crashed: %s]\n", why);
+        else     snprintf(msg, sizeof msg, "\n[Program exited with code %d]\n", labExit);
+        if (labOutLen > 0 && labOut[labOutLen - 1] != '\n') LabAppendStr("\n");
+        LabAppendStr(msg);
+    }
+    else {
+        labStatus = LAB_OK;
+        if (runLen == 0) LabAppendStr("[The program finished without printing anything.]\n");
+    }
+}
+/* ==== LAB ENGINE END ==== */
+
+/* ---------------- editor ---------------- */
+/* layout: the console (debug log) sits under the editor, or beside it if you switch */
+static int labW = 1152, labH = 330, labOX = 24, labOY = 480, labOW = 1152, labOH = 200;
+static bool labBottom = true;
+#define LAB_X 24
+#define LAB_Y 140
+#define LAB_W labW
+#define LAB_H labH
+#define LAB_GUT 56
+#define LAB_FS 18
+#define LAB_LH 26
+#define LAB_OX labOX
+#define LAB_OY labOY
+#define LAB_OW labOW
+#define LAB_OH labOH
+
+static void LabLayout(void)
+{
+    if (labBottom) { labW = W - 48; labH = 330; labOX = 24; labOY = 480; labOW = W - 48; labOH = 200; }
+    else { labW = 700;    labH = 536; labOX = 744; labOY = 140; labOW = 432;    labOH = 536; }
+}
+
+static const Color LABC = { 70, 200, 190, 255 };
+static float labSX = 0, labSY = 0, labOutScroll = 0, labHeld[512];
+static bool labInit = false, labDrag = false, labEnsure = false;
+static int labPending = 0;
+
+static bool KeyRep(int key)
+{
+    if (key < 0 || key >= 512) return false;
+    if (IsKeyPressed(key)) { labHeld[key] = 0; return true; }
+    if (IsKeyDown(key)) {
+        labHeld[key] += GetFrameTime();
+        if (labHeld[key] > 0.4f) { labHeld[key] = 0.36f; return true; }
+    }
+    else labHeld[key] = 0;
+    return false;
+}
+
+static int LStart(int i) { while (i > 0 && labBuf[i - 1] != '\n') i--; return i; }
+static int LEnd(int i) { while (i < labLen && labBuf[i] != '\n') i++; return i; }
+static int LineOf(int i) { int n = 0; for (int k = 0; k < i && k < labLen; k++) if (labBuf[k] == '\n') n++; return n; }
+static int LineStartByNo(int n)
+{
+    int i = 0;
+    while (n > 0 && i < labLen) { if (labBuf[i] == '\n') n--; i++; }
+    return i;
+}
+static int SelA(void) { return labCur < labAnc ? labCur : labAnc; }
+static int SelB(void) { return labCur < labAnc ? labAnc : labCur; }
+static bool HasSel(void) { return labCur != labAnc; }
+
+static void LabDelete(int a, int b)
+{
+    if (b <= a) return;
+    memmove(labBuf + a, labBuf + b, (size_t)(labLen - b + 1));
+    labLen -= b - a;
+    labCur = labAnc = a;
+}
+
+static void LabInsert(const char* s, int n)
+{
+    if (HasSel()) LabDelete(SelA(), SelB());
+    if (labLen + n > LAB_CAP) n = LAB_CAP - labLen;
+    if (n <= 0) return;
+    memmove(labBuf + labCur + n, labBuf + labCur, (size_t)(labLen - labCur + 1));
+    memcpy(labBuf + labCur, s, (size_t)n);
+    labLen += n;
+    labCur += n;
+    labAnc = labCur;
+}
+
+static void LabMove(int pos, bool shift)
+{
+    if (pos < 0) pos = 0;
+    if (pos > labLen) pos = labLen;
+    labCur = pos;
+    if (!shift) labAnc = pos;
+}
+
+static void LabUp(bool shift)
+{
+    int s = LStart(labCur), col = labWant >= 0 ? labWant : labCur - s;
+    if (s == 0) { LabMove(0, shift); labWant = col; return; }
+    int ps = LStart(s - 1), plen = (s - 1) - ps;
+    LabMove(ps + (col < plen ? col : plen), shift);
+    labWant = col;
+}
+
+static void LabDown(bool shift)
+{
+    int s = LStart(labCur), col = labWant >= 0 ? labWant : labCur - s, e = LEnd(labCur);
+    if (e >= labLen) { LabMove(labLen, shift); labWant = col; return; }
+    int ns = e + 1, ne = LEnd(ns), nlen = ne - ns;
+    LabMove(ns + (col < nlen ? col : nlen), shift);
+    labWant = col;
+}
+
+static bool IsWordCh(char c) { return isalnum((unsigned char)c) || c == '_'; }
+static int WordLeft(int i)
+{
+    while (i > 0 && !IsWordCh(labBuf[i - 1])) i--;
+    while (i > 0 && IsWordCh(labBuf[i - 1])) i--;
+    return i;
+}
+static int WordRight(int i)
+{
+    while (i < labLen && !IsWordCh(labBuf[i])) i++;
+    while (i < labLen && IsWordCh(labBuf[i])) i++;
+    return i;
+}
+
+static void LabCopy(void)
+{
+    if (!HasSel()) return;
+    char tmp[LAB_CAP + 1];
+    int a = SelA(), n = SelB() - a;
+    memcpy(tmp, labBuf + a, (size_t)n);
+    tmp[n] = 0;
+    SetClipboardText(tmp);
+}
+
+static void LabPaste(void)
+{
+    const char* clip = GetClipboardText();
+    if (!clip) return;
+    char tmp[6000];
+    int n = 0;
+    for (const char* p = clip; *p && n < 5990; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '\n' || (c >= 32 && c < 127)) tmp[n++] = (char)c;
+        else if (c == '\t') { for (int k = 0; k < 4; k++) tmp[n++] = ' '; }
+    }
+    LabInsert(tmp, n);
+}
+
+static void LabLoad(int lang, int ex)
+{
+    labLang = lang; labEx = ex;
+    const LabExample* E = &LAB_EX[lang][ex];
+    snprintf(labBuf, sizeof labBuf, "%s", E->code);
+    labLen = (int)strlen(labBuf);
+    labCur = labAnc = 0; labWant = -1;
+    labSX = labSY = labOutScroll = 0;
+    snprintf(labInput, sizeof labInput, "%s", E->input);
+    labInLen = (int)strlen(labInput);
+    labOutLen = 0; labOut[0] = 0; labErrN = 0;
+    labStatus = LAB_READY; labPending = 0;
+}
+
+static void LabRequestRun(void)
+{
+    if (labPending == 0) { labPending = 1; labStatus = LAB_COMPILING; labOutScroll = 0; }
+}
+
+static char stashBuf[LAB_CAP + 1];
+static int stLen = 0, stCur = 0, stAnc = 0, labOwner = 0;       /* labOwner: 0 = Coding Lab, 1 = Farm */
+
+static void StashSwap(void)
+{
+    char tmp[LAB_CAP + 1];
+    memcpy(tmp, labBuf, sizeof tmp); memcpy(labBuf, stashBuf, sizeof tmp); memcpy(stashBuf, tmp, sizeof tmp);
+    int t = labLen; labLen = stLen; stLen = t;
+    t = labCur; labCur = stCur; stCur = t;
+    t = labAnc; labAnc = stAnc; stAnc = t;
+    labSX = labSY = 0;
+}
+
+static void StartLab(void)
+{
+    if (labOwner == 1) { StashSwap(); labOwner = 0; }
+    if (!labInit) { LabLoad(0, 0); labInit = true; }
+    screen = SCR_LAB;
+    labPending = 0;
+    if (labStatus == LAB_COMPILING) labStatus = LAB_READY;
+}
+
+static void LabEdit(void)
+{
+    bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) || IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
+    bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+
+    if (IsKeyPressed(KEY_F5) || (ctrl && IsKeyPressed(KEY_ENTER))) LabRequestRun();
+
+    int ch;
+    while ((ch = GetCharPressed()) > 0) {
+        if (ctrl || ch < 32 || ch > 126) continue;
+        if (labFocus == 1) {
+            if (labInLen < 150) { labInput[labInLen++] = (char)ch; labInput[labInLen] = 0; }
+            continue;
+        }
+        if (ch == '}' && !HasSel()) {                       /* closing brace steps back one indent */
+            int ls = LStart(labCur);
+            bool onlySp = true;
+            for (int k = ls; k < labCur; k++) if (labBuf[k] != ' ') onlySp = false;
+            if (onlySp && labCur - ls >= 4) LabDelete(labCur - 4, labCur);
+        }
+        char c = (char)ch;
+        LabInsert(&c, 1);
+        labWant = -1; labEnsure = true;
+    }
+
+    if (labFocus == 1) {                                    /* the stdin box */
+        if (KeyRep(KEY_BACKSPACE) && labInLen > 0) labInput[--labInLen] = 0;
+        if (IsKeyPressed(KEY_ENTER)) LabRequestRun();
+        return;
+    }
+
+    if (ctrl && IsKeyPressed(KEY_A)) { labAnc = 0; labCur = labLen; return; }
+    if (ctrl && IsKeyPressed(KEY_C)) { LabCopy(); return; }
+    if (ctrl && IsKeyPressed(KEY_X)) { LabCopy(); if (HasSel()) LabDelete(SelA(), SelB()); labEnsure = true; return; }
+    if (ctrl && IsKeyPressed(KEY_V)) { LabPaste(); labWant = -1; labEnsure = true; return; }
+
+    if (KeyRep(KEY_LEFT)) {
+        if (ctrl) LabMove(WordLeft(labCur), shift);
+        else if (HasSel() && !shift) LabMove(SelA(), false);
+        else LabMove(labCur - 1, shift);
+        labWant = -1; labEnsure = true;
+    }
+    if (KeyRep(KEY_RIGHT)) {
+        if (ctrl) LabMove(WordRight(labCur), shift);
+        else if (HasSel() && !shift) LabMove(SelB(), false);
+        else LabMove(labCur + 1, shift);
+        labWant = -1; labEnsure = true;
+    }
+    if (KeyRep(KEY_UP)) { LabUp(shift);   labEnsure = true; }
+    if (KeyRep(KEY_DOWN)) { LabDown(shift); labEnsure = true; }
+    if (KeyRep(KEY_PAGE_UP)) { for (int i = 0; i < 15; i++) LabUp(shift);   labEnsure = true; }
+    if (KeyRep(KEY_PAGE_DOWN)) { for (int i = 0; i < 15; i++) LabDown(shift); labEnsure = true; }
+    if (IsKeyPressed(KEY_HOME)) { LabMove(ctrl ? 0 : LStart(labCur), shift); labWant = -1; labEnsure = true; }
+    if (IsKeyPressed(KEY_END)) { LabMove(ctrl ? labLen : LEnd(labCur), shift); labWant = -1; labEnsure = true; }
+
+    if (KeyRep(KEY_BACKSPACE)) {
+        if (HasSel()) LabDelete(SelA(), SelB());
+        else if (labCur > 0) LabDelete(labCur - 1, labCur);
+        labWant = -1; labEnsure = true;
+    }
+    if (KeyRep(KEY_DELETE)) {
+        if (HasSel()) LabDelete(SelA(), SelB());
+        else if (labCur < labLen) LabDelete(labCur, labCur + 1);
+        labWant = -1; labEnsure = true;
+    }
+    if (!ctrl && (KeyRep(KEY_ENTER) || KeyRep(KEY_KP_ENTER))) {          /* new line with auto-indent */
+        if (HasSel()) LabDelete(SelA(), SelB());
+        int ls = LStart(labCur), ind = 0;
+        while (ls + ind < labCur && labBuf[ls + ind] == ' ') ind++;
+        char prev = labCur > 0 ? labBuf[labCur - 1] : 0, next = labBuf[labCur];
+        char tmp[200];
+        int n = 0;
+        tmp[n++] = '\n';
+        for (int k = 0; k < ind && n < 90; k++) tmp[n++] = ' ';
+        if (prev == '{') for (int k = 0; k < 4; k++) tmp[n++] = ' ';
+        if (prev == '{' && next == '}') {                                 /* {|}  ->  open the block */
+            int mid = n;
+            tmp[n++] = '\n';
+            for (int k = 0; k < ind && n < 190; k++) tmp[n++] = ' ';
+            LabInsert(tmp, n);
+            labCur = labAnc = labCur - (n - mid);
+        }
+        else {
+            LabInsert(tmp, n);
+        }
+        labWant = -1; labEnsure = true;
+    }
+    if (KeyRep(KEY_TAB)) { LabInsert("    ", 4); labWant = -1; labEnsure = true; }
+}
+
+static int LabPosFromMouse(float mx, float my, float cw)
+{
+    int nl = LineOf(labLen);
+    int ln = (int)((my - (LAB_Y + 10) + labSY) / LAB_LH);
+    if (ln < 0) ln = 0;
+    if (ln > nl) ln = nl;
+    int s = LineStartByNo(ln), e = LEnd(s);
+    int col = (int)((mx - (LAB_X + LAB_GUT + 12) + labSX) / cw + 0.5f);
+    if (col < 0) col = 0;
+    if (col > e - s) col = e - s;
+    return s + col;
+}
+
+static void LabKeepCursorVisible(float cw)
+{
+    int line = LineOf(labCur), col = labCur - LStart(labCur);
+    float top = line * (float)LAB_LH, viewH = LAB_H - 24.0f, viewW = LAB_W - LAB_GUT - 30.0f;
+    if (top < labSY) labSY = top;
+    if (top + LAB_LH > labSY + viewH) labSY = top + LAB_LH - viewH;
+    float x = col * cw;
+    if (x < labSX) labSX = x;
+    if (x + cw * 2 > labSX + viewW) labSX = x + cw * 4 - viewW;
+}
+
+static void LabDrawEditor(float cw)
+{
+    Rectangle ed = { LAB_X, LAB_Y, LAB_W, LAB_H };
+    bool hover = CheckCollisionPointRec(GetMousePosition(), ed);
+    Panel(ed, 0.02f, CODEBG, labFocus == 0 ? LABC : BORDER);
+
+    int nLines = LineOf(labLen) + 1, maxLen = 0;
+    for (int s = 0; s < labLen + 1;) { int e = LEnd(s); if (e - s > maxLen) maxLen = e - s; s = e + 1; }
+
+    if (hover) labSY -= GetMouseWheelMove() * LAB_LH * 3;
+    float maxSY = nLines * (float)LAB_LH + 24 - LAB_H; if (maxSY < 0) maxSY = 0;
+    float maxSX = maxLen * cw - (LAB_W - LAB_GUT - 30); if (maxSX < 0) maxSX = 0;
+    if (labSY < 0) labSY = 0;
+    if (labSY > maxSY) labSY = maxSY;
+    if (labSX < 0) labSX = 0;
+    if (labSX > maxSX) labSX = maxSX;
+
+    int curLine = LineOf(labCur);
+    BeginScissorMode(LAB_X + 1, LAB_Y + 1, LAB_W - 2, LAB_H - 2);
+    int first = (int)(labSY / LAB_LH);
+    int s = LineStartByNo(first);
+    float tx = LAB_X + LAB_GUT + 12 - labSX;
+    for (int ln = first; ln < nLines; ln++) {
+        float y = LAB_Y + 10 + ln * (float)LAB_LH - labSY;
+        if (y > LAB_Y + LAB_H) break;
+        int e = LEnd(s);
+        char line[512];
+        int n = e - s;
+        if (n > 511) n = 511;
+        memcpy(line, labBuf + s, (size_t)n);
+        line[n] = 0;
+
+        bool isErr = false;
+        for (int k = 0; k < labErrN; k++) if (labErr[k] == ln + 1) isErr = true;
+        if (isErr) DrawRectangle(LAB_X + 1, (int)y - 2, LAB_W - 2, LAB_LH, Fade(BAD, 0.16f));
+        else if (ln == curLine && !HasSel() && labFocus == 0) DrawRectangle(LAB_X + 1, (int)y - 2, LAB_W - 2, LAB_LH, Fade(WHITE, 0.04f));
+
+        if (HasSel() && SelB() > s && SelA() <= e) {                    /* selection highlight */
+            int from = (SelA() > s ? SelA() : s) - s, to = (SelB() < e ? SelB() : e) - s;
+            if (SelB() > e) to += 1;
+            DrawRectangle((int)(tx + from * cw), (int)y - 2, (int)((to - from) * cw), LAB_LH, Fade(LABC, 0.32f));
+        }
+        HighlightLine(line, tx, y + 2, LAB_FS, cw);
+
+        if (labFocus == 0 && ln == curLine && ((int)(GetTime() * 2) & 1) == 0)
+            DrawRectangle((int)(tx + (labCur - s) * cw), (int)y, 2, LAB_LH - 4, WHITE);
+        s = e + 1;
+    }
+    EndScissorMode();
+
+    /* gutter drawn over the text so scrolled code never shows through */
+    DrawRectangle(LAB_X + 1, LAB_Y + 1, LAB_GUT, LAB_H - 2, (Color) { 17, 20, 29, 255 });
+    DrawLine(LAB_X + LAB_GUT, LAB_Y + 1, LAB_X + LAB_GUT, LAB_Y + LAB_H - 1, BORDER);
+    BeginScissorMode(LAB_X + 1, LAB_Y + 1, LAB_GUT, LAB_H - 2);
+    for (int ln = first; ln < nLines; ln++) {
+        float y = LAB_Y + 10 + ln * (float)LAB_LH - labSY;
+        if (y > LAB_Y + LAB_H) break;
+        bool isErr = false;
+        for (int k = 0; k < labErrN; k++) if (labErr[k] == ln + 1) isErr = true;
+        const char* num = TextFormat("%d", ln + 1);
+        float nw = MeasureTextEx(fCode, num, LAB_FS, 0).x;
+        DrawTextEx(fCode, num, (Vector2) { LAB_X + LAB_GUT - 12 - nw, y + 2 }, LAB_FS, 0,
+            isErr ? BAD : (ln == curLine ? (Color) { 190, 196, 215, 255 } : (Color) { 76, 84, 108, 255 }));
+        if (isErr) DrawCircle(LAB_X + 12, (int)y + LAB_LH / 2 - 2, 4, BAD);
+    }
+    EndScissorMode();
+}
+
+static void LabDrawOutput(float cw)
+{
+    Rectangle op = { LAB_OX, LAB_OY, LAB_OW, LAB_OH };
+    Panel(op, 0.02f, CODEBG, BORDER);
+    Txt(fBold, "Output", LAB_OX + 18, LAB_OY + 10, 19, TXT);
+
+    static const char* stName[7] = { "Ready", "Compiling...", "Ran successfully", "Compile error", "Runtime error", "Timed out", "No compiler found" };
+    Color stCol = labStatus == LAB_OK ? GOOD
+        : (labStatus == LAB_COMPILE_ERR || labStatus == LAB_RUNTIME_ERR || labStatus == LAB_NO_COMPILER) ? BAD
+        : (labStatus == LAB_READY ? DIM : (Color) { 240, 180, 60, 255 });
+    float pw = TxtW(fMed, stName[labStatus], 14) + 28;
+    Pill(stName[labStatus], LAB_OX + LAB_OW - 16 - pw, LAB_OY + 10, stCol);
+    DrawLine(LAB_OX + 1, LAB_OY + 46, LAB_OX + LAB_OW - 1, LAB_OY + 46, BORDER);
+
+    if (labOutLen == 0) {
+        Wrapped(fReg, labStatus == LAB_COMPILING ? "Compiling and running..." : "Press Run (or F5) to compile and run your code. Errors and program output appear here.",
+            LAB_OX + 18, LAB_OY + 62, LAB_OW - 36, 16, DIM);
+        return;
+    }
+
+    int cols = (int)((LAB_OW - 36) / cw);
+    if (cols < 10) cols = 10;
+    const float lh = 24;
+    bool hover = CheckCollisionPointRec(GetMousePosition(), op);
+    if (hover) labOutScroll -= GetMouseWheelMove() * lh * 3;
+
+    BeginScissorMode(LAB_OX + 1, LAB_OY + 48, LAB_OW - 2, LAB_OH - 50);
+    float y = LAB_OY + 56 - labOutScroll, startY = LAB_OY + 56;
+    const char* p = labOut;
+    while (*p) {
+        const char* e = strchr(p, '\n');
+        int len = e ? (int)(e - p) : (int)strlen(p);
+        char line[300];
+        int cl = len > 299 ? 299 : len;
+        memcpy(line, p, (size_t)cl);
+        line[cl] = 0;
+        Color col = (Color){ 215, 218, 235, 255 };
+        if (line[0] == '[') col = DIM;
+        else if (strstr(line, "error") || strstr(line, "Error")) col = (Color){ 255, 130, 140, 255 };
+        else if (strstr(line, "warning")) col = (Color){ 240, 190, 80, 255 };
+        else if (strstr(line, "note:")) col = (Color){ 120, 200, 210, 255 };
+        if (len == 0) y += lh;
+        else for (int off = 0; off < len; off += cols) {
+            char chunk[160];
+            int cn = len - off < cols ? len - off : cols;
+            if (cn > 159) cn = 159;
+            if (off + cn > cl) cn = cl > off ? cl - off : 0;
+            memcpy(chunk, line + off, (size_t)cn);
+            chunk[cn] = 0;
+            if (y > LAB_OY + 30 && y < LAB_OY + LAB_OH) DrawTextEx(fCode, chunk, (Vector2) { LAB_OX + 18, y }, LAB_FS, 0, col);
+            y += lh;
+        }
+        p += len;
+        if (*p == '\n') p++;
+    }
+    EndScissorMode();
+    float total = y + labOutScroll - startY, maxS = total - (LAB_OH - 70);
+    if (maxS < 0) maxS = 0;
+    if (labOutScroll < 0) labOutScroll = 0;
+    if (labOutScroll > maxS) labOutScroll = maxS;
+}
+
+/* first successful run of code you changed earns a few credits */
+static void LabReward(void)
+{
+    if (labStatus != LAB_OK || gm.labDone[labLang][labEx]) return;
+    if (strcmp(labBuf, LAB_EX[labLang][labEx].code) == 0) return;
+    gm.labDone[labLang][labEx] = 1;
+    bool dbg = strstr(LAB_EX[labLang][labEx].title, "Debug") != NULL;
+    GainCredits(dbg ? 15 : 5, dbg ? "Bug fixed!" : "Your own code ran");
+}
+
+static void DrawLab(void)
+{
+    if (labPending == 2) { LabRun(); labPending = 0; LabReward(); }       /* run one frame after "Compiling..." is shown */
+    else if (labPending == 1) labPending = 2;
+
+    LabLayout();
+    float cw = MeasureTextEx(fCode, "M", LAB_FS, 0).x;
+    LabEdit();
+
+    /* mouse: place cursor / select / change focus */
+    Rectangle ed = { LAB_X, LAB_Y, LAB_W, LAB_H };
+    Rectangle inb = { LAB_X + 146, 688, LAB_W - 146, 40 };
+    Vector2 m = GetMousePosition();
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        if (CheckCollisionPointRec(m, ed)) {
+            labFocus = 0;
+            bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+            LabMove(LabPosFromMouse(m.x, m.y, cw), shift);
+            labDrag = true; labWant = -1;
+        }
+        else if (CheckCollisionPointRec(m, inb)) {
+            labFocus = 1;
+        }
+    }
+    if (labDrag) {
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) { labCur = LabPosFromMouse(m.x, m.y, cw); labWant = -1; }
+        else labDrag = false;
+    }
+    if (labEnsure) { LabKeepCursorVisible(cw); labEnsure = false; }
+    if (CheckCollisionPointRec(m, ed) || CheckCollisionPointRec(m, inb)) ibeam = true;
+
+    /* ---- top bar ---- */
+    TopBar();
+    if (Button((Rectangle) { 24, 14, 124, 44 }, BACKL, SURF2, 16)) GoMenu();
+    Txt(fBold, "Coding Lab", 168, 17, 25, LABC);
+    const char* cinfo = labLang == 0 ? "Compiles with gcc (C11)" : "Compiles with g++ (C++17)";
+    Txt(fReg, cinfo, W - 36 - TxtW(fReg, cinfo, 15), 26, 15, DIM);
+
+    /* ---- toolbar: language, example, reset, run ---- */
+    Panel((Rectangle) { 24, 86, 176, 44 }, 0.3f, SURF, BORDER);
+    for (int l = 0; l < 2; l++) {
+        Rectangle r = { 28.0f + l * 84, 90, 84, 36 };
+        bool hov = CheckCollisionPointRec(m, r);
+        if (hov) hand = true;
+        if (l == labLang) DrawRectangleRounded(r, 0.3f, 8, ACCENTS[l]);
+        CenterTxt(fBold, LANG_NAME[l], r.x + r.width / 2, r.y + 6, 18, l == labLang ? WHITE : DIM);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && l != labLang) LabLoad(l, 0);
+    }
+    if (Button((Rectangle) { 216, 86, 44, 44 }, "<", SURF2, 20)) LabLoad(labLang, (labEx + LAB_NEX - 1) % LAB_NEX);
+    Panel((Rectangle) { 266, 86, 330, 44 }, 0.3f, SURF, BORDER);
+    bool dirty = strcmp(labBuf, LAB_EX[labLang][labEx].code) != 0;
+    TxtFit(fMed, TextFormat("%d/%d   %s", labEx + 1, LAB_NEX, LAB_EX[labLang][labEx].title), 282, 95, 17, dirty ? 240 : 290, TXT);
+    if (dirty) Txt(fReg, "edited", 596 - 16 - TxtW(fReg, "edited", 14), 99, 14, (Color) { 240, 180, 60, 255 });
+    if (Button((Rectangle) { 602, 86, 44, 44 }, ">", SURF2, 20)) LabLoad(labLang, (labEx + 1) % LAB_NEX);
+    if (Button((Rectangle) { 660, 86, 116, 44 }, "Reset", SURF2, 17)) LabLoad(labLang, labEx);
+    if (Button((Rectangle) { 790, 86, 180, 44 }, labBottom ? "Console: Bottom" : "Console: Side", SURF2, 16)) { labBottom = !labBottom; labSX = labSY = labOutScroll = 0; }
+
+    Rectangle rb = { W - 24 - 190, 86, 190, 44 };
+    bool busy = labPending != 0;
+    if (Button(rb, busy ? "   Running..." : "     Run", busy ? SURF2 : (Color) { 36, 160, 100, 255 }, 18) && !busy) LabRequestRun();
+    if (!busy) DrawTriangle((Vector2) { rb.x + 52, rb.y + 13 }, (Vector2) { rb.x + 52, rb.y + 31 }, (Vector2) { rb.x + 68, rb.y + 22 }, WHITE);
+
+    /* ---- panels ---- */
+    LabDrawEditor(cw);
+    LabDrawOutput(cw);
+
+    /* ---- stdin box ---- */
+    Txt(fMed, "Input (stdin):", LAB_X, 698, 17, DIM);
+    Panel(inb, 0.2f, SURF, labFocus == 1 ? LABC : BORDER);
+    if (labInLen == 0) TxtFit(fReg, "Text for scanf / cin to read. Use \\n for a new line.", inb.x + 14, 698, 15, inb.width - 28, DIM);
+    else DrawTextEx(fCode, labInput, (Vector2) { inb.x + 14, inb.y + 9 }, LAB_FS, 0, TXT);
+    if (labFocus == 1 && ((int)(GetTime() * 2) & 1) == 0)
+        DrawRectangle((int)(inb.x + 14 + labInLen * cw), (int)inb.y + 8, 2, 24, WHITE);
+    TxtFit(fReg, "F5 or Ctrl+Enter: run     Ctrl+A / C / X / V     Tab: 4 spaces     Esc: leave the lab (your code is kept)",
+        LAB_X, 736, 13, W - 48, DIM);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Campus Shop: spend credits on outfits, hats, hair, bags and trails  */
+/* ------------------------------------------------------------------ */
+static int shopCat = 0;
+
+static void StartShop(void) { screen = SCR_SHOP; }
+
+static void ShopBuy(int cat, int i, float cx, float cy)
+{
+    const Item* it = &ITEMS[cat][i];
+    if (gm.credits < it->price) {
+        Notify(TextFormat("Not enough credits - you need %d more", it->price - gm.credits), BAD);
+        return;
+    }
+    gm.credits -= it->price;
+    gm.owned[cat][i] = 1;
+    gm.eq[cat] = (unsigned char)i;
+    SaveGame();
+    Notify(TextFormat("Bought %s!", it->name), GOOD);
+    Burst(cx, cy, 36);
+}
+
+/* a few sample particles so trails can be previewed on a card */
+static void DrawTrailGlyph(int kind, float cx, float cy)
+{
+    float t = (float)GetTime();
+    for (int k = 0; k < 4; k++) {
+        Trail tr;
+        tr.kind = kind; tr.max = 1.0f; tr.life = 0.55f + 0.4f * sinf(t * 2.0f + k * 1.7f) * 0.5f + 0.2f;
+        tr.x = tr.y = tr.vx = tr.vy = 0;
+        DrawTrailBit(&tr, cx - 36 + k * 24, cy + sinf(t * 2.5f + k) * 8 - (k & 1) * 14);
+    }
+}
+
+static void DrawShop(void)
+{
+    float dt = GetFrameTime();
+    if (dt > 0.05f) dt = 0.05f;
+    const Color gold = { 255, 205, 90, 255 }, soft = { 205, 211, 228, 255 };
+    Vector2 m = GetMousePosition();
+
+    TopBar();
+    if (Button((Rectangle) { 24, 14, 124, 44 }, BACKL, SURF2, 16)) { GoMenu(); return; }
+    Txt(fBold, "Campus Shop", 168, 17, 25, gold);
+    DrawCreditsChip(W - 36, 16);
+    if (IsKeyPressed(KEY_RIGHT)) shopCat = (shopCat + 1) % NCAT;
+    if (IsKeyPressed(KEY_LEFT))  shopCat = (shopCat + NCAT - 1) % NCAT;
+
+    /* which card is the mouse over? (used for the try-before-you-buy preview) */
+    const float gx = 396, gy = 150, cwid = 181, chei = 250;
+    int hovIdx = -1;
+    for (int i = 0; i < ITEMN[shopCat]; i++) {
+        Rectangle c = { gx + (i % 4) * 195.0f, gy + (i / 4) * 262.0f, cwid, chei };
+        if (CheckCollisionPointRec(m, c)) hovIdx = i;
+    }
+
+    /* ---------- the mannequin ---------- */
+    Rectangle pv = { 36, 92, 340, 632 };
+    Panel(pv, 0.05f, SURF, BORDER);
+    DrawRectangleGradientV((int)pv.x + 1, (int)pv.y + 1, (int)pv.width - 2, 400, (Color) { 38, 50, 98, 255 }, (Color) { 96, 72, 124, 255 });
+    DrawRectangle((int)pv.x + 1, (int)pv.y + 340, (int)pv.width - 2, 61, (Color) { 62, 54, 84, 255 });
+    DrawRectangle((int)pv.x + 1, (int)pv.y + 340, (int)pv.width - 2, 3, (Color) { 120, 104, 150, 255 });
+    for (int k = 0; k < 14; k++) {                                              /* twinkling stars */
+        float sx = pv.x + 20 + fmodf(k * 61.0f, pv.width - 40), sy = pv.y + 14 + fmodf(k * 37.0f, 160.0f);
+        DrawCircle((int)sx, (int)sy, 1.5f, Fade(WHITE, 0.4f + 0.4f * sinf((float)GetTime() * 2 + k)));
+    }
+    Glow(pv.x + 170, pv.y + 250, 170, (Color) { 255, 220, 160, 255 }, 0.45f);
+
+    unsigned char tmp[NCAT];
+    memcpy(tmp, gm.eq, sizeof tmp);
+    if (hovIdx >= 0) tmp[shopCat] = (unsigned char)hovIdx;
+    Look look = LookFrom(tmp);
+    static const int turn[4] = { 0, 2, 3, 1 };
+    int d = turn[((int)((float)GetTime() / 1.8f)) & 3];
+    if (shopCat == 3 && hovIdx >= 0) d = 3;                                      /* bags are shown from behind */
+    DrawPersonEx(pv.x + 170, pv.y + 392, d, 4.2f, 0, &look);
+    if (tmp[4] > 0) DrawTrailGlyph(ITEMS[4][tmp[4]].kind, pv.x + 170, pv.y + 380);
+
+    float ly = pv.y + 404;
+    Txt(fBold, hovIdx >= 0 ? "Trying on" : "Wearing", pv.x + 22, ly, 15, hovIdx >= 0 ? gold : DIM);
+    for (int c = 0; c < NCAT; c++) {
+        const char* nm = ITEMS[c][tmp[c]].name;
+        Txt(fReg, CATNAME[c], pv.x + 22, ly + 26 + c * 22, 15, DIM);
+        TxtFit(fMed, nm, pv.x + 110, ly + 26 + c * 22, 15, pv.width - 132, (c == shopCat && hovIdx >= 0) ? gold : TXT);
+    }
+    Wrapped(fReg, "Earn credits from quizzes, lessons, Daily Quests, Battle Arena wins and fixing code in the Coding Lab.",
+        pv.x + 22, pv.y + 548, pv.width - 44, 14, DIM);
+
+    /* ---------- category tabs ---------- */
+    for (int c = 0; c < NCAT; c++) {
+        Rectangle r = { 396.0f + c * 155, 92, 147, 44 };
+        bool hov = CheckCollisionPointRec(m, r), active = (c == shopCat);
+        if (hov) hand = true;
+        Panel(r, 0.3f, active ? (Color) { 74, 62, 32, 255 } : SURF, active ? gold : (hov ? DIM : BORDER));
+        int owned = 0;
+        for (int i = 0; i < ITEMN[c]; i++) owned += gm.owned[c][i] ? 1 : 0;
+        CenterFit(fBold, CATNAME[c], r.x + r.width / 2, r.y + 5, 17, r.width - 16, active ? gold : TXT);
+        CenterTxt(fReg, TextFormat("%d / %d", owned, ITEMN[c]), r.x + r.width / 2, r.y + 25, 12, DIM);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) shopCat = c;
+    }
+
+    /* ---------- item cards ---------- */
+    for (int i = 0; i < ITEMN[shopCat]; i++) {
+        const Item* it = &ITEMS[shopCat][i];
+        Rectangle c = { gx + (i % 4) * 195.0f, gy + (i / 4) * 262.0f, cwid, chei };
+        bool hov = (i == hovIdx), owned = gm.owned[shopCat][i], worn = (gm.eq[shopCat] == i);
+        Panel(c, 0.07f, hov ? SURF2 : SURF, worn ? GOOD : (hov ? gold : BORDER));
+
+        Rectangle win = { c.x + 8, c.y + 8, c.width - 16, 150 };
+        DrawRectangleRounded(win, 0.1f, 6, (Color) { 22, 26, 40, 255 });
+        DrawRectangleGradientV((int)win.x + 2, (int)win.y + 2, (int)win.width - 4, 100, (Color) { 34, 42, 70, 255 }, (Color) { 22, 26, 40, 255 });
+        unsigned char tc[NCAT];
+        memcpy(tc, gm.eq, sizeof tc);
+        tc[shopCat] = (unsigned char)i;
+        Look pl = LookFrom(tc);
+        if (shopCat == 4) {
+            Look plain = LookFrom(gm.eq);
+            DrawPersonEx(c.x + c.width / 2 - 30, c.y + 146, 2, 1.5f, 0, &plain);
+            if (i > 0) DrawTrailGlyph(it->kind, c.x + c.width / 2 + 24, c.y + 120);
+        }
+        else {
+            DrawPersonEx(c.x + c.width / 2, c.y + 146, shopCat == 3 ? 3 : 0, shopCat == 1 ? 1.5f : 1.7f, 0, &pl);
+        }
+        if (it->price >= 300) {                                                       /* shiny corner for premium items */
+            BeginBlendMode(BLEND_ADDITIVE);
+            DrawCircle((int)(win.x + win.width - 14), (int)(win.y + 14), 5 + sinf((float)GetTime() * 4) * 1.5f, Fade(gold, 0.6f));
+            EndBlendMode();
+        }
+
+        TxtFit(fBold, it->name, c.x + 12, c.y + 164, 17, c.width - 24, TXT);
+        if (worn)       Txt(fMed, "Equipped", c.x + 12, c.y + 190, 15, GOOD);
+        else if (owned) Txt(fMed, "Owned", c.x + 12, c.y + 190, 15, DIM);
+        else if (it->price == 0) Txt(fMed, "Free", c.x + 12, c.y + 190, 15, DIM);
+        else {
+            DrawCoin(c.x + 20, c.y + 199, 8);
+            Txt(fBold, TextFormat("%d", it->price), c.x + 34, c.y + 190, 16, gm.credits >= it->price ? gold : (Color) { 240, 110, 110, 255 });
+        }
+
+        Rectangle b = { c.x + 10, c.y + 210, c.width - 20, 32 };
+        if (worn) {
+            DrawRectangleRounded(b, 0.3f, 8, Fade(GOOD, 0.18f));
+            CenterTxt(fMed, "Equipped", b.x + b.width / 2, b.y + 6, 15, GOOD);
+        }
+        else if (owned) {
+            if (Button(b, "Equip", ACCENTS[0], 15)) { gm.eq[shopCat] = (unsigned char)i; SaveGame(); }
+        }
+        else {
+            bool can = gm.credits >= it->price;
+            if (Button(b, "Buy", can ? (Color) { 36, 150, 96, 255 } : (Color) { 82, 86, 108, 255 }, 15)) ShopBuy(shopCat, i, c.x + c.width / 2, c.y + 80);
+        }
+    }
+
+    CenterTxt(fReg, "Left / right arrows switch category.   Hover an item to try it on.", 396 + 768 / 2.0f, 700, 14, soft);
+    UpdateSparks(dt);
+    DrawSparks();
+}
+
+/* ------------------------------------------------------------------ */
 /*  main                                                               */
 /* ------------------------------------------------------------------ */
+/* ---- Lawn Mower Farm: runtime sources (compiled together with the player's code) ---- */
+static const int FARM_GROW[5] = { 0, 6, 14, 24, 40 };
+static const int FARM_YIELD[5] = { 0, 1, 2, 2, 3 };
+#define FARM_ACTION_LIMIT 3000
+static const char FARM_H_SRC[] =
+"#ifndef FARM_H\n"
+"#define FARM_H\n"
+"/* ===== Lawn Mower Farm - the functions your code can call =====\n"
+" *\n"
+" *  Write  void farm(void) { ... }  in your file. The program runs it once,\n"
+" *  then replays everything your mower did on the lawn.\n"
+" *\n"
+" *  move(dir)      go NORTH / EAST / SOUTH / WEST (the lawn wraps around)\n"
+" *  harvest()      cut or pick whatever is on this tile (mow() does the same)\n"
+" *  can_harvest()  1 when the plant here is fully grown\n"
+" *  plant(ENT_..)  plant a bush, carrot or pumpkin (once unlocked)\n"
+" *  till()         turn grass into soil, or soil back into grass\n"
+" *  get_entity()   what is here:  ENT_NONE / ENT_GRASS / ENT_BUSH / ENT_CARROT / ENT_PUMPKIN\n"
+" *  get_ground()   GROUND_GRASS or GROUND_SOIL\n"
+" *  get_pos_x(), get_pos_y(), get_world_size()\n"
+" *  num_items(ITEM_HAY / ITEM_WOOD / ITEM_CARROT / ITEM_PUMPKIN)\n"
+" *  do_a_flip()    a victory spin (costs one action)\n"
+" */\n"
+"#define NORTH 0\n"
+"#define EAST  1\n"
+"#define SOUTH 2\n"
+"#define WEST  3\n"
+"\n"
+"#define GROUND_GRASS 0\n"
+"#define GROUND_SOIL  1\n"
+"\n"
+"#define ENT_NONE    0\n"
+"#define ENT_GRASS   1\n"
+"#define ENT_BUSH    2\n"
+"#define ENT_CARROT  3\n"
+"#define ENT_PUMPKIN 4\n"
+"\n"
+"#define ITEM_HAY     0\n"
+"#define ITEM_WOOD    1\n"
+"#define ITEM_CARROT  2\n"
+"#define ITEM_PUMPKIN 3\n"
+"\n"
+"void farm(void);          /* you write this one */\n"
+"\n"
+"int  move(int dir);\n"
+"int  harvest(void);\n"
+"int  mow(void);\n"
+"int  can_harvest(void);\n"
+"int  plant(int entity);\n"
+"int  till(void);\n"
+"int  get_entity(void);\n"
+"int  get_ground(void);\n"
+"int  get_pos_x(void);\n"
+"int  get_pos_y(void);\n"
+"int  get_world_size(void);\n"
+"int  num_items(int item);\n"
+"void do_a_flip(void);\n"
+"\n"
+"#endif\n"
+;
+static const char FARM_RT_SRC[] =
+"#include <stdio.h>\n"
+"#include <stdlib.h>\n"
+"#include <string.h>\n"
+"#include \"farm.h\"\n"
+"\n"
+"/* The simulation behind the API. The app replays the trace this writes. */\n"
+"#define MAXN 8\n"
+"#define ACTION_LIMIT 3000\n"
+"\n"
+"static const int GROW[5]   = { 0, 6, 14, 24, 40 };   /* ticks to grow */\n"
+"static const int YIELDN[5] = { 0, 1, 2, 2, 3 };   /* items per harvest */\n"
+"static const int YITEM[5]  = { -1, ITEM_HAY, ITEM_WOOD, ITEM_CARROT, ITEM_PUMPKIN };\n"
+"\n"
+"static int N = 3, px = 0, py = 0, tick = 0, actions = 0, msgs = 0, finished = 0;\n"
+"static int ground[MAXN][MAXN], ent[MAXN][MAXN], planted[MAXN][MAXN];\n"
+"static int inv[4];\n"
+"static int uBush, uTill, uCarrot, uPumpkin;\n"
+"static FILE *tr;\n"
+"\n"
+"static void say(const char *m)\n"
+"{\n"
+"    if (msgs++ < 12) fprintf(stderr, \"[farm] %s\\n\", m);\n"
+"    else if (msgs == 13) fprintf(stderr, \"[farm] (more messages hidden)\\n\");\n"
+"}\n"
+"\n"
+"static void emit(int kind, int a, int b, int c, int d)\n"
+"{\n"
+"    if (!tr) return;\n"
+"    fprintf(tr, \"%d %d %d %d %d %d %d %d %d %d\\n\", tick, kind, a, b, c, d, inv[0], inv[1], inv[2], inv[3]);\n"
+"    fflush(tr);\n"
+"}\n"
+"\n"
+"static void finish(void)\n"
+"{\n"
+"    if (finished) return;\n"
+"    finished = 1;\n"
+"    emit(9, actions, 0, 0, 0);\n"
+"    if (tr) fclose(tr);\n"
+"}\n"
+"\n"
+"static void act(void)\n"
+"{\n"
+"    if (++actions > ACTION_LIMIT) {\n"
+"        fprintf(stderr, \"\\n[farm] Action limit reached (%d actions) - the run was stopped.\\n\", ACTION_LIMIT);\n"
+"        exit(0);\n"
+"    }\n"
+"    tick++;\n"
+"}\n"
+"\n"
+"static int ripe(int x, int y) { return ent[x][y] != ENT_NONE && tick - planted[x][y] >= GROW[ent[x][y]]; }\n"
+"\n"
+"int move(int dir)\n"
+"{\n"
+"    act();\n"
+"    if (dir == NORTH)      py = (py + 1) % N;\n"
+"    else if (dir == SOUTH) py = (py + N - 1) % N;\n"
+"    else if (dir == EAST)  px = (px + 1) % N;\n"
+"    else if (dir == WEST)  px = (px + N - 1) % N;\n"
+"    else { say(\"move(): unknown direction - use NORTH, EAST, SOUTH or WEST\"); return 0; }\n"
+"    emit(1, dir, px, py, 0);\n"
+"    return 1;\n"
+"}\n"
+"\n"
+"int harvest(void)\n"
+"{\n"
+"    act();\n"
+"    int e = ent[px][py], ok = 0, item = -1, n = 0;\n"
+"    if (e == ENT_NONE) { say(\"harvest(): nothing is growing here\"); emit(2, px, py, -1, 0); return 0; }\n"
+"    if (ripe(px, py)) { item = YITEM[e]; n = YIELDN[e]; inv[item] += n; ok = 1; }\n"
+"    else { item = -2; say(\"harvest(): that plant is not ripe yet - it was destroyed. Use can_harvest() first\"); }\n"
+"    if (ground[px][py] == GROUND_GRASS) { ent[px][py] = ENT_GRASS; planted[px][py] = tick; }\n"
+"    else ent[px][py] = ENT_NONE;\n"
+"    emit(2, px, py, item, n);\n"
+"    return ok;\n"
+"}\n"
+"\n"
+"int mow(void) { return harvest(); }\n"
+"\n"
+"int can_harvest(void) { return ripe(px, py); }\n"
+"\n"
+"int till(void)\n"
+"{\n"
+"    if (!uTill) { say(\"till(): locked - buy 'Soil' in the Upgrades tab\"); return 0; }\n"
+"    act();\n"
+"    if (ground[px][py] == GROUND_GRASS) { ground[px][py] = GROUND_SOIL; ent[px][py] = ENT_NONE; }\n"
+"    else { ground[px][py] = GROUND_GRASS; ent[px][py] = ENT_GRASS; planted[px][py] = tick; }\n"
+"    emit(4, px, py, ground[px][py], 0);\n"
+"    return 1;\n"
+"}\n"
+"\n"
+"int plant(int e)\n"
+"{\n"
+"    if (e < ENT_BUSH || e > ENT_PUMPKIN) { say(\"plant(): you can plant ENT_BUSH, ENT_CARROT or ENT_PUMPKIN\"); return 0; }\n"
+"    if ((e == ENT_BUSH && !uBush) || (e == ENT_CARROT && !uCarrot) || (e == ENT_PUMPKIN && !uPumpkin)) {\n"
+"        say(\"plant(): that plant is locked - unlock it in the Upgrades tab\"); return 0; }\n"
+"    if (e == ENT_BUSH && ground[px][py] != GROUND_GRASS) { say(\"plant(): bushes need grass, not soil\"); return 0; }\n"
+"    if (e != ENT_BUSH && ground[px][py] != GROUND_SOIL) { say(\"plant(): carrots and pumpkins need soil - use till() first\"); return 0; }\n"
+"    if (ent[px][py] != ENT_NONE && ent[px][py] != ENT_GRASS) { say(\"plant(): something is already growing here\"); return 0; }\n"
+"    if (e == ENT_CARROT && (inv[ITEM_HAY] < 1 || inv[ITEM_WOOD] < 1)) { say(\"plant(): a carrot costs 1 hay + 1 wood\"); return 0; }\n"
+"    if (e == ENT_PUMPKIN && inv[ITEM_CARROT] < 2) { say(\"plant(): a pumpkin costs 2 carrots\"); return 0; }\n"
+"    act();\n"
+"    if (e == ENT_CARROT) { inv[ITEM_HAY]--; inv[ITEM_WOOD]--; }\n"
+"    if (e == ENT_PUMPKIN) inv[ITEM_CARROT] -= 2;\n"
+"    ent[px][py] = e; planted[px][py] = tick;\n"
+"    emit(3, px, py, e, 0);\n"
+"    return 1;\n"
+"}\n"
+"\n"
+"int get_entity(void) { return ent[px][py]; }\n"
+"int get_ground(void) { return ground[px][py]; }\n"
+"int get_pos_x(void) { return px; }\n"
+"int get_pos_y(void) { return py; }\n"
+"int get_world_size(void) { return N; }\n"
+"int num_items(int item) { return (item >= 0 && item < 4) ? inv[item] : 0; }\n"
+"void do_a_flip(void) { act(); emit(5, 0, 0, 0, 0); }\n"
+"\n"
+"int main(int argc, char **argv)\n"
+"{\n"
+"    if (argc < 3) { fprintf(stderr, \"internal error: missing arguments\\n\"); return 2; }\n"
+"    FILE *f = fopen(argv[2], \"r\");\n"
+"    if (f) {\n"
+"        if (fscanf(f, \"%d %d %d %d %d %d %d %d %d\", &N, &uBush, &uTill, &uCarrot, &uPumpkin,\n"
+"                   &inv[0], &inv[1], &inv[2], &inv[3]) != 9) N = 3;\n"
+"        fclose(f);\n"
+"    }\n"
+"    if (N < 1) N = 1;\n"
+"    if (N > MAXN) N = MAXN;\n"
+"    for (int x = 0; x < N; x++)\n"
+"        for (int y = 0; y < N; y++) { ground[x][y] = GROUND_GRASS; ent[x][y] = ENT_GRASS; planted[x][y] = -1000; }\n"
+"    tr = fopen(argv[1], \"w\");\n"
+"    atexit(finish);\n"
+"    farm();\n"
+"    return 0;\n"
+"}\n"
+;
+
+/* ------------------------------------------------------------------ */
+/*  Lawn Mower Farm: a "The Farmer Was Replaced" style programming game */
+/*  Write C that drives a ride-on mower. Press Run to watch it work.    */
+/* ------------------------------------------------------------------ */
+typedef struct { const char* title, * code; } FarmScript;
+#define FARM_NEX 8
+
+static const FarmScript FARM_EX[FARM_NEX] = {
+  { "1. Mow one tile",
+    "#include <stdio.h>\n#include \"farm.h\"\n\n"
+    "void farm(void) {\n"
+    "    harvest();                      // cut the grass under the mower\n"
+    "    printf(\"Hay: %d\\n\", num_items(ITEM_HAY));\n"
+    "}\n" },
+  { "2. Mow a row",
+    "#include \"farm.h\"\n\n"
+    "void farm(void) {\n"
+    "    int n = get_world_size();\n"
+    "    for (int i = 0; i < n; i++) {\n"
+    "        harvest();\n"
+    "        move(EAST);                 // the lawn wraps around\n"
+    "    }\n"
+    "}\n" },
+  { "3. Mow the whole lawn",
+    "#include \"farm.h\"\n\n"
+    "void farm(void) {\n"
+    "    int n = get_world_size();\n"
+    "    for (int y = 0; y < n; y++) {\n"
+    "        for (int x = 0; x < n; x++) {\n"
+    "            harvest();\n"
+    "            move(EAST);\n"
+    "        }\n"
+    "        move(NORTH);\n"
+    "    }\n"
+    "}\n" },
+  { "4. Smart mower (only ripe grass)",
+    "#include \"farm.h\"\n\n"
+    "// Grass grows back after a few moves. Cutting it too early wastes it,\n"
+    "// so check can_harvest() first and make several passes.\n"
+    "void farm(void) {\n"
+    "    int n = get_world_size();\n"
+    "    for (int pass = 0; pass < 3; pass++) {\n"
+    "        for (int y = 0; y < n; y++) {\n"
+    "            for (int x = 0; x < n; x++) {\n"
+    "                if (can_harvest()) {\n"
+    "                    harvest();\n"
+    "                }\n"
+    "                move(EAST);\n"
+    "            }\n"
+    "            move(NORTH);\n"
+    "        }\n"
+    "    }\n"
+    "}\n" },
+  { "5. Bush farm (needs Bushes)",
+    "#include \"farm.h\"\n\n"
+    "void sweep(int plant_it) {\n"
+    "    int n = get_world_size();\n"
+    "    for (int y = 0; y < n; y++) {\n"
+    "        for (int x = 0; x < n; x++) {\n"
+    "            if (plant_it) {\n"
+    "                plant(ENT_BUSH);\n"
+    "            } else if (can_harvest()) {\n"
+    "                harvest();\n"
+    "            }\n"
+    "            move(EAST);\n"
+    "        }\n"
+    "        move(NORTH);\n"
+    "    }\n"
+    "}\n\n"
+    "void farm(void) {\n"
+    "    sweep(1);                       // plant a bush everywhere\n"
+    "    sweep(0);                       // pick the ones that are ready\n"
+    "    sweep(0);\n"
+    "}\n" },
+  { "6. Carrot farm (needs Soil + Carrots)",
+    "#include \"farm.h\"\n\n"
+    "void farm(void) {\n"
+    "    int n = get_world_size();\n"
+    "    for (int y = 0; y < n; y++) {\n"
+    "        for (int x = 0; x < n; x++) {\n"
+    "            if (get_ground() == GROUND_GRASS) {\n"
+    "                till();             // grass -> soil\n"
+    "            }\n"
+    "            plant(ENT_CARROT);      // costs 1 hay + 1 wood\n"
+    "            move(EAST);\n"
+    "        }\n"
+    "        move(NORTH);\n"
+    "    }\n"
+    "}\n" },
+  { "7. Debug me! (has errors)",
+    "#include \"farm.h\"\n\n"
+    "void farm(void) {\n"
+    "    int n = get_world_size()\n"
+    "    for (int i = 0; i < n; i++) {\n"
+    "        harvset();\n"
+    "        move(EAST);\n"
+    "    }\n"
+    "}\n" },
+  { "8. Blank sandbox",
+    "#include <stdio.h>\n#include \"farm.h\"\n\n"
+    "void farm(void) {\n"
+    "    // write your own farming code here\n"
+    "\n"
+    "}\n" }
+};
+
+/* ---- upgrades (bought with hay and wood) ---- */
+typedef struct { const char* name, * desc; int hay, wood, credits; } FarmUp;
+#define FARM_NUP 6
+static const FarmUp FUP[FARM_NUP] = {
+  { "Bigger Lawn: 5 x 5",  "A lawn with 25 tiles to mow.",                               25,  0, 20 },
+  { "Huge Lawn: 8 x 8",    "The full 64-tile lawn. Needs the 5 x 5 lawn first.",         120, 15, 40 },
+  { "Bushes",              "plant(ENT_BUSH) grows wood, which you need for more upgrades.", 20,  0, 15 },
+  { "Soil",                "till() turns grass into soil and back again.",               60, 10, 20 },
+  { "Carrots",             "plant(ENT_CARROT) on soil. Each costs 1 hay + 1 wood.",      40, 15, 25 },
+  { "Pumpkins",            "plant(ENT_PUMPKIN) on soil. Each costs 2 carrots.",          100, 30, 40 }
+};
+
+/* things that must be unlocked first: -1 = nothing */
+static const int FUP_NEEDS[FARM_NUP][2] = { { -1, -1 }, { 0, -1 }, { -1, -1 }, { 2, -1 }, { 3, 2 }, { 4, -1 } };
+
+static struct { unsigned char unl[FARM_NUP]; int inv[4]; unsigned char first[4]; } fsv;
+
+static void SaveFarm(void)
+{
+    FILE* f = fopen("farm.dat", "wb");
+    if (!f) return;
+    fwrite(&fsv, sizeof fsv, 1, f);
+    fclose(f);
+}
+
+static void LoadFarm(void)
+{
+    memset(&fsv, 0, sizeof fsv);
+    FILE* f = fopen("farm.dat", "rb");
+    if (!f) return;
+    if (fread(&fsv, sizeof fsv, 1, f) != 1) memset(&fsv, 0, sizeof fsv);
+    fclose(f);
+}
+
+static int FarmSize(void) { return fsv.unl[1] ? 8 : (fsv.unl[0] ? 5 : 3); }
+
+/* ---- the trace the program leaves behind, and the replay of it ---- */
+typedef struct { int t, kind, a, b, c, d, inv[4]; } FEv;
+#define FEV_MAX (FARM_ACTION_LIMIT + 8)
+static FEv fev[FEV_MAX];
+static int fevN = 0;
+
+static const char* FARM_ITEM[4] = { "hay", "wood", "carrots", "pumpkins" };
+static const float FR_SPEED[5] = { 2.5f, 7.0f, 16.0f, 45.0f, 200.0f };
+static const char* FR_SPEEDN[5] = { "1x", "3x", "6x", "18x", "Max" };
+
+static int frSpeed = 1, frIdx = 0, frN = 3, frTick = 0, frInv[4], frInv0[4];
+static bool frPlaying = false, frDone = true;
+static float frT = 0, frMove = 1, frBlade = 0, frFlip = 0;
+static int frX = 0, frY = 0, frFX = 0, frFY = 0, frDir = 1;
+static unsigned char frGround[8][8], frEnt[8][8];
+static int frPlanted[8][8];
+static int farmTab = 0, farmEx = 0, farmRuns = 0;
+static bool farmInit = false;
+
+static void FarmReplayStart(void)
+{
+    frN = FarmSize();
+    for (int x = 0; x < 8; x++)
+        for (int y = 0; y < 8; y++) { frGround[x][y] = 0; frEnt[x][y] = 1; frPlanted[x][y] = -1000; }
+    frX = frY = frFX = frFY = 0; frDir = 1; frMove = 1; frTick = 0; frT = 1.0f; frIdx = 0;
+    frBlade = 0; frFlip = 0;
+    for (int i = 0; i < 4; i++) frInv[i] = frInv0[i];
+    frPlaying = fevN > 0; frDone = fevN == 0;
+}
+
+/* particles + floating labels */
+typedef struct { float x, y, vx, vy, life, size; Color c; } FPart;
+typedef struct { char text[24]; int tx, ty; float age; Color c; } FPop;
+static FPart fpart[120];
+static FPop fpop[10];
+
+static void FarmSpark(float x, float y, Color c, int n, float power)
+{
+    for (int i = 0; i < 120 && n > 0; i++) {
+        if (fpart[i].life > 0) continue;
+        fpart[i].x = x; fpart[i].y = y;
+        fpart[i].vx = GetRandomValue(-100, 100) * power;
+        fpart[i].vy = GetRandomValue(-190, -50) * power;
+        fpart[i].life = 0.55f + GetRandomValue(0, 40) / 100.0f;
+        fpart[i].size = 2.0f + GetRandomValue(0, 20) / 10.0f;
+        fpart[i].c = ColorBrightness(c, GetRandomValue(-20, 20) / 100.0f);
+        n--;
+    }
+}
+
+static void FarmPop(int tx, int ty, const char* text, Color c)
+{
+    int slot = 0;
+    float oldest = -1;
+    for (int i = 0; i < 10; i++) {
+        if (fpop[i].age <= 0 || fpop[i].age > 1.2f) { slot = i; oldest = 99; break; }
+        if (fpop[i].age > oldest) { oldest = fpop[i].age; slot = i; }
+    }
+    snprintf(fpop[slot].text, sizeof fpop[slot].text, "%s", text);
+    fpop[slot].tx = tx; fpop[slot].ty = ty; fpop[slot].age = 0.001f; fpop[slot].c = c;
+}
+
+/* geometry of the lawn on screen (set while drawing, used for particle positions) */
+static float fgTs = 40, fgOx = 0, fgOy = 0;
+static float FarmTX(float x) { return fgOx + x * fgTs; }
+static float FarmTY(float y) { return fgOy + (frN - 1 - y) * fgTs; }
+
+static void FarmApply(const FEv* e)
+{
+    frTick = e->t;
+    for (int i = 0; i < 4; i++) frInv[i] = e->inv[i];
+    static const Color hayC = { 236, 200, 90, 255 }, woodC = { 150, 102, 60, 255 }, carC = { 240, 140, 40, 255 }, pumC = { 240, 150, 30, 255 };
+    static const Color itemC[4] = { { 236, 200, 90, 255 }, { 150, 102, 60, 255 }, { 240, 140, 40, 255 }, { 240, 150, 30, 255 } };
+    (void)hayC; (void)woodC; (void)carC; (void)pumC;
+    if (e->kind == 1) {                                   /* move */
+        frFX = frX; frFY = frY; frX = e->b; frY = e->c; frDir = e->a; frMove = 0;
+        if (abs(frX - frFX) > 1 || abs(frY - frFY) > 1) { frFX = frX; frFY = frY; frMove = 1; }   /* wrapped around */
+    }
+    else if (e->kind == 2) {                            /* harvest */
+        int x = e->a, y = e->b;
+        float cx = FarmTX((float)x) + fgTs / 2, cy = FarmTY((float)y) + fgTs / 2;
+        frBlade = 0.35f;
+        if (e->c >= 0) {
+            Color c = e->c == 0 ? (Color) { 106, 190, 80, 255 } : itemC[e->c];
+            FarmSpark(cx, cy, c, 14, 1.0f);
+            if (e->c == 0) FarmSpark(cx, cy, (Color) { 236, 200, 90, 255 }, 6, 0.8f);
+            char b[24];
+            snprintf(b, sizeof b, "+%d %s", e->d, FARM_ITEM[e->c]);
+            FarmPop(x, y, b, itemC[e->c]);
+        }
+        else if (e->c == -2) {
+            FarmSpark(cx, cy, (Color) { 150, 120, 90, 255 }, 8, 0.7f);
+            FarmPop(x, y, "too early!", (Color) { 240, 110, 110, 255 });
+        }
+        if (frGround[x][y] == 0) { frEnt[x][y] = 1; frPlanted[x][y] = e->t; }
+        else frEnt[x][y] = 0;
+    }
+    else if (e->kind == 3) {                            /* plant */
+        frEnt[e->a][e->b] = (unsigned char)e->c; frPlanted[e->a][e->b] = e->t;
+        FarmSpark(FarmTX((float)e->a) + fgTs / 2, FarmTY((float)e->b) + fgTs / 2, (Color) { 120, 90, 60, 255 }, 6, 0.6f);
+    }
+    else if (e->kind == 4) {                            /* till */
+        frGround[e->a][e->b] = (unsigned char)e->c;
+        if (e->c == 1) frEnt[e->a][e->b] = 0; else { frEnt[e->a][e->b] = 1; frPlanted[e->a][e->b] = e->t; }
+        FarmSpark(FarmTX((float)e->a) + fgTs / 2, FarmTY((float)e->b) + fgTs / 2, (Color) { 130, 92, 58, 255 }, 10, 0.9f);
+    }
+    else if (e->kind == 5) {
+        frFlip = 0.7f;
+    }
+    else if (e->kind == 9) {
+        frPlaying = false; frDone = true;
+    }
+}
+
+static void FarmUpdate(float dt)
+{
+    if (frPlaying) {
+        frT += dt * FR_SPEED[frSpeed];
+        while (frT >= 1.0f && frIdx < fevN) { frT -= 1.0f; FarmApply(&fev[frIdx++]); }
+        if (frIdx >= fevN) { frPlaying = false; frDone = true; }
+        frMove = frT < 1.0f ? frT : 1.0f;
+        if (frSpeed == 4) frMove = 1;
+    }
+    if (frBlade > 0) frBlade -= dt;
+    if (frFlip > 0) frFlip -= dt;
+    for (int i = 0; i < 120; i++) {
+        if (fpart[i].life <= 0) continue;
+        fpart[i].life -= dt; fpart[i].vy += 420 * dt;
+        fpart[i].x += fpart[i].vx * dt; fpart[i].y += fpart[i].vy * dt;
+    }
+    for (int i = 0; i < 10; i++) if (fpop[i].age > 0) { fpop[i].age += dt; if (fpop[i].age > 1.3f) fpop[i].age = 0; }
+}
+
+static void FarmSkip(void)
+{
+    while (frIdx < fevN) FarmApply(&fev[frIdx++]);
+    frPlaying = false; frDone = true; frMove = 1; frT = 0;
+}
+
+/* ---- compile + run the player's code, then read back what happened ---- */
+static void FarmRun(void)
+{
+    labErrN = 0; labOutLen = 0; labOut[0] = 0; labExit = 0; fevN = 0; frPlaying = false;
+    char dir[300];
+#ifdef _WIN32
+    const char* t = getenv("TEMP");
+    snprintf(dir, sizeof dir, "%s\\codequest_farm", t ? t : ".");
+#else
+    snprintf(dir, sizeof dir, "/tmp/codequest_farm");
+#endif
+    LAB_MKDIR(dir);
+
+    char src[360], hdr[360], rt[360], gc[360], go[360], exe[360], st[360], tr[360], cmd[2200];
+    snprintf(src, sizeof src, "%s%smain.c", dir, LAB_SEP);
+    snprintf(hdr, sizeof hdr, "%s%sfarm.h", dir, LAB_SEP);
+    snprintf(rt, sizeof rt, "%s%sfarm_rt.c", dir, LAB_SEP);
+    snprintf(gc, sizeof gc, "%s%sguard.c", dir, LAB_SEP);
+    snprintf(go, sizeof go, "%s%sguard.o", dir, LAB_SEP);
+    snprintf(exe, sizeof exe, "%s%s%s", dir, LAB_SEP, LAB_EXE);
+    snprintf(st, sizeof st, "%s%sstate.txt", dir, LAB_SEP);
+    snprintf(tr, sizeof tr, "%s%strace.txt", dir, LAB_SEP);
+
+    FILE* f = fopen(src, "wb");
+    if (!f) { LabAppendStr("[Could not write the temporary file. Is the temp folder writable?]\n"); labStatus = LAB_RUNTIME_ERR; return; }
+    fwrite(labBuf, 1, (size_t)labLen, f);
+    fclose(f);
+    f = fopen(hdr, "wb"); if (f) { fwrite(FARM_H_SRC, 1, sizeof FARM_H_SRC - 1, f); fclose(f); }
+    f = fopen(rt, "wb");  if (f) { fwrite(FARM_RT_SRC, 1, sizeof FARM_RT_SRC - 1, f); fclose(f); }
+    f = fopen(gc, "wb");  if (f) { fwrite(LAB_GUARD, 1, sizeof LAB_GUARD - 1, f); fclose(f); }
+    f = fopen(st, "wb");
+    if (f) {
+        fprintf(f, "%d %d %d %d %d %d %d %d %d\n", FarmSize(), fsv.unl[2], fsv.unl[3], fsv.unl[4], fsv.unl[5],
+            fsv.inv[0], fsv.inv[1], fsv.inv[2], fsv.inv[3]);
+        fclose(f);
+    }
+    remove(tr);
+
+    int rawLen = 0, rc;
+    FILE* chk = fopen(go, "rb");
+    if (chk) fclose(chk);
+    else {
+        snprintf(cmd, sizeof cmd, LAB_ENVP "gcc -c \"%s\" -o \"%s\" 2>&1", gc, go);
+        rc = RunCapture(cmd, labRaw, (int)sizeof labRaw, &rawLen);
+        if (rc != 0) goto farm_compile_failed;
+    }
+
+    remove(exe);
+    snprintf(cmd, sizeof cmd, LAB_ENVP "gcc -std=gnu11 -Wall -fdiagnostics-color=never \"%s\" \"%s\" \"%s\" -o \"%s\" -lm 2>&1", src, rt, go, exe);
+    rc = RunCapture(cmd, labRaw, (int)sizeof labRaw, &rawLen);
+    {
+        char n1[320], n2[320];
+        snprintf(n1, sizeof n1, "%s/", dir);
+        snprintf(n2, sizeof n2, "%s\\", dir);
+        StrRemove(labRaw, n1);
+        StrRemove(labRaw, n2);
+        rawLen = (int)strlen(labRaw);
+    }
+    if (rc != 0) {
+    farm_compile_failed:
+        if (strstr(labRaw, "not found") || strstr(labRaw, "not recognized")) {
+            labStatus = LAB_NO_COMPILER;
+            LabAppendStr("[Could not run the compiler]\n\nThe farm needs gcc installed and on your PATH.\n");
+            LabAppendStr("Install it (for example MinGW-w64 on Windows, or the Xcode command line tools on macOS), then try again.\n\n");
+            LabAppend(labRaw, rawLen);
+            return;
+        }
+        labStatus = LAB_COMPILE_ERR;
+        LabAppendStr("[Compile error - fix the problems below and run again]\n\n");
+        int start = labOutLen;
+        LabAppend(labRaw, rawLen);
+        LabParseErrors(labOut + start);
+        if (strstr(labRaw, "undefined reference to `farm'") || strstr(labRaw, "undefined reference to 'farm'"))
+            LabAppendStr("\nHint: your code must define  void farm(void) { ... }\n");
+        return;
+    }
+    if (rawLen > 0) { LabAppendStr("[Compiler warnings]\n"); LabAppend(labRaw, rawLen); LabAppendStr("\n[Program output]\n"); }
+
+    snprintf(cmd, sizeof cmd, "\"%s\" \"%s\" \"%s\" 2>&1", exe, tr, st);
+    int runLen = 0;
+    labExit = RunCapture(cmd, labRaw, (int)sizeof labRaw, &runLen);
+    LabAppend(labRaw, runLen);
+
+    f = fopen(tr, "r");                                   /* read back the trace */
+    if (f) {
+        FEv e;
+        while (fevN < FEV_MAX &&
+            fscanf(f, "%d %d %d %d %d %d %d %d %d %d", &e.t, &e.kind, &e.a, &e.b, &e.c, &e.d,
+                &e.inv[0], &e.inv[1], &e.inv[2], &e.inv[3]) == 10)
+            fev[fevN++] = e;
+        fclose(f);
+    }
+
+    int actions = 0;
+    for (int i = 0; i < fevN; i++) if (fev[i].kind != 9) actions++;
+    for (int i = 0; i < 4; i++) frInv0[i] = fsv.inv[i];
+    if (fevN > 0) for (int i = 0; i < 4; i++) fsv.inv[i] = fev[fevN - 1].inv[i];
+    for (int i = 0; i < fevN; i++)                       /* a small credit bonus the first time you collect each item */
+        if (fev[i].kind == 2 && fev[i].c >= 0 && fev[i].d > 0 && !fsv.first[fev[i].c]) {
+            fsv.first[fev[i].c] = 1;
+            GainCredits(10, fev[i].c == 0 ? "First hay!" : (fev[i].c == 1 ? "First wood!" : (fev[i].c == 2 ? "First carrots!" : "First pumpkins!")));
+        }
+    SaveFarm();
+
+    if (labExit == 124) {
+        labStatus = LAB_TIMEOUT;
+        LabAppendStr("\n[Time limit reached: the program ran for more than 3 seconds and was stopped.]\n");
+        LabAppendStr("Tip: a loop that never calls move(), harvest() or plant() never ends. Check your loop conditions.\n");
+    }
+    else if (labExit != 0) {
+        labStatus = LAB_RUNTIME_ERR;
+        char m[200];
+        snprintf(m, sizeof m, "\n[Program %s]\n", labExit == 139 ? "crashed: segmentation fault (bad pointer or array index)" : "exited with an error");
+        LabAppendStr(m);
+    }
+    else {
+        labStatus = LAB_OK;
+    }
+    {
+        char s[200];
+        int gained[4];
+        for (int i = 0; i < 4; i++) gained[i] = fsv.inv[i] - frInv0[i];
+        snprintf(s, sizeof s, "\n[%d actions   hay %+d   wood %+d   carrots %+d   pumpkins %+d]\n", actions, gained[0], gained[1], gained[2], gained[3]);
+        if (labOutLen > 0 && labOut[labOutLen - 1] != '\n') LabAppendStr("\n");
+        LabAppendStr(s);
+    }
+    farmRuns++;
+    FarmReplayStart();
+}
+
+
+/* ---- drawing: items, the mower, the lawn ---- */
+static void FarmIcon(int kind, float cx, float cy, float r)
+{
+    if (kind == 0) {                                    /* hay bale */
+        DrawRectangleRounded((Rectangle) { cx - r, cy - r * 0.75f, r * 2, r * 1.5f }, 0.25f, 4, (Color) { 214, 168, 56, 255 });
+        DrawRectangle((int)(cx - r * 0.6f), (int)(cy - r * 0.75f), (int)(r * 0.28f + 1), (int)(r * 1.5f), (Color) { 150, 108, 36, 255 });
+        DrawRectangle((int)(cx + r * 0.3f), (int)(cy - r * 0.75f), (int)(r * 0.28f + 1), (int)(r * 1.5f), (Color) { 150, 108, 36, 255 });
+        DrawRectangle((int)(cx - r * 0.9f), (int)(cy - r * 0.45f), (int)(r * 1.8f), 1, (Color) { 244, 214, 110, 255 });
+    }
+    else if (kind == 1) {                             /* log */
+        DrawRectangleRounded((Rectangle) { cx - r, cy - r * 0.55f, r * 1.7f, r * 1.1f }, 0.4f, 4, (Color) { 124, 82, 48, 255 });
+        DrawCircle((int)(cx + r * 0.7f), (int)cy, r * 0.58f, (Color) { 210, 168, 112, 255 });
+        DrawCircle((int)(cx + r * 0.7f), (int)cy, r * 0.32f, (Color) { 176, 128, 78, 255 });
+    }
+    else if (kind == 2) {                             /* carrot */
+        DrawTriangle((Vector2) { cx - r * 0.55f, cy - r * 0.45f }, (Vector2) { cx + r * 0.1f, cy + r * 0.95f }, (Vector2) { cx + r * 0.65f, cy - r * 0.45f }, (Color) { 242, 142, 36, 255 });
+        DrawRectangle((int)(cx - r * 0.2f), (int)(cy - r * 0.95f), (int)(r * 0.18f + 1), (int)(r * 0.6f), (Color) { 84, 176, 78, 255 });
+        DrawRectangle((int)(cx + r * 0.15f), (int)(cy - r * 0.85f), (int)(r * 0.18f + 1), (int)(r * 0.5f), (Color) { 84, 176, 78, 255 });
+    }
+    else {                                            /* pumpkin */
+        DrawEllipse((int)cx, (int)(cy + r * 0.1f), r * 0.95f, r * 0.78f, (Color) { 236, 128, 30, 255 });
+        DrawEllipse((int)cx, (int)(cy + r * 0.1f), r * 0.4f, r * 0.78f, (Color) { 250, 160, 56, 255 });
+        DrawRectangle((int)(cx - r * 0.08f), (int)(cy - r * 0.9f), (int)(r * 0.2f + 1), (int)(r * 0.35f), (Color) { 84, 130, 56, 255 });
+    }
+}
+
+static void FarmChip(float x, float y, int kind, int n)
+{
+    const char* t = TextFormat("%d", n);
+    float w = TxtW(fBold, t, 17) + 52;
+    Panel((Rectangle) { x, y, w, 40 }, 0.5f, Fade(SURF, 0.96f), BORDER);
+    FarmIcon(kind, x + 22, y + 20, 10);
+    Txt(fBold, t, x + 40, y + 8, 17, TXT);
+}
+
+/* the player's student on a ride-on mower. dir: 0 = north (up the screen), 1 = east, 2 = south, 3 = west */
+static void FarmDrawMower(float cx, float fy, int dir, float sc, float blade, float flip)
+{
+#define K(v) ((v) * sc)
+    Look L = LookFrom(gm.eq);
+    const Color red = { 206, 52, 58, 255 }, redD = { 150, 34, 42, 255 }, redL = { 240, 98, 96, 255 };
+    const Color ink = { 24, 22, 34, 255 }, steel = { 134, 142, 156, 255 }, steelD = { 86, 92, 106, 255 }, tyre = { 38, 38, 46, 255 };
+    int pdir = dir == 0 ? 3 : (dir == 1 ? 2 : (dir == 2 ? 0 : 1));
+    float t = (float)GetTime(), spin = t * 40.0f;
+    float lift = flip > 0 ? sinf((0.7f - flip) / 0.7f * 3.14159f) * K(26) : 0;
+    float rot = flip > 0 ? (0.7f - flip) / 0.7f : 0;
+    (void)rot;
+    fy -= lift;
+
+    DrawEllipse((int)cx, (int)(fy + lift), K(30), K(7), Fade(BLACK, 0.26f));
+
+    if (dir == 1 || dir == 3) {                              /* ---- side view ---- */
+        float sg = dir == 1 ? 1.0f : -1.0f;
+        float deckX = sg > 0 ? cx + K(6) : cx - K(34);
+        OutRR(deckX, fy - K(10), K(28), K(7), 0.3f, steel, 1.1f * sc);        /* cutting deck */
+        if (blade > 0) {
+            float bx = cx + sg * K(20);
+            for (int k = 0; k < 3; k++) {
+                float a = spin + k * 2.1f;
+                DrawLine((int)(bx - cosf(a) * K(10)), (int)(fy - K(2)), (int)(bx + cosf(a) * K(10)), (int)(fy - K(2)), Fade((Color) { 230, 236, 244, 255 }, 0.8f));
+            }
+        }
+        DrawCircle((int)(cx - sg * K(16)), (int)(fy - K(10)), K(10) + 1.3f * sc, ink);   /* rear wheel */
+        DrawCircle((int)(cx - sg * K(16)), (int)(fy - K(10)), K(10), tyre);
+        DrawCircle((int)(cx - sg * K(16)), (int)(fy - K(10)), K(5), steel);
+        for (int k = 0; k < 4; k++) {
+            float a = (cx + k) * 0.18f + k * 1.5708f;
+            DrawLine((int)(cx - sg * K(16)), (int)(fy - K(10)), (int)(cx - sg * K(16) + cosf(a) * K(8)), (int)(fy - K(10) + sinf(a) * K(8)), steelD);
+        }
+        OutRR(cx - sg * K(24) - (sg < 0 ? K(38) : 0), fy - K(27), K(38), K(8), 0.4f, (Color) { 52, 54, 66, 255 }, 1.1f * sc);   /* seat */
+        DrawPersonEx(cx - sg * K(8), fy - K(11), pdir, sc * 0.8f, 0, &L);
+        OutRR(cx - (sg > 0 ? K(25) : K(14)), fy - K(21), K(39), K(13), 0.35f, red, 1.2f * sc);                              /* body */
+        DrawRectangle((int)(cx - (sg > 0 ? K(22) : K(11))), (int)(fy - K(20)), (int)K(33), (int)K(3), redL);
+        OutRR(cx + (sg > 0 ? K(6) : -K(26)), fy - K(25), K(20), K(11), 0.35f, redD, 1.2f * sc);                            /* hood */
+        DrawRectangle((int)(cx + (sg > 0 ? K(10) : -K(22))), (int)(fy - K(23)), (int)K(12), (int)K(2), redL);
+        DrawLine((int)(cx + sg * K(5)), (int)(fy - K(21)), (int)(cx + sg * K(10)), (int)(fy - K(34)), ink);                 /* steering */
+        DrawEllipse((int)(cx + sg * K(10)), (int)(fy - K(34)), K(7), K(2.4f), ink);
+        DrawCircle((int)(cx + sg * K(18)), (int)(fy - K(7)), K(7) + 1.2f * sc, ink);                                        /* front wheel */
+        DrawCircle((int)(cx + sg * K(18)), (int)(fy - K(7)), K(7), tyre);
+        DrawCircle((int)(cx + sg * K(18)), (int)(fy - K(7)), K(3), steel);
+    }
+    else {                                                 /* ---- front / back view ---- */
+        bool away = dir == 0;
+        if (away) {                                          /* deck is out in front, behind the body */
+            OutRR(cx - K(18), fy - K(34), K(36), K(8), 0.3f, steel, 1.1f * sc);
+        }
+        OutRR(cx - K(26), fy - K(20), K(9), K(20), 0.3f, tyre, 1.1f * sc);                   /* wheels */
+        OutRR(cx + K(17), fy - K(20), K(9), K(20), 0.3f, tyre, 1.1f * sc);
+        DrawRectangle((int)(cx - K(24)), (int)(fy - K(14)), (int)K(5), (int)K(8), steelD);
+        DrawRectangle((int)(cx + K(19)), (int)(fy - K(14)), (int)K(5), (int)K(8), steelD);
+        OutRR(cx - K(16), fy - K(30), K(32), K(8), 0.4f, (Color) { 52, 54, 66, 255 }, 1.1f * sc);   /* seat */
+        DrawPersonEx(cx, fy - K(11), pdir, sc * 0.8f, 0, &L);
+        OutRR(cx - K(18), fy - K(21), K(36), K(15), 0.3f, red, 1.2f * sc);                   /* body */
+        DrawRectangle((int)(cx - K(15)), (int)(fy - K(20)), (int)K(30), (int)K(3), redL);
+        if (!away) {                                                                          /* facing us: hood + deck in front */
+            OutRR(cx - K(11), fy - K(24), K(22), K(10), 0.35f, redD, 1.1f * sc);
+            DrawRectangle((int)(cx - K(8)), (int)(fy - K(22)), (int)K(16), (int)K(2), redL);
+            OutRR(cx - K(18), fy - K(9), K(36), K(9), 0.3f, steel, 1.1f * sc);
+            if (blade > 0)
+                for (int k = 0; k < 3; k++) {
+                    float a = spin + k * 2.1f;
+                    DrawLine((int)(cx - cosf(a) * K(14)), (int)(fy - K(4)), (int)(cx + cosf(a) * K(14)), (int)(fy - K(4)), Fade(WHITE, 0.8f));
+                }
+        }
+        DrawEllipse((int)cx, (int)(fy - K(36)), K(8), K(2.4f), ink);                         /* steering wheel */
+    }
+#undef K
+}
+
+static void FarmBlade(float x, float y, float h, float w, Color c, float sway)
+{
+    DrawRectangle((int)(x + sway), (int)(y - h), (int)w, (int)h, c);
+    DrawRectangle((int)(x + sway * 0.5f), (int)(y - h * 0.5f), (int)w, (int)(h * 0.5f + 1), c);
+}
+
+static void FarmDrawTile(int x, int y)
+{
+    float ts = fgTs, sx = FarmTX((float)x), sy = FarmTY((float)y), t = (float)GetTime();
+    int isx = (int)sx, isy = (int)sy, its = (int)ceilf(ts);
+    int g = frGround[x][y], e = frEnt[x][y];
+    float frac = 0;
+    if (e > 0) {
+        frac = (float)(frTick - frPlanted[x][y]) / (float)FARM_GROW[e];
+        frac = frac < 0 ? 0 : (frac > 1 ? 1 : frac);
+    }
+    bool ripe = e > 0 && frac >= 1.0f;
+    unsigned h0 = Hash(x * 7 + 3, y * 13 + 5);
+
+    if (g == 0) {
+        Color base = ((x + y) & 1) ? (Color) { 112, 188, 86, 255 } : (Color) { 98, 174, 76, 255 };
+        if (e == 1 && ripe) base = ((x + y) & 1) ? (Color) { 84, 156, 66, 255 } : (Color) { 78, 148, 62, 255 };
+        DrawRectangle(isx, isy, its, its, base);
+        if (e != 1 || !ripe) DrawRectangleGradientV(isx, isy, its, its / 2, Fade(WHITE, 0.07f), Fade(WHITE, 0.0f));
+    }
+    else {
+        Color base = ((x + y) & 1) ? (Color) { 112, 78, 50, 255 } : (Color) { 104, 72, 46, 255 };
+        DrawRectangle(isx, isy, its, its, base);
+        for (int k = 1; k < 4; k++) DrawRectangle(isx + 2, isy + (int)(ts * k / 4.0f) - 1, its - 4, (int)(ts * 0.07f) + 1, (Color) { 84, 56, 36, 255 });
+        for (int k = 1; k < 4; k++) DrawRectangle(isx + 2, isy + (int)(ts * k / 4.0f) + (int)(ts * 0.07f), its - 4, 1, (Color) { 138, 100, 66, 255 });
+    }
+
+    if (e == 1) {                                           /* grass: blades grow with time */
+        int n = 3 + (int)(frac * 11);
+        float bh = ts * (0.07f + 0.34f * frac), bw = ts * 0.075f > 1 ? ts * 0.075f : 1;
+        for (int k = 0; k < n; k++) {
+            unsigned q = Hash(x * 31 + k * 7, y * 17 + k * 3) & 1023;
+            float bx = sx + ts * (0.07f + 0.86f * (q & 31) / 31.0f), by = sy + ts * (0.30f + 0.66f * ((q >> 5) & 31) / 31.0f);
+            float sway = sinf(t * 1.6f + x + k) * (ripe ? ts * 0.03f : 0);
+            Color c = ripe ? (Color) { 54, 128, 50, 255 } : (Color) { 130, 204, 96, 255 };
+            FarmBlade(bx, by, bh * (0.75f + 0.5f * (q & 7) / 7.0f), bw, c, sway);
+            FarmBlade(bx + bw, by - bh * 0.2f, bh * 0.45f, bw, ColorBrightness(c, 0.28f), sway);
+        }
+    }
+    else if (e == 2) {                                    /* bush */
+        float r = ts * (0.13f + 0.30f * frac), cx = sx + ts / 2, cy = sy + ts * 0.62f;
+        DrawEllipse((int)cx, (int)(cy + r * 0.8f), r * 1.1f, r * 0.35f, Fade(BLACK, 0.22f));
+        DrawCircle((int)(cx - r * 0.55f), (int)(cy + r * 0.1f), r * 0.75f, (Color) { 34, 104, 60, 255 });
+        DrawCircle((int)(cx + r * 0.55f), (int)(cy + r * 0.1f), r * 0.75f, (Color) { 34, 104, 60, 255 });
+        DrawCircle((int)cx, (int)(cy - r * 0.3f), r * 0.9f, (Color) { 40, 120, 68, 255 });
+        DrawCircle((int)(cx - r * 0.3f), (int)(cy - r * 0.5f), r * 0.4f, (Color) { 84, 164, 92, 255 });
+        if (ripe) for (int k = 0; k < 5; k++) {
+            unsigned q = Hash(x * 5 + k, y * 9 + k * 2) & 255;
+            DrawCircle((int)(cx + (q % 100 - 50) / 50.0f * r * 0.7f), (int)(cy - r * 0.2f + ((q / 3) % 100 - 50) / 50.0f * r * 0.6f), r * 0.14f + 1, (Color) { 224, 56, 72, 255 });
+        }
+    }
+    else if (e == 3) {                                    /* carrot */
+        float cx = sx + ts / 2, cy = sy + ts * 0.72f, r = ts * (0.08f + 0.28f * frac);
+        DrawEllipse((int)cx, (int)(cy + ts * 0.08f), ts * 0.2f, ts * 0.07f, (Color) { 84, 56, 36, 255 });
+        for (int k = -2; k <= 2; k++) {
+            float a = -1.5708f + k * 0.42f;
+            DrawLine((int)cx, (int)cy, (int)(cx + cosf(a) * r * 1.5f), (int)(cy + sinf(a) * r * 1.5f), (Color) { 70, 168, 74, 255 });
+            DrawCircle((int)(cx + cosf(a) * r * 1.5f), (int)(cy + sinf(a) * r * 1.5f), r * 0.28f + 1, (Color) { 96, 190, 88, 255 });
+        }
+        if (ripe) { DrawCircle((int)cx, (int)(cy + ts * 0.02f), ts * 0.11f, (Color) { 244, 142, 36, 255 }); DrawCircle((int)cx - 1, (int)(cy + ts * 0.0f), ts * 0.05f, (Color) { 255, 190, 90, 255 }); }
+    }
+    else if (e == 4) {                                    /* pumpkin */
+        float cx = sx + ts / 2, cy = sy + ts * 0.62f, r = ts * (0.08f + 0.32f * frac);
+        DrawEllipse((int)cx, (int)(cy + r * 0.8f), r * 1.1f, r * 0.3f, Fade(BLACK, 0.22f));
+        if (frac < 0.35f) {
+            DrawCircle((int)cx, (int)cy, r * 0.9f, (Color) { 84, 160, 72, 255 });
+        }
+        else {
+            DrawEllipse((int)cx, (int)cy, r * 1.05f, r * 0.85f, (Color) { 220, 112, 28, 255 });
+            DrawEllipse((int)(cx - r * 0.45f), (int)cy, r * 0.5f, r * 0.85f, (Color) { 236, 132, 36, 255 });
+            DrawEllipse((int)(cx + r * 0.45f), (int)cy, r * 0.5f, r * 0.85f, (Color) { 236, 132, 36, 255 });
+            DrawEllipse((int)cx, (int)cy, r * 0.5f, r * 0.85f, (Color) { 250, 156, 52, 255 });
+            DrawRectangle((int)(cx - r * 0.1f), (int)(cy - r * 1.05f), (int)(r * 0.22f + 1), (int)(r * 0.3f + 1), (Color) { 74, 120, 52, 255 });
+        }
+    }
+    if (ripe && e > 1) {                                    /* ripe sparkle */
+        float a = 0.5f + 0.5f * sinf(t * 4.0f + h0);
+        DrawRectangle((int)(sx + ts * 0.8f) - 2, (int)(sy + ts * 0.18f), 5, 1, Fade(WHITE, a));
+        DrawRectangle((int)(sx + ts * 0.8f), (int)(sy + ts * 0.18f) - 2, 1, 5, Fade(WHITE, a));
+    }
+    DrawRectangle(isx, isy, its, 1, Fade(BLACK, 0.07f));   /* faint tile edges */
+    DrawRectangle(isx, isy, 1, its, Fade(BLACK, 0.07f));
+}
+
+static void FarmDrawLawn(Rectangle a)
+{
+    float avail = (a.width < a.height ? a.width : a.height) - 30;
+    float ts = floorf(avail / (float)frN);
+    if (ts > 96) ts = 96;
+    fgTs = ts;
+    fgOx = floorf(a.x + (a.width - ts * frN) / 2);
+    fgOy = floorf(a.y + (a.height - ts * frN) / 2);
+    float gw = ts * frN, fw = ts * 0.12f + 3;
+
+    DrawRectangleRec(a, (Color) { 58, 112, 56, 255 });                       /* meadow around the lawn */
+    for (int k = 0; k < 40; k++) {
+        unsigned q = Hash(k * 11, 77);
+        DrawRectangle((int)(a.x + (q % (unsigned)a.width)), (int)(a.y + ((q >> 8) % (unsigned)a.height)), 2, 4, (Color) { 74, 132, 66, 255 });
+    }
+    DrawRectangle((int)(fgOx - fw), (int)(fgOy - fw), (int)(gw + 2 * fw), (int)(gw + 2 * fw), (Color) { 96, 64, 38, 255 });     /* fence */
+    DrawRectangle((int)(fgOx - fw * 0.6f), (int)(fgOy - fw * 0.6f), (int)(gw + 1.2f * fw), (int)(gw + 1.2f * fw), (Color) { 146, 102, 62, 255 });
+
+    for (int row = 0; row < frN; row++)                                       /* top row first, so tall grass overlaps correctly */
+        for (int x = 0; x < frN; x++) FarmDrawTile(x, frN - 1 - row);
+
+    float fx = FarmTX((float)frFX) + (FarmTX((float)frX) - FarmTX((float)frFX)) * frMove;
+    float fyy = FarmTY((float)frFY) + (FarmTY((float)frY) - FarmTY((float)frFY)) * frMove;
+    float sc = ts / 62.0f;
+    if (sc < 0.42f) sc = 0.42f;
+    if (sc > 1.5f) sc = 1.5f;
+    FarmDrawMower(fx + ts / 2, fyy + ts * 0.88f, frDir, sc, frBlade > 0 ? 1.0f : 0.0f, frFlip);
+
+    for (int i = 0; i < 120; i++)
+        if (fpart[i].life > 0)
+            DrawRectangle((int)fpart[i].x, (int)fpart[i].y, (int)fpart[i].size + 1, (int)fpart[i].size + 1, Fade(fpart[i].c, fpart[i].life > 0.3f ? 1.0f : fpart[i].life / 0.3f));
+    for (int i = 0; i < 10; i++)
+        if (fpop[i].age > 0) {
+            float k = fpop[i].age, al = k > 0.9f ? (1.3f - k) / 0.4f : 1.0f;
+            float px = FarmTX((float)fpop[i].tx) + ts / 2, py = FarmTY((float)fpop[i].ty) - k * 26;
+            float tw = TxtW(fBold, fpop[i].text, 15);
+            DrawRectangleRounded((Rectangle) { px - tw / 2 - 8, py - 2, tw + 16, 24 }, 0.5f, 6, Fade((Color) { 20, 24, 36, 255 }, 0.8f * al));
+            CenterTxt(fBold, fpop[i].text, px, py + 1, 15, Fade(fpop[i].c, al));
+        }
+}
+
+/* ---- the screen ---- */
+static void FarmLayout(void) { labW = 560; labH = 330; labOX = 24; labOY = 480; labOW = W - 48; labOH = 200; }
+
+static void FarmIdleView(void)
+{
+    for (int i = 0; i < 4; i++) frInv0[i] = fsv.inv[i];
+    fevN = 0;
+    FarmReplayStart();
+}
+
+static void FarmLoad(int i)
+{
+    farmEx = i;
+    snprintf(labBuf, LAB_CAP + 1, "%s", FARM_EX[i].code);
+    labLen = (int)strlen(labBuf);
+    labCur = labAnc = 0; labWant = -1; labSX = labSY = labOutScroll = 0;
+    labOutLen = 0; labOut[0] = 0; labErrN = 0; labStatus = LAB_READY; labPending = 0;
+}
+
+static void StartFarm(void)
+{
+    if (labOwner == 0) { StashSwap(); labOwner = 1; }
+    if (!farmInit) { FarmLoad(0); farmInit = true; FarmIdleView(); }
+    screen = SCR_FARM;
+    labFocus = 0; labPending = 0;
+    if (labStatus == LAB_COMPILING) labStatus = LAB_READY;
+}
+
+static bool FarmUpgradeOk(int i)
+{
+    for (int k = 0; k < 2; k++) if (FUP_NEEDS[i][k] >= 0 && !fsv.unl[FUP_NEEDS[i][k]]) return false;
+    return true;
+}
+
+static void DrawFarmUpgrades(Rectangle a)
+{
+    for (int i = 0; i < FARM_NUP; i++) {
+        float y = a.y + 2 + i * 47.0f;
+        Rectangle row = { a.x, y, a.width, 43 };
+        bool owned = fsv.unl[i], ok = FarmUpgradeOk(i);
+        bool can = !owned && ok && fsv.inv[0] >= FUP[i].hay && fsv.inv[1] >= FUP[i].wood;
+        Panel(row, 0.15f, owned ? (Color) { 26, 52, 40, 255 } : SURF, owned ? GOOD : BORDER);
+        TxtFit(fBold, FUP[i].name, row.x + 14, y + 3, 16, 250, owned ? GOOD : TXT);
+        TxtFit(fReg, FUP[i].desc, row.x + 14, y + 23, 12, 330, DIM);
+        if (owned) {
+            CenterTxt(fBold, "Unlocked", row.x + row.width - 62, y + 12, 15, GOOD);
+        }
+        else {
+            float cx = row.x + row.width - 292;
+            if (FUP[i].hay > 0) { FarmIcon(0, cx, y + 21, 9); Txt(fBold, TextFormat("%d", FUP[i].hay), cx + 14, y + 11, 15, fsv.inv[0] >= FUP[i].hay ? TXT : (Color) { 240, 110, 110, 255 }); cx += 62; }
+            if (FUP[i].wood > 0) { FarmIcon(1, cx, y + 21, 9); Txt(fBold, TextFormat("%d", FUP[i].wood), cx + 14, y + 11, 15, fsv.inv[1] >= FUP[i].wood ? TXT : (Color) { 240, 110, 110, 255 }); }
+            Rectangle b = { row.x + row.width - 112, y + 5, 100, 33 };
+            if (!ok) {
+                DrawRectangleRounded(b, 0.3f, 8, SURF2);
+                CenterTxt(fMed, "Locked", b.x + b.width / 2, b.y + 7, 14, DIM);
+            }
+            else if (Button(b, "Unlock", can ? (Color) { 36, 150, 96, 255 } : (Color) { 82, 86, 108, 255 }, 15)) {
+                if (can) {
+                    fsv.inv[0] -= FUP[i].hay; fsv.inv[1] -= FUP[i].wood; fsv.unl[i] = 1; SaveFarm();
+                    GainCredits(FUP[i].credits, "Farm upgrade");
+                    Notify(TextFormat("Unlocked: %s", FUP[i].name), GOOD);
+                    Burst(b.x, b.y, 30);
+                    if (!frPlaying) FarmIdleView(); else for (int k = 0; k < 4; k++) frInv0[k] = fsv.inv[k];
+                }
+                else {
+                    Notify(!ok ? "Unlock the requirement first" : "Not enough hay or wood yet", BAD);
+                }
+            }
+        }
+    }
+}
+
+static void DrawFarmHelp(Rectangle a)
+{
+    static const char* fn[11] = { "harvest() / mow()", "can_harvest()", "move(dir)", "plant(ENT_..)", "till()", "get_entity()", "get_ground()",
+                                  "get_pos_x() / y()", "get_world_size()", "num_items(ITEM_..)", "do_a_flip()" };
+    static const char* ds[11] = { "cut or pick what is on this tile (returns 1 if it was ripe)", "1 when the plant here is fully grown",
+                                  "NORTH, EAST, SOUTH or WEST - the lawn wraps around", "ENT_BUSH, ENT_CARROT or ENT_PUMPKIN (unlock first)",
+                                  "grass <-> soil (unlock Soil first)", "ENT_NONE / ENT_GRASS / ENT_BUSH / ENT_CARROT / ENT_PUMPKIN",
+                                  "GROUND_GRASS or GROUND_SOIL", "where the mower is (0,0 is bottom-left)", "the lawn is n x n tiles",
+                                  "ITEM_HAY, ITEM_WOOD, ITEM_CARROT, ITEM_PUMPKIN", "a victory spin (costs one action)" };
+    Txt(fBold, "Write  void farm(void)  and press Run.", a.x + 6, a.y - 2, 16, (Color) { 255, 205, 90, 255 });
+    for (int i = 0; i < 11; i++) {
+        float y = a.y + 24 + i * 22.0f;
+        Txt(fBold, fn[i], a.x + 6, y, 14, LABC);
+        TxtFit(fReg, ds[i], a.x + 190, y, 13, a.width - 200, TXT);
+    }
+    Txt(fReg, "Every call is one action (tick). Plants grow with each action: grass 6, bush 14, carrot 24, pumpkin 40.", a.x + 6, a.y + 24 + 11 * 22.0f + 4, 12, DIM);
+}
+
+static void DrawFarm(void)
+{
+    float dt = GetFrameTime();
+    if (dt > 0.05f) dt = 0.05f;
+    if (labPending == 2) { FarmRun(); labPending = 0; }
+    else if (labPending == 1) labPending = 2;
+
+    FarmLayout();
+    labFocus = 0;
+    float cw = MeasureTextEx(fCode, "M", LAB_FS, 0).x;
+    LabEdit();
+
+    Rectangle ed = { LAB_X, LAB_Y, LAB_W, LAB_H };
+    Vector2 m = GetMousePosition();
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, ed)) {
+        bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+        LabMove(LabPosFromMouse(m.x, m.y, cw), shift);
+        labDrag = true; labWant = -1;
+    }
+    if (labDrag) {
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) { labCur = LabPosFromMouse(m.x, m.y, cw); labWant = -1; }
+        else labDrag = false;
+    }
+    if (labEnsure) { LabKeepCursorVisible(cw); labEnsure = false; }
+    if (CheckCollisionPointRec(m, ed)) ibeam = true;
+    FarmUpdate(dt);
+
+    /* top bar */
+    TopBar();
+    if (Button((Rectangle) { 24, 14, 124, 44 }, BACKL, SURF2, 16)) GoMenu();
+    Txt(fBold, "Lawn Mower Farm", 168, 17, 25, (Color) { 130, 214, 110, 255 });
+    DrawCreditsChip(W - 24, 16);
+    {
+        float x = W - 24 - 128 - 4 * 100.0f;
+        for (int i = 0; i < 4; i++) FarmChip(x + i * 100.0f, 16, i, frPlaying || frIdx > 0 ? frInv[i] : fsv.inv[i]);
+    }
+
+    /* toolbar */
+    if (Button((Rectangle) { 24, 86, 44, 44 }, "<", SURF2, 20)) FarmLoad((farmEx + FARM_NEX - 1) % FARM_NEX);
+    Panel((Rectangle) { 74, 86, 360, 44 }, 0.3f, SURF, BORDER);
+    bool dirty = strcmp(labBuf, FARM_EX[farmEx].code) != 0;
+    TxtFit(fMed, FARM_EX[farmEx].title, 90, 95, 17, dirty ? 270 : 330, TXT);
+    if (dirty) Txt(fReg, "edited", 434 - 16 - TxtW(fReg, "edited", 14), 99, 14, (Color) { 240, 180, 60, 255 });
+    if (Button((Rectangle) { 440, 86, 44, 44 }, ">", SURF2, 20)) FarmLoad((farmEx + 1) % FARM_NEX);
+    if (Button((Rectangle) { 494, 86, 100, 44 }, "Reset", SURF2, 17)) FarmLoad(farmEx);
+    Txt(fMed, "Speed", 612, 98, 15, DIM);
+    for (int i = 0; i < 5; i++) {
+        Rectangle r = { 668.0f + i * 56, 90, 52, 36 };
+        bool hov = CheckCollisionPointRec(m, r);
+        if (hov) hand = true;
+        Panel(r, 0.3f, i == frSpeed ? (Color) { 30, 74, 52, 255 } : SURF, i == frSpeed ? GOOD : (hov ? DIM : BORDER));
+        CenterTxt(fBold, FR_SPEEDN[i], r.x + r.width / 2, r.y + 7, 15, i == frSpeed ? GOOD : TXT);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) frSpeed = i;
+    }
+    {
+        Rectangle rb = { W - 24 - 190, 86, 190, 44 };
+        bool busy = labPending != 0;
+        if (frPlaying && !busy) {
+            if (Button(rb, "Skip >>", (Color) { 70, 100, 190, 255 }, 18)) FarmSkip();
+        }
+        else {
+            if (Button(rb, busy ? "   Running..." : "     Run", busy ? SURF2 : (Color) { 36, 160, 100, 255 }, 18) && !busy) LabRequestRun();
+            if (!busy) DrawTriangle((Vector2) { rb.x + 52, rb.y + 13 }, (Vector2) { rb.x + 52, rb.y + 31 }, (Vector2) { rb.x + 68, rb.y + 22 }, WHITE);
+        }
+    }
+
+    /* editor (left) and the lawn panel (right) */
+    LabDrawEditor(cw);
+    Rectangle pn = { 600, 140, 576, 330 };
+    Panel(pn, 0.02f, CODEBG, BORDER);
+    static const char* tabN[3] = { "Lawn", "Upgrades", "Help" };
+    for (int i = 0; i < 3; i++) {
+        Rectangle r = { pn.x + 8 + i * 122.0f, pn.y + 6, 116, 30 };
+        bool hov = CheckCollisionPointRec(m, r), act = (i == farmTab);
+        if (hov) hand = true;
+        if (act) DrawRectangleRounded(r, 0.3f, 8, (Color) { 40, 110, 70, 255 });
+        CenterTxt(fBold, tabN[i], r.x + r.width / 2, r.y + 4, 16, act ? WHITE : DIM);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) farmTab = i;
+    }
+    {
+        const char* st = frPlaying ? "Replaying your run..." : (fevN > 0 ? "Run complete" : "Press Run to start");
+        Txt(fReg, st, pn.x + pn.width - 14 - TxtW(fReg, st, 14), pn.y + 12, 14, frPlaying ? (Color) { 255, 205, 90, 255 } : DIM);
+    }
+    DrawLine((int)pn.x + 1, (int)pn.y + 42, (int)(pn.x + pn.width) - 1, (int)pn.y + 42, BORDER);
+    Rectangle body = { pn.x + 8, pn.y + 48, pn.width - 16, pn.height - 56 };
+    if (farmTab == 0) {
+        BeginScissorMode((int)body.x, (int)body.y, (int)body.width, (int)body.height);
+        FarmDrawLawn(body);
+        EndScissorMode();
+    }
+    else if (farmTab == 1) DrawFarmUpgrades(body);
+    else DrawFarmHelp(body);
+
+    LabDrawOutput(cw);
+    TxtFit(fReg, "F5 or Ctrl+Enter: run     Tab: 4 spaces     Esc: leave (your code is kept)     Hay, wood and upgrades are saved between visits",
+        LAB_X, 736, 13, W - 48, DIM);
+}
+
+
 int main(void)
 {
     SetConfigFlags(FLAG_MSAA_4X_HINT);      /* smoother rounded corners */
@@ -3017,6 +6377,9 @@ int main(void)
     fCode = LoadF(FONT_MONO, FONT_MONO_LEN, 18);   /* code is always drawn at size 18 */
     LoadProgress();
     BuildMaps();
+    LoadQuest();
+    LoadGame();
+    LoadFarm();
     WorldEnter();                           /* start in the campus sim */
 
     while (!quit && !WindowShouldClose()) {
@@ -3029,10 +6392,11 @@ int main(void)
             else GoMenu();
         }
 
-        hand = false;
+        hand = false; ibeam = false;
         Color accent = ACCENTS[lang];
         BeginDrawing();
         ClearBackground(BG);
+        if (screen != SCR_WORLD) DrawRectangleGradientV(0, 0, W, H, (Color) { 22, 27, 44, 255 }, (Color) { 12, 14, 22, 255 });
         switch (screen) {
         case SCR_MENU:   DrawMenu(accent);   break;
         case SCR_LESSON: DrawLesson(accent); break;
@@ -3040,9 +6404,14 @@ int main(void)
         case SCR_RESULT: DrawResult(accent); break;
         case SCR_WORLD:  DrawWorld();        break;
         case SCR_BATTLE: DrawBattle();       break;
+        case SCR_QUEST:  DrawQuest();        break;
+        case SCR_LAB:    DrawLab();          break;
+        case SCR_SHOP:   DrawShop();         break;
+        case SCR_FARM:   DrawFarm();         break;
         }
+        DrawNotices(GetFrameTime());
         EndDrawing();
-        SetMouseCursor(hand ? MOUSE_CURSOR_POINTING_HAND : MOUSE_CURSOR_DEFAULT);
+        SetMouseCursor(hand ? MOUSE_CURSOR_POINTING_HAND : (ibeam ? MOUSE_CURSOR_IBEAM : MOUSE_CURSOR_DEFAULT));
     }
 
     SaveProgress();

@@ -18,7 +18,10 @@
  * Shop: earn credits from quizzes, quests and more, then dress your student. Use the pink SHOP building
  *   on campus or the Shop button on the study menu.
  *
- * Lawn Mower Farm: a 'The Farmer Was Replaced' style game - program a ride-on mower in C (red barn on campus or Mower Farm button).
+ * Menu: sidebar dashboard (Learn path with Khan-style mastery, Practice list of 19 auto-graded coding problems, streak and levels).
+ * Lessons have a 'Try this code in the Lab' button (W3Schools style). Practice problems are compiled with gcc/g++ and run against test cases.
+ * Mower Farm: a 'The Farmer Was Replaced' style programming game - write Python-like code to drive your student's ride-on mower,
+ *   grow crops, buy upgrades (red barn on campus or the Mower Farm button). Windows can be dragged, folded and resized; F11 = fullscreen.
  * Coding Lab: write real C / C++ code, press Run, see the output (needs gcc / g++ installed).
  *   Open it from the study menu or the teal Coding Lab building on campus.
  *
@@ -1221,9 +1224,16 @@ static const unsigned char FONT_MONO[] = {
 #include <sys/wait.h>
 #endif
 #include <stdbool.h>
+#include <stdarg.h>
+#include <setjmp.h>
 
 #define W 1200
 #define H 760
+static float gScale = 1.0f, gOffX = 0, gOffY = 0;    /* window -> 1200x760 design space (letterboxed) */
+static void ScissorT(int x, int y, int w, int h)
+{
+    BeginScissorMode((int)(gOffX + x * gScale), (int)(gOffY + y * gScale), (int)ceilf(w * gScale), (int)ceilf(h * gScale));
+}
 #define NLESSONS 5
 
 /* ------------------------------------------------------------------ */
@@ -1278,7 +1288,7 @@ static const Lesson C_LESSONS[NLESSONS] = {
   {
     { "Decisions: if, else and switch",
       "A condition is true when it is non-zero. Use == to compare and = to assign (a classic bug!). Chain choices with else if. switch selects on an int or char; each case needs a break, otherwise execution FALLS THROUGH into the next case.",
-      "int score = 72;\n\nif (score >= 70) {\n    printf(\"Pass\\n\");\n} else {\n    printf(\"Fail\\n\");\n}\n\nswitch (grade) {\n    case 'A': printf(\"Great\\n\"); break;\n    default:  printf(\"Keep going\\n\");\n}" },
+      "int score = 72;\nchar grade = 'A';\n\nif (score >= 70) {\n    printf(\"Pass\\n\");\n} else {\n    printf(\"Fail\\n\");\n}\n\nswitch (grade) {\n    case 'A': printf(\"Great\\n\"); break;\n    default:  printf(\"Keep going\\n\");\n}" },
     { "Loops",
       "for is ideal when you know how many times to repeat; while checks the condition before each pass; do-while always runs at least once. break leaves the loop and continue skips to the next iteration.",
       "for (int i = 0; i < 5; i++) {\n    printf(\"%d \", i);   // 0 1 2 3 4\n}\n\nint n = 3;\nwhile (n > 0) {\n    n--;\n}\n\ndo {\n    printf(\"runs once\\n\");\n} while (0);" }
@@ -1501,7 +1511,8 @@ static const Color ACCENTS[2] = { { 64, 156, 255, 255 }, { 160, 112, 255, 255 } 
 #define SPC 0.2f          /* letter spacing for the UI font */
 #define UI_SCALE 1.14f    /* serif fonts look smaller than sans at the same size */
 
-typedef enum { SCR_MENU, SCR_LESSON, SCR_QUIZ, SCR_RESULT, SCR_WORLD, SCR_BATTLE, SCR_QUEST, SCR_LAB, SCR_SHOP, SCR_FARM } Screen;
+typedef enum { SCR_MENU, SCR_LESSON, SCR_QUIZ, SCR_RESULT, SCR_WORLD, SCR_BATTLE, SCR_QUEST, SCR_LAB, SCR_SHOP, SCR_FARM, SCR_PROBLEM, SCR_MEM, SCR_BOOT } Screen;
+typedef enum { MOOD_IDLE, MOOD_THINK, MOOD_CHEER, MOOD_SAD } Mood;
 
 static Screen screen = SCR_MENU;
 static int lang = 0, lessonIdx = 0, page = 0;
@@ -1516,12 +1527,197 @@ static bool fromWorld = false;            /* lesson/quiz opened from the campus?
 static void WorldEnter(void);
 static void StartLab(void);
 static void StartFarm(void);
+static void ToggleFull(void);
 static void StartShop(void);
+static void StartMem(void);
+static void DrawCompanion(float cx, float footY, float sc, int mood, bool below);
+static void DrawBoot(void);
+static void DrawTransition(float dt, Color accent);
+static void DrawMem(void);
+static void TryIt(const char* code);
 static void GainCredits(int n, const char* why);
 static void DrawCreditsChip(float rx, float y);
 static bool ibeam = false;                /* show text cursor this frame */
 static bool hand = false;                 /* show pointer cursor this frame */
 static Font fReg, fMed, fBold, fCode;     /* Liberation Serif + DejaVu Sans Mono */
+
+/* ---- practice problems (auto-graded against test cases) ---- */
+typedef struct { const char* in, * out; } PTest;
+typedef struct { const char* title, * topic; int diff, lesson, nt; const char* desc, * fmt; PTest t[4]; const char* hint[3]; const char* todo, * solC, * solCpp, * why; } Prob;
+#define NPROB 19
+static const Prob PROBS[NPROB] = {
+  { "Hello, Name", "Input / Output", 0, 0, 4,
+    "Read a first name (a single word) and greet the person.",
+    "Input: one word.\nOutput: Hello, <name>!",
+    { { "Ada", "Hello, Ada!" },{ "Bob", "Hello, Bob!" },{ "Zoe", "Hello, Zoe!" },{ "Max", "Hello, Max!" } },
+    { "You need a place to store text. In C a name is a char array, e.g. char name[100];","Read it with scanf(\"%99s\", name); (no & needed for arrays). In C++ use cin >> name; with a std::string.","Print it with printf(\"Hello, %s!\\n\", name); or cout << \"Hello, \" << name << \"!\\n\";" },
+    "read the name, print the greeting",
+    "#include <stdio.h>\n\nint main(void) {\n    char name[100];\n    scanf(\"%99s\", name);\n    printf(\"Hello, %s!\\n\", name);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\nusing namespace std;\n\nint main() {\n    string name;\n    cin >> name;\n    cout << \"Hello, \" << name << \"!\" << endl;\n    return 0;\n}\n",
+    "scanf/cin read one word; %s (or <<) prints it back. Always size char arrays for the longest input." },
+  { "Sum of Two", "Input / Output", 0, 0, 4,
+    "Read two integers and print their sum.",
+    "Input: two integers a and b.\nOutput: a + b",
+    { { "3 4", "7" },{ "-5 5", "0" },{ "100 250", "350" },{ "-8 -9", "-17" } },
+    { "Declare two ints: int a, b;","scanf(\"%d %d\", &a, &b); reads both (remember the &). In C++: cin >> a >> b;","Print a + b with printf(\"%d\\n\", a + b);" },
+    "read a and b, print a + b",
+    "#include <stdio.h>\n\nint main(void) {\n    int a, b;\n    scanf(\"%d %d\", &a, &b);\n    printf(\"%d\\n\", a + b);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int a, b;\n    cin >> a >> b;\n    cout << a + b << endl;\n    return 0;\n}\n",
+    "Variables hold the numbers; scanf needs the address (&a) of each int, cin does not." },
+  { "Celsius to Fahrenheit", "Input / Output", 0, 0, 4,
+    "Convert a whole-number temperature from Celsius to Fahrenheit. F = C * 9 / 5 + 32.",
+    "Input: an integer C.\nOutput: F with exactly 1 decimal place.",
+    { { "0", "32.0" },{ "100", "212.0" },{ "-40", "-40.0" },{ "37", "98.6" } },
+    { "Use a double for the result: double f = ...;","Beware integer division! 9 / 5 is 1 in C. Write c * 9.0 / 5 + 32 instead.","Print with one decimal: printf(\"%.1f\\n\", f); or cout << fixed << setprecision(1) << f;" },
+    "convert and print with 1 decimal",
+    "#include <stdio.h>\n\nint main(void) {\n    int c;\n    scanf(\"%d\", &c);\n    double f = c * 9.0 / 5 + 32;\n    printf(\"%.1f\\n\", f);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int c;\n    cin >> c;\n    double f = c * 9.0 / 5 + 32;\n    cout << fixed << setprecision(1) << f << endl;\n    return 0;\n}\n",
+    "Mixing in a double (9.0) avoids integer division. %.1f / setprecision(1) control the decimals." },
+  { "Even or Odd", "Conditionals", 0, 1, 4,
+    "Read an integer and say whether it is even or odd.",
+    "Input: one integer n (may be negative).\nOutput: even or odd",
+    { { "4", "even" },{ "7", "odd" },{ "0", "even" },{ "-3", "odd" } },
+    { "A number is even when it divides by 2 with no remainder.","The remainder operator is %. n % 2 == 0 means even.","Negative odd numbers give -1 for n % 2, so test == 0 rather than == 1." },
+    "print even or odd",
+    "#include <stdio.h>\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    if (n % 2 == 0) printf(\"even\\n\");\n    else printf(\"odd\\n\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    cout << (n % 2 == 0 ? \"even\" : \"odd\") << endl;\n    return 0;\n}\n",
+    "if / else on n % 2 == 0. Testing for 0 works for negatives too." },
+  { "Maximum of Three", "Conditionals", 0, 1, 4,
+    "Read three integers and print the largest.",
+    "Input: three integers.\nOutput: the largest one.",
+    { { "1 2 3", "3" },{ "9 4 7", "9" },{ "-1 -5 -3", "-1" },{ "5 5 2", "5" } },
+    { "Keep a variable best that starts as the first number.","Compare the second and third to best; if bigger, update best.","if (b > best) best = b;  if (c > best) best = c;" },
+    "find and print the largest",
+    "#include <stdio.h>\n\nint main(void) {\n    int a, b, c;\n    scanf(\"%d %d %d\", &a, &b, &c);\n    int best = a;\n    if (b > best) best = b;\n    if (c > best) best = c;\n    printf(\"%d\\n\", best);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int a, b, c;\n    cin >> a >> b >> c;\n    int best = a;\n    if (b > best) best = b;\n    if (c > best) best = c;\n    cout << best << endl;\n    return 0;\n}\n",
+    "Track the best value so far and update it as you compare - the same idea scales to any list." },
+  { "Sum from 1 to N", "Loops", 0, 1, 4,
+    "Read N and print 1 + 2 + ... + N.",
+    "Input: an integer N >= 1.\nOutput: the sum.",
+    { { "1", "1" },{ "10", "55" },{ "100", "5050" },{ "7", "28" } },
+    { "Start a total at 0.","Use a for loop: for (int i = 1; i <= n; i++)","Inside the loop add i to the total, then print it after the loop." },
+    "loop and add",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, total = 0;\n    scanf(\"%d\", &n);\n    for (int i = 1; i <= n; i++) total += i;\n    printf(\"%d\\n\", total);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, total = 0;\n    cin >> n;\n    for (int i = 1; i <= n; i++) total += i;\n    cout << total << endl;\n    return 0;\n}\n",
+    "An accumulator variable plus a counting loop: the most common loop pattern." },
+  { "Factorial", "Loops", 1, 1, 4,
+    "Print n! (n factorial = 1 x 2 x ... x n). 0! is 1.",
+    "Input: an integer n, 0 <= n <= 12.\nOutput: n!",
+    { { "0", "1" },{ "5", "120" },{ "10", "3628800" },{ "12", "479001600" } },
+    { "Start result at 1 (not 0!) so multiplying works.","Loop i from 2 up to n and multiply: result *= i;","For n = 0 or 1 the loop does nothing, so the answer stays 1 - correct." },
+    "multiply 1..n",
+    "#include <stdio.h>\n\nint main(void) {\n    int n;\n    long long r = 1;\n    scanf(\"%d\", &n);\n    for (int i = 2; i <= n; i++) r *= i;\n    printf(\"%lld\\n\", r);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n;\n    long long r = 1;\n    cin >> n;\n    for (int i = 2; i <= n; i++) r *= i;\n    cout << r << endl;\n    return 0;\n}\n",
+    "An accumulator that multiplies must start at 1. 12! just fits in an int; long long gives headroom." },
+  { "FizzBuzz", "Loops", 1, 1, 4,
+    "For each number from 1 to n print the number, but print Fizz for multiples of 3, Buzz for multiples of 5 and FizzBuzz for multiples of both.",
+    "Input: an integer n.\nOutput: n lines.",
+    { { "5", "1\n2\nFizz\n4\nBuzz" },{ "15", "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz" },{ "1", "1" },{ "10", "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz" } },
+    { "Loop i from 1 to n and print one line per number.","Check the combined case FIRST: if (i % 15 == 0).","Then else if (i % 3 == 0), else if (i % 5 == 0), else print i." },
+    "print n lines of FizzBuzz",
+    "#include <stdio.h>\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    for (int i = 1; i <= n; i++) {\n        if (i % 15 == 0) printf(\"FizzBuzz\\n\");\n        else if (i % 3 == 0) printf(\"Fizz\\n\");\n        else if (i % 5 == 0) printf(\"Buzz\\n\");\n        else printf(\"%d\\n\", i);\n    }\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    for (int i = 1; i <= n; i++) {\n        if (i % 15 == 0) cout << \"FizzBuzz\\n\";\n        else if (i % 3 == 0) cout << \"Fizz\\n\";\n        else if (i % 5 == 0) cout << \"Buzz\\n\";\n        else cout << i << \"\\n\";\n    }\n    return 0;\n}\n",
+    "Order matters in an else-if chain: the most specific case (both) must come first." },
+  { "Prime Check", "Functions", 1, 2, 4,
+    "Decide whether a number is prime (only divisible by 1 and itself). 1 is not prime.",
+    "Input: an integer n >= 1.\nOutput: prime or not prime",
+    { { "1", "not prime" },{ "2", "prime" },{ "15", "not prime" },{ "97", "prime" } },
+    { "Write a helper function: int is_prime(int n). Return 0 or 1.","Numbers below 2 are not prime. Otherwise try every divisor d from 2 while d * d <= n.","If n % d == 0 for any d, it is not prime. If the loop finishes, it is." },
+    "write is_prime and print the answer",
+    "#include <stdio.h>\n\nint is_prime(int n) {\n    if (n < 2) return 0;\n    for (int d = 2; d * d <= n; d++)\n        if (n % d == 0) return 0;\n    return 1;\n}\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    printf(is_prime(n) ? \"prime\\n\" : \"not prime\\n\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nbool is_prime(int n) {\n    if (n < 2) return false;\n    for (int d = 2; d * d <= n; d++)\n        if (n % d == 0) return false;\n    return true;\n}\n\nint main() {\n    int n;\n    cin >> n;\n    cout << (is_prime(n) ? \"prime\" : \"not prime\") << endl;\n    return 0;\n}\n",
+    "Functions let you name an idea. You only need to test divisors up to the square root." },
+  { "Fibonacci", "Functions", 1, 2, 4,
+    "Print the n-th Fibonacci number where F(0) = 0, F(1) = 1 and F(n) = F(n-1) + F(n-2).",
+    "Input: an integer n, 0 <= n <= 30.\nOutput: F(n)",
+    { { "0", "0" },{ "1", "1" },{ "10", "55" },{ "30", "832040" } },
+    { "Keep the two previous values in variables a = 0 and b = 1.","Repeat n times: next = a + b; a = b; b = next;","After the loop a holds F(n). (A recursive function also works for n <= 30.)" },
+    "compute F(n)",
+    "#include <stdio.h>\n\nint fib(int n) {\n    int a = 0, b = 1;\n    for (int i = 0; i < n; i++) {\n        int next = a + b;\n        a = b;\n        b = next;\n    }\n    return a;\n}\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    printf(\"%d\\n\", fib(n));\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint fib(int n) {\n    int a = 0, b = 1;\n    for (int i = 0; i < n; i++) {\n        int next = a + b;\n        a = b;\n        b = next;\n    }\n    return a;\n}\n\nint main() {\n    int n;\n    cin >> n;\n    cout << fib(n) << endl;\n    return 0;\n}\n",
+    "Iteration with two rolling variables is fast; naive recursion would repeat work exponentially." },
+  { "Greatest Common Divisor", "Functions", 1, 2, 4,
+    "Print the greatest common divisor of two non-negative integers.",
+    "Input: two integers a and b (not both 0).\nOutput: gcd(a, b)",
+    { { "12 18", "6" },{ "17 5", "1" },{ "100 75", "25" },{ "0 9", "9" } },
+    { "Euclid's idea: gcd(a, b) = gcd(b, a % b).","Stop when b is 0; the answer is then a.","while (b != 0) { int t = a % b; a = b; b = t; }" },
+    "write gcd(a, b)",
+    "#include <stdio.h>\n\nint gcd(int a, int b) {\n    while (b != 0) {\n        int t = a % b;\n        a = b;\n        b = t;\n    }\n    return a;\n}\n\nint main(void) {\n    int a, b;\n    scanf(\"%d %d\", &a, &b);\n    printf(\"%d\\n\", gcd(a, b));\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint gcd(int a, int b) {\n    while (b != 0) {\n        int t = a % b;\n        a = b;\n        b = t;\n    }\n    return a;\n}\n\nint main() {\n    int a, b;\n    cin >> a >> b;\n    cout << gcd(a, b) << endl;\n    return 0;\n}\n",
+    "Euclid's algorithm is over 2000 years old and still the standard answer." },
+  { "Count Vowels", "Strings", 1, 2, 4,
+    "Count the vowels (a, e, i, o, u - upper or lower case) in a word.",
+    "Input: one word of letters.\nOutput: the number of vowels.",
+    { { "hello", "2" },{ "rhythm", "0" },{ "Education", "5" },{ "AEIOU", "5" } },
+    { "Read the word into a char array (C) or std::string (C++).","Loop over each character until the end of the string ('\\0' in C).","Convert with tolower(ch) so you only compare against the lower-case vowels." },
+    "count the vowels",
+    "#include <stdio.h>\n#include <ctype.h>\n#include <string.h>\n\nint main(void) {\n    char w[200];\n    int count = 0;\n    scanf(\"%199s\", w);\n    for (int i = 0; w[i] != 0; i++) {\n        char c = (char)tolower((unsigned char)w[i]);\n        if (strchr(\"aeiou\", c)) count++;\n    }\n    printf(\"%d\\n\", count);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <cctype>\nusing namespace std;\n\nint main() {\n    string w;\n    cin >> w;\n    int count = 0;\n    for (char ch : w) {\n        char c = (char)tolower((unsigned char)ch);\n        if (string(\"aeiou\").find(c) != string::npos) count++;\n    }\n    cout << count << endl;\n    return 0;\n}\n",
+    "A C string is an array ending in '\\0'; walking it character by character is a core skill." },
+  { "Palindrome Word", "Strings", 1, 2, 4,
+    "A palindrome reads the same forwards and backwards. Decide if a word is one (case-sensitive).",
+    "Input: one word.\nOutput: yes or no",
+    { { "level", "yes" },{ "hello", "no" },{ "a", "yes" },{ "abca", "no" } },
+    { "Compare the first character with the last, the second with the second-last, and so on.","Use two indexes: i = 0 and j = length - 1 (strlen in C, .size() in C++).","Stop at the first mismatch and print no. If you never mismatch, print yes." },
+    "compare from both ends",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    char w[200];\n    scanf(\"%199s\", w);\n    int ok = 1;\n    for (int i = 0, j = (int)strlen(w) - 1; i < j; i++, j--)\n        if (w[i] != w[j]) ok = 0;\n    printf(ok ? \"yes\\n\" : \"no\\n\");\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\nusing namespace std;\n\nint main() {\n    string w;\n    cin >> w;\n    bool ok = true;\n    for (int i = 0, j = (int)w.size() - 1; i < j; i++, j--)\n        if (w[i] != w[j]) ok = false;\n    cout << (ok ? \"yes\" : \"no\") << endl;\n    return 0;\n}\n",
+    "Two indexes moving towards each other is the classic two-pointer technique." },
+  { "Array Maximum", "Arrays", 0, 3, 4,
+    "Read n numbers and print the largest.",
+    "Input: n on the first line, then n integers.\nOutput: the maximum.",
+    { { "5\\n3 9 2 7 1", "9" },{ "3\\n-4 -2 -9", "-2" },{ "1\\n42", "42" },{ "4\\n5 5 5 5", "5" } },
+    { "Declare an array: int a[100]; (n will be at most 100). In C++ you can use vector<int>.","Read n, then loop n times reading a[i].","Start max as a[0], then compare every other element." },
+    "read the array, print the max",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, a[100];\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    int max = a[0];\n    for (int i = 1; i < n; i++)\n        if (a[i] > max) max = a[i];\n    printf(\"%d\\n\", max);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    vector<int> a(n);\n    for (int i = 0; i < n; i++) cin >> a[i];\n    int mx = a[0];\n    for (int x : a) if (x > mx) mx = x;\n    cout << mx << endl;\n    return 0;\n}\n",
+    "Never start max at 0: with all-negative data you would print the wrong answer." },
+  { "Reverse the Array", "Arrays", 1, 3, 4,
+    "Print the numbers in reverse order, separated by single spaces.",
+    "Input: n, then n integers (n <= 100).\nOutput: the numbers reversed on one line.",
+    { { "5\\n1 2 3 4 5", "5 4 3 2 1" },{ "1\\n9", "9" },{ "4\\n10 20 30 40", "40 30 20 10" },{ "2\\n-1 7", "7 -1" } },
+    { "Store all the numbers first, then print from the last index down to 0.","for (int i = n - 1; i >= 0; i--)","Print a space BEFORE every number except the first one printed, so there is no trailing space." },
+    "print the array backwards",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, a[100];\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    for (int i = n - 1; i >= 0; i--) {\n        printf(\"%d\", a[i]);\n        if (i > 0) printf(\" \");\n    }\n    printf(\"\\n\");\n    return 0;\n}\n",
+    "#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    vector<int> a(n);\n    for (int i = 0; i < n; i++) cin >> a[i];\n    for (int i = n - 1; i >= 0; i--) {\n        cout << a[i];\n        if (i > 0) cout << \" \";\n    }\n    cout << endl;\n    return 0;\n}\n",
+    "Reading must finish before printing begins - arrays let you revisit data in any order." },
+  { "Sort the Array", "Arrays", 1, 3, 4,
+    "Sort the numbers from smallest to largest and print them separated by spaces.",
+    "Input: n, then n integers (n <= 50).\nOutput: the sorted numbers on one line.",
+    { { "5\\n5 2 9 1 7", "1 2 5 7 9" },{ "3\\n3 2 1", "1 2 3" },{ "1\\n4", "4" },{ "6\\n-3 8 0 -3 5 2", "-3 -3 0 2 5 8" } },
+    { "Bubble sort: repeatedly swap neighbours that are in the wrong order.","Two nested loops: for i in 0..n-2, for j in 0..n-2-i, if a[j] > a[j+1] swap them.","Swapping needs a temporary: int t = a[j]; a[j] = a[j+1]; a[j+1] = t;" },
+    "sort and print",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, a[50];\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    for (int i = 0; i < n - 1; i++)\n        for (int j = 0; j < n - 1 - i; j++)\n            if (a[j] > a[j + 1]) {\n                int t = a[j];\n                a[j] = a[j + 1];\n                a[j + 1] = t;\n            }\n    for (int i = 0; i < n; i++)\n        printf(i ? \" %d\" : \"%d\", a[i]);\n    printf(\"\\n\");\n    return 0;\n}\n",
+    "#include <iostream>\n#include <vector>\n#include <algorithm>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    vector<int> a(n);\n    for (int i = 0; i < n; i++) cin >> a[i];\n    sort(a.begin(), a.end());\n    for (int i = 0; i < n; i++)\n        cout << (i ? \" \" : \"\") << a[i];\n    cout << endl;\n    return 0;\n}\n",
+    "Bubble sort teaches the mechanics; in C++ you would normally call std::sort." },
+  { "Second Largest", "Arrays", 2, 3, 4,
+    "Print the second largest DISTINCT value. The input always has at least two different values.",
+    "Input: n, then n integers (n <= 100).\nOutput: the second largest distinct value.",
+    { { "5\\n4 9 2 9 7", "7" },{ "2\\n1 2", "1" },{ "4\\n-1 -2 -3 -2", "-2" },{ "6\\n10 10 8 8 3 3", "8" } },
+    { "Track two variables: largest and second.","Initialise both to a very small number (e.g. -2147483647 - 1) - or use the first element carefully.","For each x: if x > largest, second = largest and largest = x; else if x < largest and x > second, second = x." },
+    "find the second largest distinct value",
+    "#include <stdio.h>\n#include <limits.h>\n\nint main(void) {\n    int n, x;\n    int largest = INT_MIN, second = INT_MIN;\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) {\n        scanf(\"%d\", &x);\n        if (x > largest) { second = largest; largest = x; }\n        else if (x < largest && x > second) second = x;\n    }\n    printf(\"%d\\n\", second);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <climits>\nusing namespace std;\n\nint main() {\n    int n, x;\n    int largest = INT_MIN, second = INT_MIN;\n    cin >> n;\n    for (int i = 0; i < n; i++) {\n        cin >> x;\n        if (x > largest) { second = largest; largest = x; }\n        else if (x < largest && x > second) second = x;\n    }\n    cout << second << endl;\n    return 0;\n}\n",
+    "One pass, two trackers. Careful with duplicates: the 'x < largest' check is what makes it distinct." },
+  { "Top Scorer", "Structs & Classes", 1, 4, 4,
+    "Read students (name and score). Print the name of the top scorer and the class average with 1 decimal. If there is a tie, the first student wins.",
+    "Input: n, then n lines: <name> <score>.\nOutput: <name> <average>",
+    { { "3\\nAda 90\\nBob 75\\nCy 85", "Ada 83.3" },{ "1\\nZed 50", "Zed 50.0" },{ "4\\nAnn 60\\nBen 80\\nCat 80\\nDan 70", "Ben 72.5" },{ "2\\nX 100\\nY 99", "X 99.5" } },
+    { "Group a name and a score together: struct Student { char name[30]; int score; }; (a class works in C++).","Read n students into an array of Student, adding each score to a total as you go.","Keep the index of the best score (use > so the FIRST of a tie stays). Average = (double)total / n, printed with %.1f." },
+    "store students in a struct, find the best",
+    "#include <stdio.h>\n\nstruct Student {\n    char name[30];\n    int score;\n};\n\nint main(void) {\n    int n, total = 0, best = 0;\n    struct Student s[50];\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) {\n        scanf(\"%29s %d\", s[i].name, &s[i].score);\n        total += s[i].score;\n        if (s[i].score > s[best].score) best = i;\n    }\n    printf(\"%s %.1f\\n\", s[best].name, (double)total / n);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <iomanip>\n#include <string>\n#include <vector>\nusing namespace std;\n\nstruct Student {\n    string name;\n    int score;\n};\n\nint main() {\n    int n, total = 0, best = 0;\n    cin >> n;\n    vector<Student> s(n);\n    for (int i = 0; i < n; i++) {\n        cin >> s[i].name >> s[i].score;\n        total += s[i].score;\n        if (s[i].score > s[best].score) best = i;\n    }\n    cout << s[best].name << \" \" << fixed << setprecision(1)\n         << (double)total / n << endl;\n    return 0;\n}\n",
+    "A struct bundles related data so one array holds whole records instead of parallel arrays." },
+  { "Balanced Brackets", "Stacks", 2, 4, 4,
+    "A string of ( ) [ ] { } is balanced if every bracket is closed by the matching kind in the right order. Print yes or no.",
+    "Input: one string with no spaces.\nOutput: yes or no",
+    { { "([]{})", "yes" },{ "(]", "no" },{ "(((", "no" },{ "{[()]}()", "yes" } },
+    { "Use a stack: push every opening bracket.","On a closing bracket the top of the stack must be its matching opener - pop it. If the stack is empty or the kind differs, answer no.","At the end the stack must be empty. In C use a char array plus an int top; in C++ use std::stack<char>." },
+    "use a stack to match brackets",
+    "#include <stdio.h>\n\nint main(void) {\n    char s[200], st[200];\n    int top = 0, ok = 1;\n    scanf(\"%199s\", s);\n    for (int i = 0; s[i] && ok; i++) {\n        char c = s[i];\n        if (c == '(' || c == '[' || c == '{') st[top++] = c;\n        else {\n            char o = c == ')' ? '(' : c == ']' ? '[' : '{';\n            if (top == 0 || st[top - 1] != o) ok = 0;\n            else top--;\n        }\n    }\n    printf(ok && top == 0 ? \"yes\\n\" : \"no\\n\");\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <stack>\nusing namespace std;\n\nint main() {\n    string s;\n    cin >> s;\n    stack<char> st;\n    bool ok = true;\n    for (char c : s) {\n        if (c == '(' || c == '[' || c == '{') st.push(c);\n        else {\n            char o = c == ')' ? '(' : c == ']' ? '[' : '{';\n            if (st.empty() || st.top() != o) {\n                ok = false;\n                break;\n            }\n            st.pop();\n        }\n    }\n    cout << (ok && st.empty() ? \"yes\" : \"no\") << endl;\n    return 0;\n}\n",
+    "A stack (last in, first out) matches nested structure perfectly - the same idea parsers use." },
+};
 
 static struct {
     unsigned char read[2][NLESSONS];
@@ -1555,6 +1751,74 @@ static void SaveProgress(void)
     fwrite(&prog, sizeof prog, 1, f);
     fclose(f);
 }
+
+/* ---- profile: practice progress, streak, XP and mastery (Khan-Academy style) ---- */
+typedef struct {
+    int magic;
+    unsigned char solved[2][NPROB];       /* per language */
+    int attempts[2][NPROB];
+    unsigned char hints[NPROB];           /* hints revealed */
+    int lastDay, streak, bestStreak;
+} Profile;
+static Profile pro;
+static const char* DIFF_NAME[3] = { "Easy", "Medium", "Hard" };
+static const Color DIFF_COL[3] = { { 52, 199, 120, 255 }, { 255, 184, 64, 255 }, { 240, 92, 104, 255 } };
+static const int DIFF_XP[3] = { 15, 25, 40 }, DIFF_CR[3] = { 10, 20, 35 };
+
+static int DayNow(void) { return (int)(time(NULL) / 86400); }
+static void SaveProfile(void)
+{
+    FILE* f = fopen("profile.dat", "wb");
+    if (f) { fwrite(&pro, sizeof pro, 1, f); fclose(f); }
+}
+static void LoadProfile(void)
+{
+    memset(&pro, 0, sizeof pro);
+    FILE* f = fopen("profile.dat", "rb");
+    if (f) { Profile t; if (fread(&t, sizeof t, 1, f) == 1 && t.magic == (int)0xC0DE0002) pro = t; fclose(f); }
+    pro.magic = (int)0xC0DE0002;
+    int d = DayNow();
+    if (pro.lastDay != d) {                                   /* opening the app on consecutive days builds a streak */
+        pro.streak = (pro.lastDay == d - 1) ? pro.streak + 1 : 1;
+        if (pro.streak > pro.bestStreak) pro.bestStreak = pro.streak;
+        pro.lastDay = d;
+        SaveProfile();
+    }
+}
+
+static int ProbsInLesson(int les) { int n = 0; for (int i = 0; i < NPROB; i++) if (PROBS[i].lesson == les) n++; return n; }
+static int SolvedInLesson(int lg, int les) { int n = 0; for (int i = 0; i < NPROB; i++) if (PROBS[i].lesson == les && pro.solved[lg][i]) n++; return n; }
+static int SolvedTotal(int lg) { int n = 0; for (int i = 0; i < NPROB; i++) n += pro.solved[lg][i]; return n; }
+static int DiffTotal(int d) { int n = 0; for (int i = 0; i < NPROB; i++) if (PROBS[i].diff == d) n++; return n; }
+static int DiffSolved(int lg, int d) { int n = 0; for (int i = 0; i < NPROB; i++) if (PROBS[i].diff == d && pro.solved[lg][i]) n++; return n; }
+
+/* mastery of one lesson, 0..100: reading 20, quiz 30, coding challenges 50 */
+static int Mastery(int lg, int les)
+{
+    const Lesson* L = &LESSONS[lg][les];
+    float m = prog.read[lg][les] ? 20.0f : 0.0f;
+    if (prog.best[lg][les] >= 0) m += 30.0f * prog.best[lg][les] / L->nQ;
+    int n = ProbsInLesson(les);
+    if (n) m += 50.0f * SolvedInLesson(lg, les) / n; else m += 50.0f * (prog.best[lg][les] >= 0 ? 1 : 0);
+    return (int)(m + 0.5f);
+}
+static const char* MasteryName(int m) { return m <= 0 ? "Not started" : m < 35 ? "Attempted" : m < 65 ? "Familiar" : m < 100 ? "Proficient" : "Mastered"; }
+static Color MasteryCol(int m) { return m <= 0 ? DIM : m < 35 ? (Color) { 100, 170, 255, 255 } : m < 65 ? (Color) { 70, 200, 190, 255 } : m < 100 ? (Color) { 255, 184, 64, 255 } : (Color) { 255, 214, 90, 255 }; }
+
+static int XpTotal(void)
+{
+    int xp = 0;
+    for (int l = 0; l < 2; l++) {
+        for (int i = 0; i < NLESSONS; i++) { if (prog.read[l][i]) xp += 10; if (prog.best[l][i] > 0) xp += 10 * prog.best[l][i]; }
+        for (int i = 0; i < NPROB; i++) if (pro.solved[l][i]) xp += DIFF_XP[PROBS[i].diff];
+    }
+    return xp;
+}
+static int LevelOf(int xp) { int l = 1; while (xp >= 30 * l * l) l++; return l; }
+
+/* the lesson to continue with, and what to do next in it */
+static int NextLesson(int lg) { for (int i = 0; i < NLESSONS; i++) if (Mastery(lg, i) < 100) return i; return 0; }
+static int DailyProblem(void) { return DayNow() % NPROB; }
 
 /* ------------------------------------------------------------------ */
 /*  Fonts and text helpers                                             */
@@ -1727,7 +1991,8 @@ static bool IsKeyword(const char* w)
         "static", "struct", "typedef", "enum", "if", "else", "for", "while", "do", "switch",
         "case", "default", "break", "continue", "return", "sizeof", "class", "public",
         "private", "protected", "virtual", "override", "new", "delete", "template",
-        "typename", "namespace", "using", "auto", "true", "false", "nullptr", "NULL", NULL
+        "typename", "namespace", "using", "auto", "true", "false", "nullptr", "NULL",
+        "def", "elif", "and", "or", "not", "in", "pass", "None", "True", "False", "global", NULL
     };
     for (int i = 0; kw[i]; i++)
         if (strcmp(w, kw[i]) == 0) return true;
@@ -1835,64 +2100,271 @@ static void StartLesson(int idx) { lessonIdx = idx; page = 0; scroll = 0; screen
 /* ------------------------------------------------------------------ */
 /*  Screens                                                            */
 /* ------------------------------------------------------------------ */
-static void DrawMenu(Color accent)
+/* ---- main menu: sidebar dashboard with a learning path and a practice list ---- */
+static void StartProblem(int idx);
+static int menuTab = 0, pracDiff = -1, pracLesson = -1;
+static bool pracUnsolved = false;
+static float pracScroll = 0;
+
+static void DrawCheck(float cx, float cy, float r, Color c)
 {
-    fromWorld = false;
-    TopBar();
-    DrawRectangleRounded((Rectangle) { 36, 16, 40, 40 }, 0.3f, 10, accent);
-    CenterTxt(fCode, "</>", 56, 27, 16, WHITE);
-    Txt(fBold, "CodeQuest", 90, 10, 28, TXT);
-    Txt(fReg, "Learn C & C++ interactively", 92, 46, 12, DIM);
+    DrawLineEx((Vector2) { cx - r * 0.45f, cy }, (Vector2) { cx - r * 0.1f, cy + r * 0.38f }, 2.4f, c);
+    DrawLineEx((Vector2) { cx - r * 0.1f, cy + r * 0.38f }, (Vector2) { cx + r * 0.5f, cy - r * 0.4f }, 2.4f, c);
+}
+static void DrawFlame(float cx, float cy, float r, Color c)
+{
+    DrawCircle((int)cx, (int)(cy + r * 0.25f), r * 0.62f, c);
+    DrawTriangle((Vector2) { cx - r * 0.6f, cy + r * 0.1f }, (Vector2) { cx + r * 0.6f, cy + r * 0.1f }, (Vector2) { cx + r * 0.05f, cy - r * 1.05f }, c);
+    DrawCircle((int)cx, (int)(cy + r * 0.4f), r * 0.28f, (Color) { 255, 226, 120, 255 });
+}
+static void NavIcon(int k, float cx, float cy, Color c)
+{
+    switch (k) {
+    case 0: DrawRectangleRounded((Rectangle) { cx - 10, cy - 8, 9, 16 }, 0.2f, 4, c); DrawRectangleRounded((Rectangle) { cx + 1, cy - 8, 9, 16 }, 0.2f, 4, Fade(c, 0.7f)); break;
+    case 1: DrawTextEx(fCode, "{ }", (Vector2) { cx - 14, cy - 9 }, 17, 0, c); break;
+    case 2: DrawTextEx(fCode, ">_", (Vector2) { cx - 9, cy - 9 }, 17, 0, c); break;
+    case 3: DrawTriangle((Vector2) { cx - 11, cy - 1 }, (Vector2) { cx + 11, cy - 1 }, (Vector2) { cx, cy - 11 }, c); DrawRectangle((int)cx - 8, (int)cy - 1, 16, 11, Fade(c, 0.8f)); break;
+    case 4: DrawLineEx((Vector2) { cx, cy + 10 }, (Vector2) { cx, cy - 2 }, 2.5f, c); DrawEllipse((int)cx - 6, (int)cy - 4, 6, 3.5f, c); DrawEllipse((int)cx + 6, (int)cy - 7, 6, 3.5f, c); break;
+    case 6: DrawRectangleRounded((Rectangle) { cx - 11, cy - 9, 12, 8 }, 0.3f, 4, c); DrawRectangleRounded((Rectangle) { cx - 1, cy + 1, 12, 8 }, 0.3f, 4, Fade(c, 0.7f)); DrawLineEx((Vector2) { cx - 5, cy - 1 }, (Vector2) { cx + 5, cy + 5 }, 2, c); break;
+    default: DrawCircle((int)cx, (int)cy, 10, c); DrawCircle((int)cx, (int)cy, 6, Fade(BLACK, 0.25f)); break;
+    }
+}
 
-    int done = 0, total = 2 * NLESSONS * 2;
-    for (int l = 0; l < 2; l++)
-        for (int i = 0; i < NLESSONS; i++) {
-            done += prog.read[l][i] ? 1 : 0;
-            done += prog.best[l][i] >= 0 ? 1 : 0;
+static void MenuSidebar(Color accent)
+{
+    DrawRectangle(0, 0, 236, H, (Color) { 12, 14, 21, 255 });
+    DrawLine(236, 0, 236, H, BORDER);
+    DrawRectangleRounded((Rectangle) { 20, 20, 42, 42 }, 0.3f, 10, accent);
+    CenterTxt(fCode, "</>", 41, 31, 16, WHITE);
+    Txt(fBold, "CodeQuest", 72, 14, 25, TXT);
+    Txt(fReg, "C & C++ academy", 74, 44, 12, DIM);
+
+    static const char* nm[7] = { "Learn", "Practice", "Coding Lab", "Campus & Arena", "Mower Farm", "Shop", "Memory Lab" };
+    for (int i = 0; i < 7; i++) {
+        Rectangle r = { 12, 92.0f + i * 50 + (i >= 2 ? 22 : 0), 212, 44 };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r), act = i < 2 && i == menuTab;
+        if (hov) hand = true;
+        if (act) { DrawRectangleRounded(r, 0.25f, 8, Fade(accent, 0.18f)); DrawRectangleRounded((Rectangle) { r.x, r.y + 8, 4, r.height - 16 }, 0.5f, 4, accent); }
+        else if (hov) DrawRectangleRounded(r, 0.25f, 8, SURF2);
+        NavIcon(i, r.x + 30, r.y + 22, act ? accent : (hov ? TXT : DIM));
+        Txt(fBold, nm[i], r.x + 58, r.y + 10, 18, act || hov ? TXT : (Color) { 180, 188, 208, 255 });
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            if (i < 2) { menuTab = i; pracScroll = 0; }
+            else if (i == 2) StartLab();
+            else if (i == 3) WorldEnter();
+            else if (i == 4) StartFarm();
+            else if (i == 5) StartShop();
+            else StartMem();
         }
-    const char* pt = TextFormat("Overall progress  %d%%", done * 100 / total);
-    Txt(fMed, pt, W - 36 - 300, 14, 15, DIM);
-    DrawRectangleRounded((Rectangle) { W - 36 - 300, 42, 300, 8 }, 0.5f, 10, SURF2);
-    if (done) DrawRectangleRounded((Rectangle) { W - 36 - 300, 42, 300.0f * done / total, 8 }, 0.5f, 10, accent);
-    DrawCreditsChip(W - 36 - 300 - 20, 16);
+    }
+    Txt(fBold, "SPACES", 24, 92.0f + 2 * 50 + 4, 11, (Color) { 90, 98, 122, 255 });
 
-    /* segmented language control */
-    Panel((Rectangle) { 36, 96, 300, 48 }, 0.3f, SURF, BORDER);
+    /* language switch */
+    Panel((Rectangle) { 16, 520, 204, 44 }, 0.3f, SURF, BORDER);
     for (int l = 0; l < 2; l++) {
-        Rectangle r = { 40.0f + l * 146, 100, 146, 40 };
+        Rectangle r = { 20.0f + l * 98, 524, 96, 36 };
         bool hov = CheckCollisionPointRec(GetMousePosition(), r);
         if (hov) hand = true;
         if (l == lang) DrawRectangleRounded(r, 0.3f, 10, ACCENTS[l]);
-        CenterTxt(fMed, LANG_NAME[l], r.x + r.width / 2, r.y + 8, 20, l == lang ? WHITE : DIM);
+        CenterTxt(fMed, LANG_NAME[l], r.x + r.width / 2, r.y + 6, 19, l == lang ? WHITE : DIM);
         if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) lang = l;
     }
-    if (Button((Rectangle) { 526, 96, 160, 48 }, "Mower Farm", (Color) { 70, 150, 70, 255 }, 16)) StartFarm();
-    if (Button((Rectangle) { 362, 96, 150, 48 }, "Shop", (Color) { 200, 80, 150, 255 }, 16)) StartShop();
-    if (Button((Rectangle) { W - 36 - 260, 96, 260, 48 }, "Walk the campus  >", accent, 16)) WorldEnter();
-    if (Button((Rectangle) { W - 36 - 260 - 16 - 190, 96, 190, 48 }, "Coding Lab", (Color) { 40, 150, 145, 255 }, 16)) StartLab();
+    /* level and streak */
+    int xp = XpTotal(), lv = LevelOf(xp), lo = 30 * (lv - 1) * (lv - 1), hi = 30 * lv * lv;
+    Rectangle pc = { 16, 580, 204, 164 };
+    Panel(pc, 0.08f, SURF, BORDER);
+    DrawCircle(46, 614, 20, Fade(accent, 0.2f));
+    DrawRing((Vector2) { 46, 614 }, 17, 20, -90, -90 + 360.0f * (xp - lo) / (hi - lo), 40, accent);
+    CenterTxt(fBold, TextFormat("%d", lv), 46, 603, 19, TXT);
+    Txt(fBold, TextFormat("Level %d", lv), 80, 598, 18, TXT);
+    Txt(fReg, TextFormat("%d / %d XP", xp, hi), 80, 622, 13, DIM);
+    DrawRectangleRounded((Rectangle) { 28, 650, 180, 7 }, 0.5f, 6, SURF2);
+    DrawRectangleRounded((Rectangle) { 28, 650, 180.0f * (xp - lo) / (hi - lo), 7 }, 0.5f, 6, accent);
+    DrawFlame(40, 689, 11, (Color) { 255, 140, 40, 255 });
+    Txt(fBold, TextFormat("%d day streak", pro.streak), 60, 679, 16, TXT);
+    Txt(fReg, TextFormat("Best: %d    Solved: %d", pro.bestStreak, SolvedTotal(lang)), 28, 710, 13, DIM);
+}
 
-    /* lesson cards */
+static void MenuHeader(const char* title, const char* sub)
+{
+    Txt(fBold, title, 268, 22, 31, TXT);
+    Txt(fReg, sub, 270, 62, 15, DIM);
+    DrawCreditsChip(W - 32, 24);
+}
+
+/* what the "Continue" button does for a lesson */
+static const char* NextStepText(int lg, int les, int* action, int* prob)
+{
+    *action = 0; *prob = -1;
+    if (!prog.read[lg][les]) { *action = 0; return "Next: read the lesson"; }
+    if (prog.best[lg][les] < 0) { *action = 1; return "Next: take the quiz"; }
+    for (int i = 0; i < NPROB; i++) if (PROBS[i].lesson == les && !pro.solved[lg][i]) { *action = 2; *prob = i; return TextFormat("Next: solve \"%s\"", PROBS[i].title); }
+    if (prog.best[lg][les] < LESSONS[lg][les].nQ) { *action = 1; return "Next: retake the quiz for a perfect score"; }
+    *action = 0; return "Review the lesson any time";
+}
+
+static void MenuLearn(Color accent)
+{
+    int overall = 0;
+    for (int i = 0; i < NLESSONS; i++) overall += Mastery(lang, i);
+    overall /= NLESSONS;
+    MenuHeader("Your learning path", TextFormat("%s  -  %d%% mastered  -  read, quiz, then write real code to master each unit", LANG_NAME[lang], overall));
+
+    /* continue card */
+    int cl = NextLesson(lang), act, np, cm = Mastery(lang, cl);
+    const char* step = NextStepText(lang, cl, &act, &np);
+    Rectangle hero = { 268, 96, 560, 148 };
+    Panel(hero, 0.07f, SURF, BORDER);
+    DrawRectangleRounded((Rectangle) { hero.x, hero.y, 6, hero.height }, 0.5f, 4, accent);
+    Txt(fBold, "CONTINUE LEARNING", hero.x + 26, hero.y + 16, 12, accent);
+    TxtFit(fBold, LESSONS[lang][cl].name + 3, hero.x + 26, hero.y + 36, 27, 380, TXT);
+    TxtFit(fReg, step, hero.x + 26, hero.y + 78, 15, 380, (Color) { 190, 198, 216, 255 });
+    DrawRectangleRounded((Rectangle) { hero.x + 26, hero.y + 112, 380, 8 }, 0.5f, 6, SURF2);
+    if (cm) DrawRectangleRounded((Rectangle) { hero.x + 26, hero.y + 112, 380.0f * cm / 100, 8 }, 0.5f, 6, MasteryCol(cm));
+    Txt(fBold, TextFormat("%s  %d%%", MasteryName(cm), cm), hero.x + 418, hero.y + 106, 14, MasteryCol(cm));
+    if (Button((Rectangle) { hero.x + hero.width - 132, hero.y + 34, 112, 46 }, "Continue", accent, 17)) {
+        if (act == 1) { lessonIdx = cl; StartQuiz(); }
+        else if (act == 2) StartProblem(np);
+        else StartLesson(cl);
+    }
+
+    /* problem of the day */
+    int dp = DailyProblem();
+    const Prob* DP = &PROBS[dp];
+    Rectangle dc = { 844, 96, 324, 148 };
+    Panel(dc, 0.07f, SURF, BORDER);
+    Txt(fBold, "PROBLEM OF THE DAY", dc.x + 20, dc.y + 16, 12, (Color) { 255, 184, 64, 255 });
+    TxtFit(fBold, DP->title, dc.x + 20, dc.y + 36, 22, 280, TXT);
+    Pill(DIFF_NAME[DP->diff], dc.x + 20, dc.y + 72, DIFF_COL[DP->diff]);
+    Txt(fReg, DP->topic, dc.x + 28 + TxtW(fMed, DIFF_NAME[DP->diff], 14) + 28, dc.y + 76, 14, DIM);
+    if (pro.solved[lang][dp]) { DrawCheck(dc.x + 36, dc.y + 120, 12, GOOD); Txt(fBold, "Solved", dc.x + 56, dc.y + 111, 16, GOOD); }
+    if (Button((Rectangle) { dc.x + dc.width - 120, dc.y + 100, 100, 38 }, pro.solved[lang][dp] ? "Again" : "Solve", (Color) { 214, 140, 30, 255 }, 15)) StartProblem(dp);
+
+    /* course path */
+    Txt(fBold, "COURSE PATH", 268, 262, 12, DIM);
     for (int i = 0; i < NLESSONS; i++) {
         const Lesson* L = &LESSONS[lang][i];
-        float y = 168.0f + i * 108;
-        Rectangle card = { 36, y, W - 72, 96 };
-        bool hov = CheckCollisionPointRec(GetMousePosition(), card);
-        Panel(card, 0.14f, hov ? SURF2 : SURF, hov ? accent : BORDER);
-        DrawRectangleRounded((Rectangle) { 36, y + 18, 5, 60 }, 0.5f, 6, accent);
-
-        DrawCircle(92, (int)y + 48, 24, Fade(accent, 0.18f));
-        CenterTxt(fBold, TextFormat("%d", i + 1), 92, y + 35, 22, accent);
-        TxtFit(fBold, L->name + 3, 138, y + 16, 23, 400, TXT);
-        Txt(fReg, TextFormat("%d pages  -  %d questions", L->nPages, L->nQ), 138, y + 55, 15, DIM);
-
-        if (prog.read[lang][i]) Pill("Lesson read", 560, y + 14, GOOD);
-        else                    Pill("Not started", 560, y + 14, DIM);
-        if (prog.best[lang][i] >= 0) Pill(TextFormat("Best %d/%d", prog.best[lang][i], L->nQ), 560, y + 54, GOOD);
-        else                         Pill("Quiz not taken", 560, y + 54, DIM);
-
-        if (Button((Rectangle) { 900, y + 24, 112, 48 }, "Learn", accent, 17)) StartLesson(i);
-        if (Button((Rectangle) { 1026, y + 24, 112, 48 }, "Quiz", SURF2, 17)) { lessonIdx = i; StartQuiz(); }
+        float y = 284.0f + i * 92;
+        Rectangle row = { 268, y, 900, 82 };
+        int m = Mastery(lang, i); Color mc = MasteryCol(m);
+        bool hov = CheckCollisionPointRec(GetMousePosition(), row);
+        Panel(row, 0.1f, hov ? SURF2 : SURF, hov ? Fade(mc, 0.8f) : BORDER);
+        Vector2 c = { row.x + 46, y + 41 };
+        DrawRing(c, 25, 30, 0, 360, 48, SURF2);
+        if (m) DrawRing(c, 25, 30, -90, -90 + 360.0f * m / 100, 48, mc);
+        if (m >= 100) DrawCheck(c.x, c.y, 16, mc); else CenterTxt(fBold, TextFormat("%d", i + 1), c.x, c.y - 12, 22, m ? mc : DIM);
+        TxtFit(fBold, L->name + 3, row.x + 94, y + 10, 22, 330, TXT);
+        Pill(MasteryName(m), row.x + 94, y + 44, mc);
+        float sx = row.x + 94 + TxtW(fMed, MasteryName(m), 14) + 28 + 18;
+        const char* s1 = prog.read[lang][i] ? "Lesson done" : "Lesson", * s2 = prog.best[lang][i] >= 0 ? TextFormat("Quiz %d/%d", prog.best[lang][i], L->nQ) : "Quiz",
+            * s3 = TextFormat("Code %d/%d", SolvedInLesson(lang, i), ProbsInLesson(i));
+        bool d1 = prog.read[lang][i], d2 = prog.best[lang][i] >= 0, d3 = SolvedInLesson(lang, i) == ProbsInLesson(i);
+        const char* ss[3] = { s1, s2, s3 }; bool dd[3] = { d1, d2, d3 };
+        for (int k = 0; k < 3; k++) {
+            DrawCircle((int)sx + 7, (int)y + 58, 7, dd[k] ? GOOD : SURF2);
+            if (dd[k]) DrawCheck(sx + 7, y + 58, 9, WHITE);
+            Txt(fReg, ss[k], sx + 20, y + 49, 14, dd[k] ? (Color) { 190, 198, 216, 255 } : DIM);
+            sx += 20 + TxtW(fReg, ss[k], 14) + 22;
+        }
+        if (Button((Rectangle) { row.x + row.width - 332, y + 20, 100, 42 }, "Learn", accent, 16)) StartLesson(i);
+        if (Button((Rectangle) { row.x + row.width - 224, y + 20, 100, 42 }, "Quiz", SURF2, 16)) { lessonIdx = i; StartQuiz(); }
+        if (Button((Rectangle) { row.x + row.width - 116, y + 20, 100, 42 }, "Code", (Color) { 40, 150, 145, 255 }, 16)) { menuTab = 1; pracLesson = i; pracDiff = -1; pracUnsolved = false; pracScroll = 0; }
     }
+}
+
+static void MenuPractice(Color accent)
+{
+    MenuHeader("Practice", TextFormat("%s  -  write real %s programs; every submission is compiled and run against test cases", LANG_NAME[lang], LANG_NAME[lang]));
+    for (int d = 0; d < 3; d++) {
+        Rectangle c = { 268.0f + d * 304, 96, 292, 76 };
+        Panel(c, 0.12f, SURF, BORDER);
+        Txt(fBold, DIFF_NAME[d], c.x + 18, c.y + 10, 17, DIFF_COL[d]);
+        Txt(fBold, TextFormat("%d / %d", DiffSolved(lang, d), DiffTotal(d)), c.x + c.width - 18 - TxtW(fBold, TextFormat("%d / %d", DiffSolved(lang, d), DiffTotal(d)), 17), c.y + 10, 17, TXT);
+        DrawRectangleRounded((Rectangle) { c.x + 18, c.y + 48, c.width - 36, 8 }, 0.5f, 6, SURF2);
+        if (DiffSolved(lang, d)) DrawRectangleRounded((Rectangle) { c.x + 18, c.y + 48, (c.width - 36)* DiffSolved(lang, d) / DiffTotal(d), 8 }, 0.5f, 6, DIFF_COL[d]);
+    }
+    /* filters */
+    static const char* fl[4] = { "All", "Easy", "Medium", "Hard" };
+    float fx = 268;
+    for (int i = 0; i < 4; i++) {
+        float w = TxtW(fMed, fl[i], 15) + 34;
+        Rectangle r = { fx, 186, w, 34 };
+        bool on = pracDiff == i - 1, hov = CheckCollisionPointRec(GetMousePosition(), r);
+        if (hov) hand = true;
+        DrawRectangleRounded(r, 0.5f, 10, on ? (i ? DIFF_COL[i - 1] : accent) : (hov ? SURF2 : SURF));
+        CenterTxt(fMed, fl[i], r.x + w / 2, r.y + 6, 15, on ? (Color) { 10, 12, 18, 255 } : DIM);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { pracDiff = i - 1; pracScroll = 0; }
+        fx += w + 8;
+    }
+    {
+        const char* t = "Unsolved only"; float w = TxtW(fMed, t, 15) + 50;
+        Rectangle r = { fx + 12, 186, w, 34 };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+        if (hov) hand = true;
+        DrawRectangleRounded(r, 0.5f, 10, hov ? SURF2 : SURF);
+        DrawCircle((int)r.x + 20, (int)r.y + 17, 8, pracUnsolved ? accent : SURF2);
+        if (pracUnsolved) DrawCheck(r.x + 20, r.y + 17, 12, WHITE);
+        Txt(fMed, t, r.x + 36, r.y + 6, 15, pracUnsolved ? TXT : DIM);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { pracUnsolved = !pracUnsolved; pracScroll = 0; }
+        fx = r.x + w + 8;
+    }
+    if (pracLesson >= 0) {
+        const char* t = TextFormat("Unit %d  x", pracLesson + 1); float w = TxtW(fMed, t, 15) + 30;
+        Rectangle r = { fx, 186, w, 34 };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+        if (hov) hand = true;
+        DrawRectangleRounded(r, 0.5f, 10, Fade(accent, hov ? 0.4f : 0.25f));
+        CenterTxt(fMed, t, r.x + w / 2, r.y + 6, 15, TXT);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { pracLesson = -1; pracScroll = 0; }
+    }
+
+    /* table */
+    Rectangle th = { 268, 232, 900, 30 };
+    DrawRectangle((int)th.x, (int)th.y, (int)th.width, (int)th.height, SURF);
+    Txt(fBold, "STATUS", th.x + 16, th.y + 7, 12, DIM); Txt(fBold, "TITLE", th.x + 90, th.y + 7, 12, DIM);
+    Txt(fBold, "TOPIC", th.x + 520, th.y + 7, 12, DIM); Txt(fBold, "UNIT", th.x + 690, th.y + 7, 12, DIM); Txt(fBold, "DIFFICULTY", th.x + 790, th.y + 7, 12, DIM);
+    int idx[NPROB], n = 0;
+    for (int i = 0; i < NPROB; i++) {
+        if (pracDiff >= 0 && PROBS[i].diff != pracDiff) continue;
+        if (pracLesson >= 0 && PROBS[i].lesson != pracLesson) continue;
+        if (pracUnsolved && pro.solved[lang][i]) continue;
+        idx[n++] = i;
+    }
+    Rectangle view = { 268, 262, 900, 486 };
+    const float rh = 44;
+    float maxS = n * rh - view.height; if (maxS < 0) maxS = 0;
+    if (CheckCollisionPointRec(GetMousePosition(), view)) pracScroll -= GetMouseWheelMove() * 44;
+    if (pracScroll < 0) pracScroll = 0;
+    if (pracScroll > maxS) pracScroll = maxS;
+    ScissorT((int)view.x, (int)view.y, (int)view.width, (int)view.height);
+    if (!n) CenterTxt(fReg, "No problems match these filters.", view.x + view.width / 2, view.y + 60, 17, DIM);
+    for (int k = 0; k < n; k++) {
+        int i = idx[k]; float y = view.y + k * rh - pracScroll;
+        if (y > view.y + view.height || y + rh < view.y) continue;
+        Rectangle r = { view.x, y, view.width, rh };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r) && CheckCollisionPointRec(GetMousePosition(), view);
+        DrawRectangleRec(r, hov ? SURF2 : (k & 1 ? (Color) { 18, 21, 31, 255 } : (Color) { 15, 17, 25, 255 }));
+        if (hov) hand = true;
+        float cy = y + rh / 2;
+        if (pro.solved[lang][i]) { DrawCircle((int)r.x + 30, (int)cy, 11, GOOD); DrawCheck(r.x + 30, cy, 14, WHITE); }
+        else if (pro.attempts[lang][i]) DrawRing((Vector2) { r.x + 30, cy }, 8, 11, 0, 360, 24, (Color) { 255, 184, 64, 255 });
+        else DrawRing((Vector2) { r.x + 30, cy }, 9, 11, 0, 360, 24, BORDER);
+        Txt(fMed, TextFormat("%d.  %s", i + 1, PROBS[i].title), r.x + 90, y + 10, 18, TXT);
+        if (i == DailyProblem()) Pill("Today", r.x + 90 + TxtW(fMed, TextFormat("%d.  %s", i + 1, PROBS[i].title), 18) + 14, y + 8, (Color) { 255, 184, 64, 255 });
+        Txt(fReg, PROBS[i].topic, r.x + 520, y + 12, 15, DIM);
+        Txt(fReg, TextFormat("Unit %d", PROBS[i].lesson + 1), r.x + 690, y + 12, 15, DIM);
+        Txt(fBold, DIFF_NAME[PROBS[i].diff], r.x + 790, y + 11, 16, DIFF_COL[PROBS[i].diff]);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) StartProblem(i);
+    }
+    EndScissorMode();
+}
+
+static void DrawMenu(Color accent)
+{
+    fromWorld = false;
+    MenuSidebar(accent);
+    if (menuTab == 0) MenuLearn(accent); else MenuPractice(accent);
+    DrawCompanion(950, 66, 1.0f, MOOD_IDLE, true);
 }
 
 static void DrawLesson(Color accent)
@@ -1909,9 +2381,10 @@ static void DrawLesson(Color accent)
         int cx = W - 48 - (L->nPages - 1 - p) * 26;
         DrawCircle(cx, 36, p == page ? 7 : 5, p == page ? accent : BORDER);
     }
+    DrawCompanion(1122, 668, 1.6f, MOOD_IDLE, false);
 
     /* scrollable content */
-    BeginScissorMode(0, 73, W, 611);
+    ScissorT(0, 73, W, 611);
     float y = 108 - scroll;
     Txt(fBold, TextFormat("LESSON %d   -   PAGE %d OF %d", lessonIdx + 1, page + 1, L->nPages), x0, y, 14, accent);
     y += 28;
@@ -1937,7 +2410,8 @@ static void DrawLesson(Color accent)
     /* footer */
     DrawRectangle(0, 684, W, H - 684, SURF);
     DrawLine(0, 684, W, 684, BORDER);
-    CenterTxt(fReg, "Use the left / right arrow keys to change page", W / 2.0f, 710, 14, DIM);
+    CenterTxt(fReg, "Left / right arrow keys change page", W / 2.0f, 688, 12, DIM);
+    if (Button((Rectangle) { W / 2.0f - 120, 704, 240, 44 }, "Try this code in the Lab", (Color) { 40, 150, 145, 255 }, 16)) TryIt(P->code);
 
     bool last = (page == L->nPages - 1);
     if (last && !prog.read[lang][lessonIdx]) { prog.read[lang][lessonIdx] = 1; SaveProgress(); GainCredits(5, "Lesson complete"); }
@@ -2118,6 +2592,7 @@ static void DrawQuiz(Color accent)
         }
     }
 
+    DrawCompanion(1122, 668, 1.7f, sel < 0 ? MOOD_THINK : (sel == Q->correct ? MOOD_CHEER : MOOD_SAD), false);
     DrawRectangle(0, 684, W, H - 684, SURF);
     DrawLine(0, 684, W, 684, BORDER);
     if (sel < 0) {
@@ -2182,6 +2657,7 @@ static void DrawResult(Color accent)
     if (Button((Rectangle) { bx, 550, 180, 52 }, "Retry quiz", accent, 16)) StartQuiz();
     if (Button((Rectangle) { bx + 194, 550, 180, 52 }, "Review lesson", SURF2, 16)) StartLesson(lessonIdx);
     if (Button((Rectangle) { bx + 388, 550, 180, 52 }, (fromWorld ? "Campus" : "Menu"), SURF2, 16)) GoMenu();
+    DrawCompanion(1060, 640, 2.2f, score == L->nQ ? MOOD_CHEER : (score * 2 >= L->nQ ? MOOD_IDLE : MOOD_SAD), false);
 }
 
 /* ------------------------------------------------------------------ */
@@ -3289,7 +3765,7 @@ static void DrawBoard(const char* room, const char* title, float sx, float sy, f
 {
     DrawRectangleRounded((Rectangle) { sx, sy, w, h }, 0.1f, 6, (Color) { 120, 80, 45, 255 });
     DrawRectangleRounded((Rectangle) { sx + 4, sy + 4, w - 8, h - 8 }, 0.08f, 6, (Color) { 34, 70, 56, 255 });
-    BeginScissorMode((int)sx + 4, (int)sy + 4, (int)w - 8, (int)h - 8);
+    ScissorT((int)sx + 4, (int)sy + 4, (int)w - 8, (int)h - 8);
     CenterFit(fReg, room, sx + w / 2, sy + 8, 13, w - 50, (Color) { 190, 215, 200, 255 });
     CenterFit(fBold, title, sx + w / 2, sy + 28, 24, w - 56, (Color) { 240, 245, 240, 255 });
     DrawRectangle((int)(sx + w / 2 - 30), (int)(sy + h - 14), 60, 2, (Color) { 190, 215, 200, 255 });
@@ -4536,6 +5012,7 @@ static void LabParseErrors(const char* text)
     }
 }
 
+static bool labReuseExe = false;                        /* the practice grader compiles once, then runs many tests */
 static void LabRun(void)
 {
     labErrN = 0; labOutLen = 0; labOut[0] = 0; labExit = 0;
@@ -4575,54 +5052,56 @@ static void LabRun(void)
         fclose(f);
     }
 
-    int rawLen = 0, rc;
-    FILE* chk = fopen(go, "rb");
-    if (chk) fclose(chk);
-    else {
-        snprintf(cmd, sizeof cmd, LAB_ENVP "gcc -c \"%s\" -o \"%s\" 2>&1", gc, go);
+    int rawLen = 0, rc = 0;
+    if (!labReuseExe) {
+        FILE* chk = fopen(go, "rb");
+        if (chk) fclose(chk);
+        else {
+            snprintf(cmd, sizeof cmd, LAB_ENVP "gcc -c \"%s\" -o \"%s\" 2>&1", gc, go);
+            rc = RunCapture(cmd, labRaw, (int)sizeof labRaw, &rawLen);
+            if (rc != 0) goto compile_failed_setup;
+        }
+
+        remove(exe);
+        if (labLang == 0)
+            snprintf(cmd, sizeof cmd, LAB_ENVP "gcc -std=gnu11 -Wall -fdiagnostics-color=never \"%s\" \"%s\" -o \"%s\" -lm 2>&1", src, go, exe);
+        else
+            snprintf(cmd, sizeof cmd, LAB_ENVP "g++ -std=c++17 -Wall -fdiagnostics-color=never \"%s\" \"%s\" -o \"%s\" 2>&1", src, go, exe);
         rc = RunCapture(cmd, labRaw, (int)sizeof labRaw, &rawLen);
-        if (rc != 0) goto compile_failed_setup;
-    }
 
-    remove(exe);
-    if (labLang == 0)
-        snprintf(cmd, sizeof cmd, LAB_ENVP "gcc -std=gnu11 -Wall -fdiagnostics-color=never \"%s\" \"%s\" -o \"%s\" -lm 2>&1", src, go, exe);
-    else
-        snprintf(cmd, sizeof cmd, LAB_ENVP "g++ -std=c++17 -Wall -fdiagnostics-color=never \"%s\" \"%s\" -o \"%s\" 2>&1", src, go, exe);
-    rc = RunCapture(cmd, labRaw, (int)sizeof labRaw, &rawLen);
+        {   /* show the file as "main.c" instead of its temp path */
+            char n1[320], n2[320];
+            snprintf(n1, sizeof n1, "%s/", dir);
+            snprintf(n2, sizeof n2, "%s\\", dir);
+            StrRemove(labRaw, n1);
+            StrRemove(labRaw, n2);
+            rawLen = (int)strlen(labRaw);
+        }
 
-    {   /* show the file as "main.c" instead of its temp path */
-        char n1[320], n2[320];
-        snprintf(n1, sizeof n1, "%s/", dir);
-        snprintf(n2, sizeof n2, "%s\\", dir);
-        StrRemove(labRaw, n1);
-        StrRemove(labRaw, n2);
-        rawLen = (int)strlen(labRaw);
-    }
-
-    if (rc != 0) {
-    compile_failed_setup:
-        if (strstr(labRaw, "not found") || strstr(labRaw, "not recognized")) {
-            labStatus = LAB_NO_COMPILER;
-            LabAppendStr("[Could not run the compiler]\n\n");
-            LabAppendStr(labLang == 0 ? "This lab needs gcc installed and on your PATH.\n" : "This lab needs g++ installed and on your PATH.\n");
-            LabAppendStr("Install it (for example MinGW-w64 on Windows, or the Xcode command line tools on macOS), then try again.\n\n");
+        if (rc != 0) {
+        compile_failed_setup:
+            if (strstr(labRaw, "not found") || strstr(labRaw, "not recognized")) {
+                labStatus = LAB_NO_COMPILER;
+                LabAppendStr("[Could not run the compiler]\n\n");
+                LabAppendStr(labLang == 0 ? "This lab needs gcc installed and on your PATH.\n" : "This lab needs g++ installed and on your PATH.\n");
+                LabAppendStr("Install it (for example MinGW-w64 on Windows, or the Xcode command line tools on macOS), then try again.\n\n");
+                LabAppend(labRaw, rawLen);
+                return;
+            }
+            labStatus = LAB_COMPILE_ERR;
+            LabAppendStr("[Compile error - fix the problems below and run again]\n\n");
+            int start = labOutLen;
             LabAppend(labRaw, rawLen);
+            LabParseErrors(labOut + start);
             return;
         }
-        labStatus = LAB_COMPILE_ERR;
-        LabAppendStr("[Compile error - fix the problems below and run again]\n\n");
-        int start = labOutLen;
-        LabAppend(labRaw, rawLen);
-        LabParseErrors(labOut + start);
-        return;
-    }
 
-    bool warned = rawLen > 0;
-    if (warned) {
-        LabAppendStr("[Compiler warnings]\n");
-        LabAppend(labRaw, rawLen);
-        LabAppendStr("\n[Program output]\n");
+        bool warned = rawLen > 0;
+        if (warned) {
+            LabAppendStr("[Compiler warnings]\n");
+            LabAppend(labRaw, rawLen);
+            LabAppendStr("\n[Program output]\n");
+        }
     }
 
     snprintf(cmd, sizeof cmd, "\"%s\" < \"%s\" 2>&1", exe, inp);
@@ -4663,8 +5142,9 @@ static void LabRun(void)
 /* layout: the console (debug log) sits under the editor, or beside it if you switch */
 static int labW = 1152, labH = 330, labOX = 24, labOY = 480, labOW = 1152, labOH = 200;
 static bool labBottom = true;
-#define LAB_X 24
-#define LAB_Y 140
+static int labX = 24, labY = 140;
+#define LAB_X labX
+#define LAB_Y labY
 #define LAB_W labW
 #define LAB_H labH
 #define LAB_GUT 56
@@ -4677,6 +5157,7 @@ static bool labBottom = true;
 
 static void LabLayout(void)
 {
+    labX = 24; labY = 140;                       /* other screens (farm, practice) move the shared editor, so reset it */
     if (labBottom) { labW = W - 48; labH = 330; labOX = 24; labOY = 480; labOW = W - 48; labOH = 200; }
     else { labW = 700;    labH = 536; labOX = 744; labOY = 140; labOW = 432;    labOH = 536; }
 }
@@ -4814,22 +5295,21 @@ static void LabRequestRun(void)
     if (labPending == 0) { labPending = 1; labStatus = LAB_COMPILING; labOutScroll = 0; }
 }
 
-static char stashBuf[LAB_CAP + 1];
-static int stLen = 0, stCur = 0, stAnc = 0, labOwner = 0;       /* labOwner: 0 = Coding Lab, 1 = Farm */
+static char stashBuf[3][LAB_CAP + 1];
+static int stLen[3], stCur[3], stAnc[3], labOwner = 0;           /* labOwner: 0 = Coding Lab, 1 = Farm, 2 = Practice problem */
 
-static void StashSwap(void)
+/* the editor buffer is shared; each screen keeps its own text parked while another one uses it */
+static void LabOwn(int o)
 {
-    char tmp[LAB_CAP + 1];
-    memcpy(tmp, labBuf, sizeof tmp); memcpy(labBuf, stashBuf, sizeof tmp); memcpy(stashBuf, tmp, sizeof tmp);
-    int t = labLen; labLen = stLen; stLen = t;
-    t = labCur; labCur = stCur; stCur = t;
-    t = labAnc; labAnc = stAnc; stAnc = t;
-    labSX = labSY = 0;
+    if (o == labOwner) return;
+    memcpy(stashBuf[labOwner], labBuf, sizeof labBuf); stLen[labOwner] = labLen; stCur[labOwner] = labCur; stAnc[labOwner] = labAnc;
+    memcpy(labBuf, stashBuf[o], sizeof labBuf); labLen = stLen[o]; labCur = stCur[o]; labAnc = stAnc[o];
+    labOwner = o; labSX = labSY = 0; labErrN = 0;
 }
 
 static void StartLab(void)
 {
-    if (labOwner == 1) { StashSwap(); labOwner = 0; }
+    LabOwn(0);
     if (!labInit) { LabLoad(0, 0); labInit = true; }
     screen = SCR_LAB;
     labPending = 0;
@@ -4910,7 +5390,7 @@ static void LabEdit(void)
         int n = 0;
         tmp[n++] = '\n';
         for (int k = 0; k < ind && n < 90; k++) tmp[n++] = ' ';
-        if (prev == '{') for (int k = 0; k < 4; k++) tmp[n++] = ' ';
+        if (prev == '{' || (prev == ':' && labOwner == 1)) for (int k = 0; k < 4; k++) tmp[n++] = ' ';
         if (prev == '{' && next == '}') {                                 /* {|}  ->  open the block */
             int mid = n;
             tmp[n++] = '\n';
@@ -4968,7 +5448,7 @@ static void LabDrawEditor(float cw)
     if (labSX > maxSX) labSX = maxSX;
 
     int curLine = LineOf(labCur);
-    BeginScissorMode(LAB_X + 1, LAB_Y + 1, LAB_W - 2, LAB_H - 2);
+    ScissorT(LAB_X + 1, LAB_Y + 1, LAB_W - 2, LAB_H - 2);
     int first = (int)(labSY / LAB_LH);
     int s = LineStartByNo(first);
     float tx = LAB_X + LAB_GUT + 12 - labSX;
@@ -5003,7 +5483,7 @@ static void LabDrawEditor(float cw)
     /* gutter drawn over the text so scrolled code never shows through */
     DrawRectangle(LAB_X + 1, LAB_Y + 1, LAB_GUT, LAB_H - 2, (Color) { 17, 20, 29, 255 });
     DrawLine(LAB_X + LAB_GUT, LAB_Y + 1, LAB_X + LAB_GUT, LAB_Y + LAB_H - 1, BORDER);
-    BeginScissorMode(LAB_X + 1, LAB_Y + 1, LAB_GUT, LAB_H - 2);
+    ScissorT(LAB_X + 1, LAB_Y + 1, LAB_GUT, LAB_H - 2);
     for (int ln = first; ln < nLines; ln++) {
         float y = LAB_Y + 10 + ln * (float)LAB_LH - labSY;
         if (y > LAB_Y + LAB_H) break;
@@ -5044,7 +5524,7 @@ static void LabDrawOutput(float cw)
     bool hover = CheckCollisionPointRec(GetMousePosition(), op);
     if (hover) labOutScroll -= GetMouseWheelMove() * lh * 3;
 
-    BeginScissorMode(LAB_OX + 1, LAB_OY + 48, LAB_OW - 2, LAB_OH - 50);
+    ScissorT(LAB_OX + 1, LAB_OY + 48, LAB_OW - 2, LAB_OH - 50);
     float y = LAB_OY + 56 - labOutScroll, startY = LAB_OY + 56;
     const char* p = labOut;
     while (*p) {
@@ -5189,6 +5669,380 @@ static void ShopBuy(int cat, int i, float cx, float cy)
     Burst(cx, cy, 36);
 }
 
+/* ---- turn a lesson snippet into a program that compiles (adds includes and main when missing) ---- */
+static bool SnipStarts(const char* t, const char* w) { size_t n = strlen(w); return strncmp(t, w, n) == 0 && !isalnum((unsigned char)t[n]) && t[n] != '_'; }
+static bool SnipTopLevel(const char* t)             /* does this depth-0 line start a declaration rather than a statement? */
+{
+    static const char* kw[] = { "struct", "class", "template", "typedef", "enum", "namespace", "union", "using", NULL };
+    for (int i = 0; kw[i]; i++) if (SnipStarts(t, kw[i])) {
+        if (SnipStarts(t, "struct") || SnipStarts(t, "enum") || SnipStarts(t, "union") || SnipStarts(t, "class")) {   /* "struct P p = ..." is a statement */
+            const char* b = strchr(t, '{'), * e = strchr(t, '='), * s = strchr(t, ';');
+            if (!b && e) return false;
+            if (!b && s && strchr(t, '(') == NULL) {                                    /* "struct Node *a;" -> statement; "struct Node;" -> forward decl */
+                int words = 0; for (const char* p = t; p < s; p++) if (*p == ' ') words++;
+                return words < 2;
+            }
+        }
+        return true;
+    }
+    if (SnipStarts(t, "return") || SnipStarts(t, "else") || SnipStarts(t, "if") || SnipStarts(t, "for") || SnipStarts(t, "while") || SnipStarts(t, "do") || SnipStarts(t, "switch") || SnipStarts(t, "case") || SnipStarts(t, "delete") || SnipStarts(t, "new") || SnipStarts(t, "free")) return false;
+    const char* p = t;                                  /* "<type words> name(" with no '=' before the '(' */
+    int words = 0; bool inWord = false;
+    for (; *p && *p != '(' && *p != '=' && *p != ';' && *p != '"'; p++) {
+        if (isalnum((unsigned char)*p) || *p == '_' || *p == ':' || *p == '<' || *p == '>') { if (!inWord) words++; inWord = true; }
+        else if (*p == ' ' || *p == '*' || *p == '&' || *p == ',') inWord = false;
+        else return false;
+    }
+    if (*p != '(' || words < 2) return false;
+    const char* close = strchr(p, ')'); if (!close) return false;
+    const char* after = close + 1; while (*after == ' ') after++;
+    if (*after == '{' || *after == 0 || (SnipStarts(after, "const"))) return true;      /* definition (brace now or next line) */
+    if (*after == ';') {                                                                   /* prototype only if the parameters look like types */
+        static const char* ty[] = { "int", "char", "float", "double", "void", "long", "short", "unsigned", "const", "bool", "string", "vector", "struct", NULL };
+        const char* q = p + 1; while (*q == ' ') q++;
+        if (*q == ')') return true;
+        for (int i = 0; ty[i]; i++) if (SnipStarts(q, ty[i])) return true;
+    }
+    return false;
+}
+static void WrapSnippet(const char* code, int lg, char* out, int cap)
+{
+    if (strstr(code, "main(")) {
+        const char* pre = strstr(code, "#include") ? "" : (lg == 0 ? "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n" : "#include <iostream>\n#include <string>\n#include <vector>\n#include <map>\n#include <algorithm>\nusing namespace std;\n\n");
+        snprintf(out, (size_t)cap, "%s%s%s", pre, code, code[strlen(code) - 1] == '\n' ? "" : "\n"); return;
+    }
+    static char top[LAB_CAP], body[LAB_CAP];
+    top[0] = body[0] = 0; int tl = 0, bl = 0, depth = 0; bool inTop = false;
+    const char* p = code;
+    while (*p) {
+        const char* e = strchr(p, '\n'); int len = e ? (int)(e - p) : (int)strlen(p);
+        char line[400]; int n = len > 399 ? 399 : len; memcpy(line, p, (size_t)n); line[n] = 0;
+        const char* t = line; while (*t == ' ' || *t == '\t') t++;
+        if (depth == 0 && !inTop) inTop = t[0] == '#' || SnipTopLevel(t);
+        char* dst = inTop ? top : body; int* dl = inTop ? &tl : &bl;
+        if (!inTop && t[0]) { if (*dl + 6 < LAB_CAP) { memcpy(dst + *dl, "    ", 4); *dl += 4; } }
+        if (*dl + n + 2 < LAB_CAP) { memcpy(dst + *dl, t[0] || inTop ? (inTop ? line : t) : "", strlen(t[0] || inTop ? (inTop ? line : t) : "")); *dl += (int)strlen(t[0] || inTop ? (inTop ? line : t) : ""); dst[(*dl)++] = '\n'; dst[*dl] = 0; }
+        for (int i = 0; i < n; i++) { if (line[i] == '{') depth++; else if (line[i] == '}') depth--; }
+        if (depth < 0) depth = 0;
+        if (depth == 0 && inTop) {
+            const char* l = t + strlen(t); while (l > t && (l[-1] == ' ' || l[-1] == '\r')) l--;
+            if (t[0] == '#' || (l > t && (l[-1] == ';' || l[-1] == '}'))) inTop = false;
+            if (strstr(t, "template") && l > t && l[-1] == '>') inTop = true;
+        }
+        p += len; if (*p == '\n') p++;
+    }
+    if (lg == 0) snprintf(out, (size_t)cap, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n%s\nint main(void) {\n%s\n    return 0;\n}\n", top, body);
+    else snprintf(out, (size_t)cap, "#include <iostream>\n#include <string>\n#include <vector>\n#include <map>\n#include <algorithm>\nusing namespace std;\n\n%s\nint main() {\n%s\n    return 0;\n}\n", top, body);
+}
+
+/* ---- "Try it" (W3Schools style): open any lesson snippet in the Coding Lab ---- */
+static void TryIt(const char* code)
+{
+    LabOwn(0);
+    labInit = true; labLang = lang;
+    static char tmp[LAB_CAP];
+    WrapSnippet(code, lang, tmp, (int)sizeof tmp);
+    int n = (int)strlen(tmp); if (n > LAB_CAP - 1) n = LAB_CAP - 1;
+    memcpy(labBuf, tmp, (size_t)n); labBuf[n] = 0; labLen = n; labCur = labAnc = 0; labSX = labSY = 0;
+    labInLen = 0; labInput[0] = 0; labOutLen = 0; labOut[0] = 0; labErrN = 0; labPending = 0; labStatus = LAB_READY; labFocus = 0;
+    screen = SCR_LAB;
+}
+
+/* ---- practice problems: editor, grader, hints, solution ---- */
+#define PCAP 4000
+static char probCode[NPROB][2][PCAP];
+static int probIdx = 0, probTab = 0, probRes = 0, probPass = 0, probPending = 0, probOnly = -1, probFailIdx = -1, probTest[4];
+static char probGot[4][240], probMsg[1400];
+static bool probDirty = false, probInit = false;
+static float probSaveT = 0, probScroll = 0;
+
+static void ProbStarter(int i, int lg, char* out, int cap)
+{
+    if (lg == 0) snprintf(out, (size_t)cap, "#include <stdio.h>\n\nint main(void) {\n    // TODO: %s\n\n    return 0;\n}\n", PROBS[i].todo);
+    else snprintf(out, (size_t)cap, "#include <iostream>\n#include <string>\n#include <vector>\nusing namespace std;\n\nint main() {\n    // TODO: %s\n\n    return 0;\n}\n", PROBS[i].todo);
+}
+static void ProbLoad(void)
+{
+    char* c = probCode[probIdx][lang];
+    if (!c[0]) ProbStarter(probIdx, lang, c, PCAP);
+    int n = (int)strlen(c);
+    memcpy(labBuf, c, (size_t)n + 1); labLen = n; labCur = labAnc = 0; labSX = labSY = 0; labErrN = 0;
+    probRes = 0; probPass = 0; probFailIdx = -1; probPending = 0; probMsg[0] = 0; memset(probTest, 0, sizeof probTest);
+}
+static void ProbSync(void)
+{
+    char* c = probCode[probIdx][lang];
+    if (strncmp(c, labBuf, PCAP - 1) != 0 || (int)strlen(c) != (labLen < PCAP - 1 ? labLen : PCAP - 1)) {
+        int n = labLen < PCAP - 1 ? labLen : PCAP - 1;
+        memcpy(c, labBuf, (size_t)n); c[n] = 0; probDirty = true;
+    }
+}
+static void SaveProbCode(void)
+{
+    if (!probDirty) return;
+    FILE* f = fopen("problems.dat", "wb");
+    if (f) { fwrite(probCode, sizeof probCode, 1, f); fclose(f); probDirty = false; }
+}
+static void StartProblem(int idx)
+{
+    LabOwn(2);
+    if (!probInit) { probInit = true; FILE* f = fopen("problems.dat", "rb"); if (f) { if (fread(probCode, sizeof probCode, 1, f) != 1) memset(probCode, 0, sizeof probCode); fclose(f); } }
+    probIdx = idx; probTab = 0; probScroll = 0; menuTab = 1;
+    ProbLoad();
+    labFocus = 0; labPending = 0; labStatus = LAB_READY;
+    screen = SCR_PROBLEM;
+}
+
+/* compare ignoring trailing spaces and trailing blank lines */
+static bool OutMatch(const char* got, const char* exp)
+{
+    static char a[2000], b[2000];
+    for (int k = 0; k < 2; k++) {
+        const char* s = k ? exp : got; char* d = k ? b : a; int n = 0;
+        for (; *s && n < 1990; s++) {
+            if (*s == '\r') continue;
+            if (*s == '\n') while (n > 0 && d[n - 1] == ' ') n--;
+            d[n++] = *s;
+        }
+        while (n > 0 && (d[n - 1] == '\n' || d[n - 1] == ' ')) n--;
+        d[n] = 0;
+    }
+    return strcmp(a, b) == 0;
+}
+
+/* only < 0: run every test (a submission); otherwise just that one test (a trial run) */
+static void ProbGrade(int only)
+{
+    const Prob* P = &PROBS[probIdx];
+    memset(probTest, 0, sizeof probTest); memset(probGot, 0, sizeof probGot);
+    probMsg[0] = 0; probPass = 0; probFailIdx = -1; labErrN = 0;
+    labLang = lang;
+    int first = only >= 0 ? only : 0, last = only >= 0 ? only : P->nt - 1, kind = 1;
+    for (int t = first; t <= last; t++) {
+        snprintf(labInput, sizeof labInput, "%s", P->t[t].in); labInLen = (int)strlen(labInput);
+        labReuseExe = t > first;
+        LabRun();
+        labReuseExe = false;
+        if (labStatus == LAB_NO_COMPILER) { kind = 6; snprintf(probMsg, sizeof probMsg, "%s", labOut); break; }
+        if (labStatus == LAB_COMPILE_ERR) { kind = 3; snprintf(probMsg, sizeof probMsg, "%s", labOut); break; }
+        const char* o = labOut, * mk = strstr(labOut, "[Program output]\n");
+        if (mk) o = mk + 17;
+        snprintf(probGot[t], sizeof probGot[t], "%s", o);
+        bool ok = labStatus == LAB_OK && OutMatch(o, P->t[t].out);
+        probTest[t] = ok ? 1 : 2;
+        if (ok) probPass++;
+        else if (kind == 1) { kind = labStatus == LAB_TIMEOUT ? 5 : labStatus == LAB_RUNTIME_ERR ? 4 : 2; probFailIdx = t; }
+    }
+    probRes = (only >= 0 && kind == 1) ? 7 : kind;
+    labStatus = LAB_READY;
+    if (only < 0 && kind != 3 && kind != 6) { pro.attempts[lang][probIdx]++; SaveProfile(); }
+    if (only < 0 && kind == 1 && !pro.solved[lang][probIdx]) {
+        pro.solved[lang][probIdx] = 1; SaveProfile();
+        GainCredits(DIFF_CR[P->diff], "Problem solved");
+        Notify(TextFormat("Accepted: %s", P->title), GOOD);
+    }
+}
+
+static void ProbText(const char* s, char* out, int cap)       /* the stdin box uses \n for new lines; show real ones */
+{
+    int n = 0;
+    for (; *s && n < cap - 1; s++) { if (s[0] == '\\' && s[1] == 'n') { out[n++] = '\n'; s++; } else out[n++] = *s; }
+    out[n] = 0;
+}
+/* label + monospace box; returns the y below it */
+static float ProbBox(const char* label, const char* text, float x, float y, float w, int maxLines)
+{
+    if (label[0]) { Txt(fBold, label, x, y, 13, DIM); y += 22; }
+    int lines = 1; for (const char* p = text; *p; p++) if (*p == '\n') lines++;
+    if (lines > maxLines) lines = maxLines;
+    float h = lines * 22 + 14;
+    DrawRectangleRounded((Rectangle) { x, y, w, h }, 0.1f, 6, CODEBG);
+    float cy = y + 7; int ln = 0;
+    for (const char* p = text; *p&& ln < maxLines;) {
+        const char* e = strchr(p, '\n'); int len = e ? (int)(e - p) : (int)strlen(p);
+        char line[160]; int n = len > 159 ? 159 : len; memcpy(line, p, (size_t)n); line[n] = 0;
+        int maxc = (int)((w - 20) / 8.6f); if (n > maxc && maxc > 3) { line[maxc - 2] = '.'; line[maxc - 1] = '.'; line[maxc] = 0; }
+        DrawTextEx(fCode, line, (Vector2) { x + 10, cy }, 15, 0, (Color) { 215, 218, 235, 255 });
+        cy += 22; ln++; p += len; if (*p == '\n') p++;
+    }
+    return y + h + 10;
+}
+
+static void ProbLeft(Rectangle L, Color accent)
+{
+    const Prob* P = &PROBS[probIdx];
+    Panel(L, 0.02f, SURF, BORDER);
+    static const char* tn[3] = { "Description", "Hints", "Solution" };
+    for (int t = 0; t < 3; t++) {
+        Rectangle r = { L.x + 1 + t * (L.width - 2) / 3, L.y + 1, (L.width - 2) / 3, 38 };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+        if (hov) hand = true;
+        if (t == probTab) { DrawRectangleRec(r, SURF2); DrawRectangle((int)r.x, (int)r.y + 36, (int)r.width, 3, accent); }
+        CenterTxt(fBold, tn[t], r.x + r.width / 2, r.y + 8, 16, t == probTab ? TXT : DIM);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { probTab = t; probScroll = 0; }
+    }
+    Rectangle cv = { L.x + 18, L.y + 48, L.width - 36, L.height - 58 };
+    ScissorT((int)cv.x - 6, (int)cv.y, (int)cv.width + 12, (int)cv.height);
+    float y = cv.y + 4 - probScroll, w = cv.width;
+    if (probTab == 0) {
+        Txt(fBold, P->title, cv.x, y, 27, TXT); y += 40;
+        Pill(DIFF_NAME[P->diff], cv.x, y, DIFF_COL[P->diff]);
+        Pill(P->topic, cv.x + TxtW(fMed, DIFF_NAME[P->diff], 14) + 36, y, DIM);
+        if (pro.solved[lang][probIdx]) Pill("Solved", cv.x + w - TxtW(fMed, "Solved", 14) - 28, y, GOOD);
+        y += 42;
+        y += Wrapped(fReg, P->desc, cv.x, y, w, 17, (Color) { 205, 211, 228, 255 }) + 10;
+        Txt(fBold, "INPUT / OUTPUT", cv.x, y, 12, DIM); y += 22;
+        y = ProbBox("", P->fmt, cv.x, y, w, 6);
+        for (int e = 0; e < 2; e++) {
+            char in[200]; ProbText(P->t[e].in, in, sizeof in);
+            Txt(fBold, TextFormat("EXAMPLE %d", e + 1), cv.x, y, 12, DIM); y += 22;
+            y = ProbBox("Input", in, cv.x, y, w, 6);
+            y = ProbBox("Output", P->t[e].out, cv.x, y, w, 6);
+        }
+        Wrapped(fReg, "Your program reads from standard input and prints the answer. Outputs must match exactly (trailing spaces and blank lines are ignored).", cv.x, y, w, 14, DIM);
+        y += 80;
+    }
+    else if (probTab == 1) {
+        y += Wrapped(fReg, "Stuck? Try the problem first, then reveal hints one at a time. Each one is more specific than the last.", cv.x, y, w, 15, DIM) + 10;
+        for (int h = 0; h < 3; h++) {
+            bool shown = h < pro.hints[probIdx];
+            Rectangle c = { cv.x, y, w, shown ? (float)WrapH(fReg, P->hint[h], w - 32, 16) + 56 : 64 };
+            DrawRectangleRounded(c, 0.08f, 8, shown ? SURF2 : CODEBG);
+            Txt(fBold, TextFormat("Hint %d", h + 1), c.x + 16, c.y + 12, 15, shown ? accent : DIM);
+            if (shown) Wrapped(fReg, P->hint[h], c.x + 16, c.y + 40, w - 32, 16, (Color) { 215, 220, 235, 255 });
+            else if (h == pro.hints[probIdx]) {
+                if (Button((Rectangle) { c.x + w - 136, c.y + 12, 120, 40 }, "Reveal", (Color) { 214, 140, 30, 255 }, 15)) { pro.hints[probIdx]++; SaveProfile(); }
+            }
+            else Txt(fReg, "Reveal the previous hint first", c.x + w - 16 - TxtW(fReg, "Reveal the previous hint first", 13), c.y + 18, 13, DIM);
+            y += c.height + 12;
+        }
+    }
+    else {
+        bool open = pro.solved[lang][probIdx] || pro.attempts[lang][probIdx] >= 3;
+        if (!open) {
+            y += 10;
+            DrawRectangleRounded((Rectangle) { cv.x, y, w, 150 }, 0.06f, 8, CODEBG);
+            CenterTxt(fBold, "Solution locked", cv.x + w / 2, y + 22, 22, TXT);
+            Wrapped(fReg, TextFormat("Struggling is how you learn. Solve the problem, or submit at least 3 attempts, to see a worked solution.  Attempts so far: %d / 3", pro.attempts[lang][probIdx]), cv.x + 24, y + 62, w - 48, 15, DIM);
+            y += 160;
+        }
+        else {
+            y += Wrapped(fReg, P->why, cv.x, y, w, 16, (Color) { 205, 211, 228, 255 }) + 14;
+            y = (float)DrawCode(lang == 0 ? P->solC : P->solCpp, cv.x, y, w, 12.5f, lang == 0 ? "solution.c" : "solution.cpp") + 14;
+            Wrapped(fReg, "Compare this with your own code. Is yours shorter, clearer or handling more cases? Try rewriting it from memory tomorrow.", cv.x, y, w, 14, DIM);
+            y += 70;
+        }
+    }
+    EndScissorMode();
+    float total = y + probScroll - cv.y, maxS = total - cv.height; if (maxS < 0) maxS = 0;
+    if (CheckCollisionPointRec(GetMousePosition(), L)) probScroll -= GetMouseWheelMove() * 45;
+    if (probScroll < 0) probScroll = 0;
+    if (probScroll > maxS) probScroll = maxS;
+}
+
+static void ProbResults(Rectangle R)
+{
+    const Prob* P = &PROBS[probIdx];
+    Panel(R, 0.02f, SURF, BORDER);
+    float x = R.x + 18, y = R.y + 14, w = R.width - 36;
+    if (probPending) { CenterTxt(fBold, "Compiling and running your code...", R.x + R.width / 2, R.y + R.height / 2 - 14, 20, DIM); return; }
+    if (probRes == 0) {
+        Txt(fBold, "Test results", x, y, 18, TXT);
+        Wrapped(fReg, "Write your solution, press Run sample to try the first example, then Submit to check it against all test cases. Read the error messages carefully - they are the fastest teacher.", x, y + 34, w, 15, DIM);
+        for (int t = 0; t < 4; t++) { DrawRectangleRounded((Rectangle) { x + t * 78.0f, R.y + R.height - 54, 70, 34 }, 0.3f, 8, CODEBG); CenterTxt(fReg, TextFormat("Test %d", t + 1), x + t * 78.0f + 35, R.y + R.height - 48, 14, DIM); }
+        return;
+    }
+    static const char* vn[8] = { "", "Accepted", "Wrong Answer", "Compile Error", "Runtime Error", "Time Limit Exceeded", "No compiler found", "Sample passed" };
+    Color vc = probRes == 1 || probRes == 7 ? GOOD : probRes == 5 ? (Color) { 255, 184, 64, 255 } : BAD;
+    Txt(fBold, vn[probRes], x, y - 2, 26, vc);
+    if (probRes <= 5 && probRes != 3) Txt(fBold, TextFormat("%d / %d tests passed", probPass, probOnly >= 0 ? 1 : P->nt), x + w - 190, y + 6, 16, DIM);
+    y += 40;
+    if (probRes == 3 || probRes == 6) {
+        char t[1400]; snprintf(t, sizeof t, "%s", probMsg);
+        const char* p = strstr(t, "error"); if (p) { while (p > t && p[-1] != '\n') p--; }
+        else p = t;
+        ProbBox("Compiler message", p, x, y, w, 7);
+        return;
+    }
+    if (probOnly < 0) {
+        for (int t = 0; t < P->nt; t++) {
+            Rectangle c = { x + t * 78.0f, y, 70, 30 };
+            DrawRectangleRounded(c, 0.3f, 8, probTest[t] == 1 ? Fade(GOOD, 0.2f) : probTest[t] == 2 ? Fade(BAD, 0.22f) : CODEBG);
+            Txt(fMed, TextFormat("Test %d", t + 1), c.x + 8, c.y + 5, 13, probTest[t] == 1 ? GOOD : probTest[t] == 2 ? BAD : DIM);
+        }
+        y += 42;
+    }
+    if (probRes == 1) {
+        Wrapped(fReg, TextFormat("All %d tests passed. Nice work - +%d credits the first time you solve it. Open the Solution tab to compare approaches.", P->nt, DIFF_CR[P->diff]), x, y, w, 15, (Color) { 205, 211, 228, 255 });
+        int nx = -1; for (int k = 1; k <= NPROB; k++) { int j = (probIdx + k) % NPROB; if (!pro.solved[lang][j]) { nx = j; break; } }
+        if (nx >= 0 && Button((Rectangle) { R.x + R.width - 220, R.y + R.height - 58, 200, 42 }, "Next problem >", GOOD, 15)) StartProblem(nx);
+        return;
+    }
+    if (probRes == 7) { Wrapped(fReg, "The first example matches. Press Submit to try every test case, including tricky edge cases.", x, y, w, 15, DIM); return; }
+    int t = probFailIdx >= 0 ? probFailIdx : 0;
+    char in[200]; ProbText(P->t[t].in, in, sizeof in);
+    float cw3 = (w - 20) / 3;
+    ProbBox("Input", in, x, y, cw3, 4);
+    ProbBox("Expected", P->t[t].out, x + cw3 + 10, y, cw3, 4);
+    ProbBox(probRes == 4 ? "Crashed" : probRes == 5 ? "Stopped" : "Your output", probGot[t][0] ? probGot[t] : "(nothing printed)", x + 2 * (cw3 + 10), y, cw3, 4);
+}
+
+static void DrawProblem(Color accent)
+{
+    const Prob* P = &PROBS[probIdx];
+    float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
+    if (probPending == 2) { ProbGrade(probOnly); probPending = 0; }
+    else if (probPending == 1) probPending = 2;
+    if (labPending) { labPending = 0; if (!probPending) { probOnly = 0; probPending = 1; } }      /* F5 / Ctrl+Enter = run sample */
+
+    labFocus = 0; LabEdit();
+    ProbSync();
+    probSaveT += dt; if (probSaveT > 5) { probSaveT = 0; SaveProbCode(); }
+
+    /* header */
+    DrawRectangle(0, 0, W, 58, SURF); DrawLine(0, 58, W, 58, BORDER);
+    if (Button((Rectangle) { 12, 8, 118, 42 }, "< Practice", SURF2, 15)) { SaveProbCode(); screen = SCR_MENU; menuTab = 1; }
+    TxtFit(fBold, TextFormat("%d. %s", probIdx + 1, P->title), 148, 14, 24, 420, TXT);
+    float px = 148 + fminf(TxtW(fBold, TextFormat("%d. %s", probIdx + 1, P->title), 24), 420) + 16;
+    Pill(DIFF_NAME[P->diff], px, 15, DIFF_COL[P->diff]);
+    if (pro.solved[lang][probIdx]) Pill("Solved", px + TxtW(fMed, DIFF_NAME[P->diff], 14) + 36, 15, GOOD);
+    Panel((Rectangle) { W - 12 - 150, 8, 150, 42 }, 0.3f, SURF2, BORDER);
+    for (int l = 0; l < 2; l++) {
+        Rectangle r = { W - 12 - 148.0f + l * 74, 10, 72, 38 };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+        if (hov) hand = true;
+        if (l == lang) DrawRectangleRounded(r, 0.3f, 8, ACCENTS[l]);
+        CenterTxt(fMed, LANG_NAME[l], r.x + r.width / 2, r.y + 7, 17, l == lang ? WHITE : DIM);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && l != lang) { ProbSync(); lang = l; ProbLoad(); }
+    }
+    DrawCreditsChip(W - 12 - 150 - 14, 9);
+
+    ProbLeft((Rectangle) { 12, 68, 524, 680 }, accent);
+
+    /* editor */
+    float ex = 548;
+    DrawRectangle((int)ex, 68, 640, 40, SURF);
+    bool busy = probPending != 0;
+    if (Button((Rectangle) { ex + 6, 70, 130, 36 }, "Run sample", SURF2, 15) && !busy) { probOnly = 0; probPending = 1; }
+    if (Button((Rectangle) { ex + 144, 70, 120, 36 }, "Submit", GOOD, 16) && !busy) { probOnly = -1; probPending = 1; }
+    if (Button((Rectangle) { ex + 272, 70, 120, 36 }, "Reset code", SURF2, 14)) { probCode[probIdx][lang][0] = 0; ProbLoad(); labEnsure = true; }
+    Txt(fReg, "F5 = run sample", ex + 640 - 8 - TxtW(fReg, "F5 = run sample", 13), 80, 13, DIM);
+    labX = (int)ex; labY = 108; labW = 640; labH = 330;
+    float cw = MeasureTextEx(fCode, "M", LAB_FS, 0).x;
+    Rectangle ed = { (float)labX, (float)labY, (float)labW, (float)labH };
+    Vector2 m = GetMousePosition();
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, ed)) {
+        bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+        LabMove(LabPosFromMouse(m.x, m.y, cw), shift); labDrag = true; labWant = -1;
+    }
+    if (labDrag) { if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) { labCur = LabPosFromMouse(m.x, m.y, cw); labWant = -1; } else labDrag = false; }
+    if (labEnsure) { LabKeepCursorVisible(cw); labEnsure = false; }
+    if (CheckCollisionPointRec(m, ed)) ibeam = true;
+    LabDrawEditor(cw);
+
+    ProbResults((Rectangle) { ex, 448, 640, 300 });
+}
+
 /* a few sample particles so trails can be previewed on a card */
 static void DrawTrailGlyph(int kind, float cx, float cy)
 {
@@ -5327,614 +6181,6 @@ static void DrawShop(void)
 /* ------------------------------------------------------------------ */
 /*  main                                                               */
 /* ------------------------------------------------------------------ */
-/* ---- Lawn Mower Farm: runtime sources (compiled together with the player's code) ---- */
-static const int FARM_GROW[5] = { 0, 6, 14, 24, 40 };
-static const int FARM_YIELD[5] = { 0, 1, 2, 2, 3 };
-#define FARM_ACTION_LIMIT 3000
-static const char FARM_H_SRC[] =
-"#ifndef FARM_H\n"
-"#define FARM_H\n"
-"/* ===== Lawn Mower Farm - the functions your code can call =====\n"
-" *\n"
-" *  Write  void farm(void) { ... }  in your file. The program runs it once,\n"
-" *  then replays everything your mower did on the lawn.\n"
-" *\n"
-" *  move(dir)      go NORTH / EAST / SOUTH / WEST (the lawn wraps around)\n"
-" *  harvest()      cut or pick whatever is on this tile (mow() does the same)\n"
-" *  can_harvest()  1 when the plant here is fully grown\n"
-" *  plant(ENT_..)  plant a bush, carrot or pumpkin (once unlocked)\n"
-" *  till()         turn grass into soil, or soil back into grass\n"
-" *  get_entity()   what is here:  ENT_NONE / ENT_GRASS / ENT_BUSH / ENT_CARROT / ENT_PUMPKIN\n"
-" *  get_ground()   GROUND_GRASS or GROUND_SOIL\n"
-" *  get_pos_x(), get_pos_y(), get_world_size()\n"
-" *  num_items(ITEM_HAY / ITEM_WOOD / ITEM_CARROT / ITEM_PUMPKIN)\n"
-" *  do_a_flip()    a victory spin (costs one action)\n"
-" */\n"
-"#define NORTH 0\n"
-"#define EAST  1\n"
-"#define SOUTH 2\n"
-"#define WEST  3\n"
-"\n"
-"#define GROUND_GRASS 0\n"
-"#define GROUND_SOIL  1\n"
-"\n"
-"#define ENT_NONE    0\n"
-"#define ENT_GRASS   1\n"
-"#define ENT_BUSH    2\n"
-"#define ENT_CARROT  3\n"
-"#define ENT_PUMPKIN 4\n"
-"\n"
-"#define ITEM_HAY     0\n"
-"#define ITEM_WOOD    1\n"
-"#define ITEM_CARROT  2\n"
-"#define ITEM_PUMPKIN 3\n"
-"\n"
-"void farm(void);          /* you write this one */\n"
-"\n"
-"int  move(int dir);\n"
-"int  harvest(void);\n"
-"int  mow(void);\n"
-"int  can_harvest(void);\n"
-"int  plant(int entity);\n"
-"int  till(void);\n"
-"int  get_entity(void);\n"
-"int  get_ground(void);\n"
-"int  get_pos_x(void);\n"
-"int  get_pos_y(void);\n"
-"int  get_world_size(void);\n"
-"int  num_items(int item);\n"
-"void do_a_flip(void);\n"
-"\n"
-"#endif\n"
-;
-static const char FARM_RT_SRC[] =
-"#include <stdio.h>\n"
-"#include <stdlib.h>\n"
-"#include <string.h>\n"
-"#include \"farm.h\"\n"
-"\n"
-"/* The simulation behind the API. The app replays the trace this writes. */\n"
-"#define MAXN 8\n"
-"#define ACTION_LIMIT 3000\n"
-"\n"
-"static const int GROW[5]   = { 0, 6, 14, 24, 40 };   /* ticks to grow */\n"
-"static const int YIELDN[5] = { 0, 1, 2, 2, 3 };   /* items per harvest */\n"
-"static const int YITEM[5]  = { -1, ITEM_HAY, ITEM_WOOD, ITEM_CARROT, ITEM_PUMPKIN };\n"
-"\n"
-"static int N = 3, px = 0, py = 0, tick = 0, actions = 0, msgs = 0, finished = 0;\n"
-"static int ground[MAXN][MAXN], ent[MAXN][MAXN], planted[MAXN][MAXN];\n"
-"static int inv[4];\n"
-"static int uBush, uTill, uCarrot, uPumpkin;\n"
-"static FILE *tr;\n"
-"\n"
-"static void say(const char *m)\n"
-"{\n"
-"    if (msgs++ < 12) fprintf(stderr, \"[farm] %s\\n\", m);\n"
-"    else if (msgs == 13) fprintf(stderr, \"[farm] (more messages hidden)\\n\");\n"
-"}\n"
-"\n"
-"static void emit(int kind, int a, int b, int c, int d)\n"
-"{\n"
-"    if (!tr) return;\n"
-"    fprintf(tr, \"%d %d %d %d %d %d %d %d %d %d\\n\", tick, kind, a, b, c, d, inv[0], inv[1], inv[2], inv[3]);\n"
-"    fflush(tr);\n"
-"}\n"
-"\n"
-"static void finish(void)\n"
-"{\n"
-"    if (finished) return;\n"
-"    finished = 1;\n"
-"    emit(9, actions, 0, 0, 0);\n"
-"    if (tr) fclose(tr);\n"
-"}\n"
-"\n"
-"static void act(void)\n"
-"{\n"
-"    if (++actions > ACTION_LIMIT) {\n"
-"        fprintf(stderr, \"\\n[farm] Action limit reached (%d actions) - the run was stopped.\\n\", ACTION_LIMIT);\n"
-"        exit(0);\n"
-"    }\n"
-"    tick++;\n"
-"}\n"
-"\n"
-"static int ripe(int x, int y) { return ent[x][y] != ENT_NONE && tick - planted[x][y] >= GROW[ent[x][y]]; }\n"
-"\n"
-"int move(int dir)\n"
-"{\n"
-"    act();\n"
-"    if (dir == NORTH)      py = (py + 1) % N;\n"
-"    else if (dir == SOUTH) py = (py + N - 1) % N;\n"
-"    else if (dir == EAST)  px = (px + 1) % N;\n"
-"    else if (dir == WEST)  px = (px + N - 1) % N;\n"
-"    else { say(\"move(): unknown direction - use NORTH, EAST, SOUTH or WEST\"); return 0; }\n"
-"    emit(1, dir, px, py, 0);\n"
-"    return 1;\n"
-"}\n"
-"\n"
-"int harvest(void)\n"
-"{\n"
-"    act();\n"
-"    int e = ent[px][py], ok = 0, item = -1, n = 0;\n"
-"    if (e == ENT_NONE) { say(\"harvest(): nothing is growing here\"); emit(2, px, py, -1, 0); return 0; }\n"
-"    if (ripe(px, py)) { item = YITEM[e]; n = YIELDN[e]; inv[item] += n; ok = 1; }\n"
-"    else { item = -2; say(\"harvest(): that plant is not ripe yet - it was destroyed. Use can_harvest() first\"); }\n"
-"    if (ground[px][py] == GROUND_GRASS) { ent[px][py] = ENT_GRASS; planted[px][py] = tick; }\n"
-"    else ent[px][py] = ENT_NONE;\n"
-"    emit(2, px, py, item, n);\n"
-"    return ok;\n"
-"}\n"
-"\n"
-"int mow(void) { return harvest(); }\n"
-"\n"
-"int can_harvest(void) { return ripe(px, py); }\n"
-"\n"
-"int till(void)\n"
-"{\n"
-"    if (!uTill) { say(\"till(): locked - buy 'Soil' in the Upgrades tab\"); return 0; }\n"
-"    act();\n"
-"    if (ground[px][py] == GROUND_GRASS) { ground[px][py] = GROUND_SOIL; ent[px][py] = ENT_NONE; }\n"
-"    else { ground[px][py] = GROUND_GRASS; ent[px][py] = ENT_GRASS; planted[px][py] = tick; }\n"
-"    emit(4, px, py, ground[px][py], 0);\n"
-"    return 1;\n"
-"}\n"
-"\n"
-"int plant(int e)\n"
-"{\n"
-"    if (e < ENT_BUSH || e > ENT_PUMPKIN) { say(\"plant(): you can plant ENT_BUSH, ENT_CARROT or ENT_PUMPKIN\"); return 0; }\n"
-"    if ((e == ENT_BUSH && !uBush) || (e == ENT_CARROT && !uCarrot) || (e == ENT_PUMPKIN && !uPumpkin)) {\n"
-"        say(\"plant(): that plant is locked - unlock it in the Upgrades tab\"); return 0; }\n"
-"    if (e == ENT_BUSH && ground[px][py] != GROUND_GRASS) { say(\"plant(): bushes need grass, not soil\"); return 0; }\n"
-"    if (e != ENT_BUSH && ground[px][py] != GROUND_SOIL) { say(\"plant(): carrots and pumpkins need soil - use till() first\"); return 0; }\n"
-"    if (ent[px][py] != ENT_NONE && ent[px][py] != ENT_GRASS) { say(\"plant(): something is already growing here\"); return 0; }\n"
-"    if (e == ENT_CARROT && (inv[ITEM_HAY] < 1 || inv[ITEM_WOOD] < 1)) { say(\"plant(): a carrot costs 1 hay + 1 wood\"); return 0; }\n"
-"    if (e == ENT_PUMPKIN && inv[ITEM_CARROT] < 2) { say(\"plant(): a pumpkin costs 2 carrots\"); return 0; }\n"
-"    act();\n"
-"    if (e == ENT_CARROT) { inv[ITEM_HAY]--; inv[ITEM_WOOD]--; }\n"
-"    if (e == ENT_PUMPKIN) inv[ITEM_CARROT] -= 2;\n"
-"    ent[px][py] = e; planted[px][py] = tick;\n"
-"    emit(3, px, py, e, 0);\n"
-"    return 1;\n"
-"}\n"
-"\n"
-"int get_entity(void) { return ent[px][py]; }\n"
-"int get_ground(void) { return ground[px][py]; }\n"
-"int get_pos_x(void) { return px; }\n"
-"int get_pos_y(void) { return py; }\n"
-"int get_world_size(void) { return N; }\n"
-"int num_items(int item) { return (item >= 0 && item < 4) ? inv[item] : 0; }\n"
-"void do_a_flip(void) { act(); emit(5, 0, 0, 0, 0); }\n"
-"\n"
-"int main(int argc, char **argv)\n"
-"{\n"
-"    if (argc < 3) { fprintf(stderr, \"internal error: missing arguments\\n\"); return 2; }\n"
-"    FILE *f = fopen(argv[2], \"r\");\n"
-"    if (f) {\n"
-"        if (fscanf(f, \"%d %d %d %d %d %d %d %d %d\", &N, &uBush, &uTill, &uCarrot, &uPumpkin,\n"
-"                   &inv[0], &inv[1], &inv[2], &inv[3]) != 9) N = 3;\n"
-"        fclose(f);\n"
-"    }\n"
-"    if (N < 1) N = 1;\n"
-"    if (N > MAXN) N = MAXN;\n"
-"    for (int x = 0; x < N; x++)\n"
-"        for (int y = 0; y < N; y++) { ground[x][y] = GROUND_GRASS; ent[x][y] = ENT_GRASS; planted[x][y] = -1000; }\n"
-"    tr = fopen(argv[1], \"w\");\n"
-"    atexit(finish);\n"
-"    farm();\n"
-"    return 0;\n"
-"}\n"
-;
-
-/* ------------------------------------------------------------------ */
-/*  Lawn Mower Farm: a "The Farmer Was Replaced" style programming game */
-/*  Write C that drives a ride-on mower. Press Run to watch it work.    */
-/* ------------------------------------------------------------------ */
-typedef struct { const char* title, * code; } FarmScript;
-#define FARM_NEX 8
-
-static const FarmScript FARM_EX[FARM_NEX] = {
-  { "1. Mow one tile",
-    "#include <stdio.h>\n#include \"farm.h\"\n\n"
-    "void farm(void) {\n"
-    "    harvest();                      // cut the grass under the mower\n"
-    "    printf(\"Hay: %d\\n\", num_items(ITEM_HAY));\n"
-    "}\n" },
-  { "2. Mow a row",
-    "#include \"farm.h\"\n\n"
-    "void farm(void) {\n"
-    "    int n = get_world_size();\n"
-    "    for (int i = 0; i < n; i++) {\n"
-    "        harvest();\n"
-    "        move(EAST);                 // the lawn wraps around\n"
-    "    }\n"
-    "}\n" },
-  { "3. Mow the whole lawn",
-    "#include \"farm.h\"\n\n"
-    "void farm(void) {\n"
-    "    int n = get_world_size();\n"
-    "    for (int y = 0; y < n; y++) {\n"
-    "        for (int x = 0; x < n; x++) {\n"
-    "            harvest();\n"
-    "            move(EAST);\n"
-    "        }\n"
-    "        move(NORTH);\n"
-    "    }\n"
-    "}\n" },
-  { "4. Smart mower (only ripe grass)",
-    "#include \"farm.h\"\n\n"
-    "// Grass grows back after a few moves. Cutting it too early wastes it,\n"
-    "// so check can_harvest() first and make several passes.\n"
-    "void farm(void) {\n"
-    "    int n = get_world_size();\n"
-    "    for (int pass = 0; pass < 3; pass++) {\n"
-    "        for (int y = 0; y < n; y++) {\n"
-    "            for (int x = 0; x < n; x++) {\n"
-    "                if (can_harvest()) {\n"
-    "                    harvest();\n"
-    "                }\n"
-    "                move(EAST);\n"
-    "            }\n"
-    "            move(NORTH);\n"
-    "        }\n"
-    "    }\n"
-    "}\n" },
-  { "5. Bush farm (needs Bushes)",
-    "#include \"farm.h\"\n\n"
-    "void sweep(int plant_it) {\n"
-    "    int n = get_world_size();\n"
-    "    for (int y = 0; y < n; y++) {\n"
-    "        for (int x = 0; x < n; x++) {\n"
-    "            if (plant_it) {\n"
-    "                plant(ENT_BUSH);\n"
-    "            } else if (can_harvest()) {\n"
-    "                harvest();\n"
-    "            }\n"
-    "            move(EAST);\n"
-    "        }\n"
-    "        move(NORTH);\n"
-    "    }\n"
-    "}\n\n"
-    "void farm(void) {\n"
-    "    sweep(1);                       // plant a bush everywhere\n"
-    "    sweep(0);                       // pick the ones that are ready\n"
-    "    sweep(0);\n"
-    "}\n" },
-  { "6. Carrot farm (needs Soil + Carrots)",
-    "#include \"farm.h\"\n\n"
-    "void farm(void) {\n"
-    "    int n = get_world_size();\n"
-    "    for (int y = 0; y < n; y++) {\n"
-    "        for (int x = 0; x < n; x++) {\n"
-    "            if (get_ground() == GROUND_GRASS) {\n"
-    "                till();             // grass -> soil\n"
-    "            }\n"
-    "            plant(ENT_CARROT);      // costs 1 hay + 1 wood\n"
-    "            move(EAST);\n"
-    "        }\n"
-    "        move(NORTH);\n"
-    "    }\n"
-    "}\n" },
-  { "7. Debug me! (has errors)",
-    "#include \"farm.h\"\n\n"
-    "void farm(void) {\n"
-    "    int n = get_world_size()\n"
-    "    for (int i = 0; i < n; i++) {\n"
-    "        harvset();\n"
-    "        move(EAST);\n"
-    "    }\n"
-    "}\n" },
-  { "8. Blank sandbox",
-    "#include <stdio.h>\n#include \"farm.h\"\n\n"
-    "void farm(void) {\n"
-    "    // write your own farming code here\n"
-    "\n"
-    "}\n" }
-};
-
-/* ---- upgrades (bought with hay and wood) ---- */
-typedef struct { const char* name, * desc; int hay, wood, credits; } FarmUp;
-#define FARM_NUP 6
-static const FarmUp FUP[FARM_NUP] = {
-  { "Bigger Lawn: 5 x 5",  "A lawn with 25 tiles to mow.",                               25,  0, 20 },
-  { "Huge Lawn: 8 x 8",    "The full 64-tile lawn. Needs the 5 x 5 lawn first.",         120, 15, 40 },
-  { "Bushes",              "plant(ENT_BUSH) grows wood, which you need for more upgrades.", 20,  0, 15 },
-  { "Soil",                "till() turns grass into soil and back again.",               60, 10, 20 },
-  { "Carrots",             "plant(ENT_CARROT) on soil. Each costs 1 hay + 1 wood.",      40, 15, 25 },
-  { "Pumpkins",            "plant(ENT_PUMPKIN) on soil. Each costs 2 carrots.",          100, 30, 40 }
-};
-
-/* things that must be unlocked first: -1 = nothing */
-static const int FUP_NEEDS[FARM_NUP][2] = { { -1, -1 }, { 0, -1 }, { -1, -1 }, { 2, -1 }, { 3, 2 }, { 4, -1 } };
-
-static struct { unsigned char unl[FARM_NUP]; int inv[4]; unsigned char first[4]; } fsv;
-
-static void SaveFarm(void)
-{
-    FILE* f = fopen("farm.dat", "wb");
-    if (!f) return;
-    fwrite(&fsv, sizeof fsv, 1, f);
-    fclose(f);
-}
-
-static void LoadFarm(void)
-{
-    memset(&fsv, 0, sizeof fsv);
-    FILE* f = fopen("farm.dat", "rb");
-    if (!f) return;
-    if (fread(&fsv, sizeof fsv, 1, f) != 1) memset(&fsv, 0, sizeof fsv);
-    fclose(f);
-}
-
-static int FarmSize(void) { return fsv.unl[1] ? 8 : (fsv.unl[0] ? 5 : 3); }
-
-/* ---- the trace the program leaves behind, and the replay of it ---- */
-typedef struct { int t, kind, a, b, c, d, inv[4]; } FEv;
-#define FEV_MAX (FARM_ACTION_LIMIT + 8)
-static FEv fev[FEV_MAX];
-static int fevN = 0;
-
-static const char* FARM_ITEM[4] = { "hay", "wood", "carrots", "pumpkins" };
-static const float FR_SPEED[5] = { 2.5f, 7.0f, 16.0f, 45.0f, 200.0f };
-static const char* FR_SPEEDN[5] = { "1x", "3x", "6x", "18x", "Max" };
-
-static int frSpeed = 1, frIdx = 0, frN = 3, frTick = 0, frInv[4], frInv0[4];
-static bool frPlaying = false, frDone = true;
-static float frT = 0, frMove = 1, frBlade = 0, frFlip = 0;
-static int frX = 0, frY = 0, frFX = 0, frFY = 0, frDir = 1;
-static unsigned char frGround[8][8], frEnt[8][8];
-static int frPlanted[8][8];
-static int farmTab = 0, farmEx = 0, farmRuns = 0;
-static bool farmInit = false;
-
-static void FarmReplayStart(void)
-{
-    frN = FarmSize();
-    for (int x = 0; x < 8; x++)
-        for (int y = 0; y < 8; y++) { frGround[x][y] = 0; frEnt[x][y] = 1; frPlanted[x][y] = -1000; }
-    frX = frY = frFX = frFY = 0; frDir = 1; frMove = 1; frTick = 0; frT = 1.0f; frIdx = 0;
-    frBlade = 0; frFlip = 0;
-    for (int i = 0; i < 4; i++) frInv[i] = frInv0[i];
-    frPlaying = fevN > 0; frDone = fevN == 0;
-}
-
-/* particles + floating labels */
-typedef struct { float x, y, vx, vy, life, size; Color c; } FPart;
-typedef struct { char text[24]; int tx, ty; float age; Color c; } FPop;
-static FPart fpart[120];
-static FPop fpop[10];
-
-static void FarmSpark(float x, float y, Color c, int n, float power)
-{
-    for (int i = 0; i < 120 && n > 0; i++) {
-        if (fpart[i].life > 0) continue;
-        fpart[i].x = x; fpart[i].y = y;
-        fpart[i].vx = GetRandomValue(-100, 100) * power;
-        fpart[i].vy = GetRandomValue(-190, -50) * power;
-        fpart[i].life = 0.55f + GetRandomValue(0, 40) / 100.0f;
-        fpart[i].size = 2.0f + GetRandomValue(0, 20) / 10.0f;
-        fpart[i].c = ColorBrightness(c, GetRandomValue(-20, 20) / 100.0f);
-        n--;
-    }
-}
-
-static void FarmPop(int tx, int ty, const char* text, Color c)
-{
-    int slot = 0;
-    float oldest = -1;
-    for (int i = 0; i < 10; i++) {
-        if (fpop[i].age <= 0 || fpop[i].age > 1.2f) { slot = i; oldest = 99; break; }
-        if (fpop[i].age > oldest) { oldest = fpop[i].age; slot = i; }
-    }
-    snprintf(fpop[slot].text, sizeof fpop[slot].text, "%s", text);
-    fpop[slot].tx = tx; fpop[slot].ty = ty; fpop[slot].age = 0.001f; fpop[slot].c = c;
-}
-
-/* geometry of the lawn on screen (set while drawing, used for particle positions) */
-static float fgTs = 40, fgOx = 0, fgOy = 0;
-static float FarmTX(float x) { return fgOx + x * fgTs; }
-static float FarmTY(float y) { return fgOy + (frN - 1 - y) * fgTs; }
-
-static void FarmApply(const FEv* e)
-{
-    frTick = e->t;
-    for (int i = 0; i < 4; i++) frInv[i] = e->inv[i];
-    static const Color hayC = { 236, 200, 90, 255 }, woodC = { 150, 102, 60, 255 }, carC = { 240, 140, 40, 255 }, pumC = { 240, 150, 30, 255 };
-    static const Color itemC[4] = { { 236, 200, 90, 255 }, { 150, 102, 60, 255 }, { 240, 140, 40, 255 }, { 240, 150, 30, 255 } };
-    (void)hayC; (void)woodC; (void)carC; (void)pumC;
-    if (e->kind == 1) {                                   /* move */
-        frFX = frX; frFY = frY; frX = e->b; frY = e->c; frDir = e->a; frMove = 0;
-        if (abs(frX - frFX) > 1 || abs(frY - frFY) > 1) { frFX = frX; frFY = frY; frMove = 1; }   /* wrapped around */
-    }
-    else if (e->kind == 2) {                            /* harvest */
-        int x = e->a, y = e->b;
-        float cx = FarmTX((float)x) + fgTs / 2, cy = FarmTY((float)y) + fgTs / 2;
-        frBlade = 0.35f;
-        if (e->c >= 0) {
-            Color c = e->c == 0 ? (Color) { 106, 190, 80, 255 } : itemC[e->c];
-            FarmSpark(cx, cy, c, 14, 1.0f);
-            if (e->c == 0) FarmSpark(cx, cy, (Color) { 236, 200, 90, 255 }, 6, 0.8f);
-            char b[24];
-            snprintf(b, sizeof b, "+%d %s", e->d, FARM_ITEM[e->c]);
-            FarmPop(x, y, b, itemC[e->c]);
-        }
-        else if (e->c == -2) {
-            FarmSpark(cx, cy, (Color) { 150, 120, 90, 255 }, 8, 0.7f);
-            FarmPop(x, y, "too early!", (Color) { 240, 110, 110, 255 });
-        }
-        if (frGround[x][y] == 0) { frEnt[x][y] = 1; frPlanted[x][y] = e->t; }
-        else frEnt[x][y] = 0;
-    }
-    else if (e->kind == 3) {                            /* plant */
-        frEnt[e->a][e->b] = (unsigned char)e->c; frPlanted[e->a][e->b] = e->t;
-        FarmSpark(FarmTX((float)e->a) + fgTs / 2, FarmTY((float)e->b) + fgTs / 2, (Color) { 120, 90, 60, 255 }, 6, 0.6f);
-    }
-    else if (e->kind == 4) {                            /* till */
-        frGround[e->a][e->b] = (unsigned char)e->c;
-        if (e->c == 1) frEnt[e->a][e->b] = 0; else { frEnt[e->a][e->b] = 1; frPlanted[e->a][e->b] = e->t; }
-        FarmSpark(FarmTX((float)e->a) + fgTs / 2, FarmTY((float)e->b) + fgTs / 2, (Color) { 130, 92, 58, 255 }, 10, 0.9f);
-    }
-    else if (e->kind == 5) {
-        frFlip = 0.7f;
-    }
-    else if (e->kind == 9) {
-        frPlaying = false; frDone = true;
-    }
-}
-
-static void FarmUpdate(float dt)
-{
-    if (frPlaying) {
-        frT += dt * FR_SPEED[frSpeed];
-        while (frT >= 1.0f && frIdx < fevN) { frT -= 1.0f; FarmApply(&fev[frIdx++]); }
-        if (frIdx >= fevN) { frPlaying = false; frDone = true; }
-        frMove = frT < 1.0f ? frT : 1.0f;
-        if (frSpeed == 4) frMove = 1;
-    }
-    if (frBlade > 0) frBlade -= dt;
-    if (frFlip > 0) frFlip -= dt;
-    for (int i = 0; i < 120; i++) {
-        if (fpart[i].life <= 0) continue;
-        fpart[i].life -= dt; fpart[i].vy += 420 * dt;
-        fpart[i].x += fpart[i].vx * dt; fpart[i].y += fpart[i].vy * dt;
-    }
-    for (int i = 0; i < 10; i++) if (fpop[i].age > 0) { fpop[i].age += dt; if (fpop[i].age > 1.3f) fpop[i].age = 0; }
-}
-
-static void FarmSkip(void)
-{
-    while (frIdx < fevN) FarmApply(&fev[frIdx++]);
-    frPlaying = false; frDone = true; frMove = 1; frT = 0;
-}
-
-/* ---- compile + run the player's code, then read back what happened ---- */
-static void FarmRun(void)
-{
-    labErrN = 0; labOutLen = 0; labOut[0] = 0; labExit = 0; fevN = 0; frPlaying = false;
-    char dir[300];
-#ifdef _WIN32
-    const char* t = getenv("TEMP");
-    snprintf(dir, sizeof dir, "%s\\codequest_farm", t ? t : ".");
-#else
-    snprintf(dir, sizeof dir, "/tmp/codequest_farm");
-#endif
-    LAB_MKDIR(dir);
-
-    char src[360], hdr[360], rt[360], gc[360], go[360], exe[360], st[360], tr[360], cmd[2200];
-    snprintf(src, sizeof src, "%s%smain.c", dir, LAB_SEP);
-    snprintf(hdr, sizeof hdr, "%s%sfarm.h", dir, LAB_SEP);
-    snprintf(rt, sizeof rt, "%s%sfarm_rt.c", dir, LAB_SEP);
-    snprintf(gc, sizeof gc, "%s%sguard.c", dir, LAB_SEP);
-    snprintf(go, sizeof go, "%s%sguard.o", dir, LAB_SEP);
-    snprintf(exe, sizeof exe, "%s%s%s", dir, LAB_SEP, LAB_EXE);
-    snprintf(st, sizeof st, "%s%sstate.txt", dir, LAB_SEP);
-    snprintf(tr, sizeof tr, "%s%strace.txt", dir, LAB_SEP);
-
-    FILE* f = fopen(src, "wb");
-    if (!f) { LabAppendStr("[Could not write the temporary file. Is the temp folder writable?]\n"); labStatus = LAB_RUNTIME_ERR; return; }
-    fwrite(labBuf, 1, (size_t)labLen, f);
-    fclose(f);
-    f = fopen(hdr, "wb"); if (f) { fwrite(FARM_H_SRC, 1, sizeof FARM_H_SRC - 1, f); fclose(f); }
-    f = fopen(rt, "wb");  if (f) { fwrite(FARM_RT_SRC, 1, sizeof FARM_RT_SRC - 1, f); fclose(f); }
-    f = fopen(gc, "wb");  if (f) { fwrite(LAB_GUARD, 1, sizeof LAB_GUARD - 1, f); fclose(f); }
-    f = fopen(st, "wb");
-    if (f) {
-        fprintf(f, "%d %d %d %d %d %d %d %d %d\n", FarmSize(), fsv.unl[2], fsv.unl[3], fsv.unl[4], fsv.unl[5],
-            fsv.inv[0], fsv.inv[1], fsv.inv[2], fsv.inv[3]);
-        fclose(f);
-    }
-    remove(tr);
-
-    int rawLen = 0, rc;
-    FILE* chk = fopen(go, "rb");
-    if (chk) fclose(chk);
-    else {
-        snprintf(cmd, sizeof cmd, LAB_ENVP "gcc -c \"%s\" -o \"%s\" 2>&1", gc, go);
-        rc = RunCapture(cmd, labRaw, (int)sizeof labRaw, &rawLen);
-        if (rc != 0) goto farm_compile_failed;
-    }
-
-    remove(exe);
-    snprintf(cmd, sizeof cmd, LAB_ENVP "gcc -std=gnu11 -Wall -fdiagnostics-color=never \"%s\" \"%s\" \"%s\" -o \"%s\" -lm 2>&1", src, rt, go, exe);
-    rc = RunCapture(cmd, labRaw, (int)sizeof labRaw, &rawLen);
-    {
-        char n1[320], n2[320];
-        snprintf(n1, sizeof n1, "%s/", dir);
-        snprintf(n2, sizeof n2, "%s\\", dir);
-        StrRemove(labRaw, n1);
-        StrRemove(labRaw, n2);
-        rawLen = (int)strlen(labRaw);
-    }
-    if (rc != 0) {
-    farm_compile_failed:
-        if (strstr(labRaw, "not found") || strstr(labRaw, "not recognized")) {
-            labStatus = LAB_NO_COMPILER;
-            LabAppendStr("[Could not run the compiler]\n\nThe farm needs gcc installed and on your PATH.\n");
-            LabAppendStr("Install it (for example MinGW-w64 on Windows, or the Xcode command line tools on macOS), then try again.\n\n");
-            LabAppend(labRaw, rawLen);
-            return;
-        }
-        labStatus = LAB_COMPILE_ERR;
-        LabAppendStr("[Compile error - fix the problems below and run again]\n\n");
-        int start = labOutLen;
-        LabAppend(labRaw, rawLen);
-        LabParseErrors(labOut + start);
-        if (strstr(labRaw, "undefined reference to `farm'") || strstr(labRaw, "undefined reference to 'farm'"))
-            LabAppendStr("\nHint: your code must define  void farm(void) { ... }\n");
-        return;
-    }
-    if (rawLen > 0) { LabAppendStr("[Compiler warnings]\n"); LabAppend(labRaw, rawLen); LabAppendStr("\n[Program output]\n"); }
-
-    snprintf(cmd, sizeof cmd, "\"%s\" \"%s\" \"%s\" 2>&1", exe, tr, st);
-    int runLen = 0;
-    labExit = RunCapture(cmd, labRaw, (int)sizeof labRaw, &runLen);
-    LabAppend(labRaw, runLen);
-
-    f = fopen(tr, "r");                                   /* read back the trace */
-    if (f) {
-        FEv e;
-        while (fevN < FEV_MAX &&
-            fscanf(f, "%d %d %d %d %d %d %d %d %d %d", &e.t, &e.kind, &e.a, &e.b, &e.c, &e.d,
-                &e.inv[0], &e.inv[1], &e.inv[2], &e.inv[3]) == 10)
-            fev[fevN++] = e;
-        fclose(f);
-    }
-
-    int actions = 0;
-    for (int i = 0; i < fevN; i++) if (fev[i].kind != 9) actions++;
-    for (int i = 0; i < 4; i++) frInv0[i] = fsv.inv[i];
-    if (fevN > 0) for (int i = 0; i < 4; i++) fsv.inv[i] = fev[fevN - 1].inv[i];
-    for (int i = 0; i < fevN; i++)                       /* a small credit bonus the first time you collect each item */
-        if (fev[i].kind == 2 && fev[i].c >= 0 && fev[i].d > 0 && !fsv.first[fev[i].c]) {
-            fsv.first[fev[i].c] = 1;
-            GainCredits(10, fev[i].c == 0 ? "First hay!" : (fev[i].c == 1 ? "First wood!" : (fev[i].c == 2 ? "First carrots!" : "First pumpkins!")));
-        }
-    SaveFarm();
-
-    if (labExit == 124) {
-        labStatus = LAB_TIMEOUT;
-        LabAppendStr("\n[Time limit reached: the program ran for more than 3 seconds and was stopped.]\n");
-        LabAppendStr("Tip: a loop that never calls move(), harvest() or plant() never ends. Check your loop conditions.\n");
-    }
-    else if (labExit != 0) {
-        labStatus = LAB_RUNTIME_ERR;
-        char m[200];
-        snprintf(m, sizeof m, "\n[Program %s]\n", labExit == 139 ? "crashed: segmentation fault (bad pointer or array index)" : "exited with an error");
-        LabAppendStr(m);
-    }
-    else {
-        labStatus = LAB_OK;
-    }
-    {
-        char s[200];
-        int gained[4];
-        for (int i = 0; i < 4; i++) gained[i] = fsv.inv[i] - frInv0[i];
-        snprintf(s, sizeof s, "\n[%d actions   hay %+d   wood %+d   carrots %+d   pumpkins %+d]\n", actions, gained[0], gained[1], gained[2], gained[3]);
-        if (labOutLen > 0 && labOut[labOutLen - 1] != '\n') LabAppendStr("\n");
-        LabAppendStr(s);
-    }
-    farmRuns++;
-    FarmReplayStart();
-}
-
 
 /* ---- drawing: items, the mower, the lawn ---- */
 static void FarmIcon(int kind, float cx, float cy, float r)
@@ -5962,13 +6208,33 @@ static void FarmIcon(int kind, float cx, float cy, float r)
     }
 }
 
+static const Color GB_BG = { 30, 32, 38, 255 }, GB_PANEL = { 40, 43, 52, 255 }, GB_EDGE = { 78, 82, 96, 255 }, GB_DARK = { 18, 19, 24, 255 };
+
+/* flat, square, bevelled button in the style of the game's toolbar */
+static bool GBtn(Rectangle r, const char* label, Color c, int fs)
+{
+    Vector2 m = GetMousePosition();
+    bool hov = CheckCollisionPointRec(m, r), down = hov && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+    if (hov) hand = true;
+    Color f = hov ? ColorBrightness(c, 0.14f) : c;
+    DrawRectangleRec(r, GB_DARK);
+    DrawRectangle((int)r.x + 1, (int)r.y + 1, (int)r.width - 2, (int)r.height - 2, f);
+    DrawRectangle((int)r.x + 1, (int)r.y + 1, (int)r.width - 2, 2, Fade(WHITE, down ? 0.0f : 0.22f));
+    DrawRectangle((int)r.x + 1, (int)(r.y + r.height) - 3, (int)r.width - 2, 2, Fade(BLACK, 0.30f));
+    float tw = TxtW(fBold, label, (float)fs);
+    float sc = tw > r.width - 8 ? (r.width - 8) / tw : 1.0f;
+    Txt(fBold, label, r.x + (r.width - tw * sc) / 2, r.y + (r.height - fs * 1.1f * UI_SCALE) / 2 + (down ? 1 : 0), fs * sc, WHITE);
+    return hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+}
+
 static void FarmChip(float x, float y, int kind, int n)
 {
     const char* t = TextFormat("%d", n);
     float w = TxtW(fBold, t, 17) + 52;
-    Panel((Rectangle) { x, y, w, 40 }, 0.5f, Fade(SURF, 0.96f), BORDER);
-    FarmIcon(kind, x + 22, y + 20, 10);
-    Txt(fBold, t, x + 40, y + 8, 17, TXT);
+    DrawRectangle((int)x, (int)y, (int)w, 34, GB_DARK);
+    DrawRectangle((int)x + 1, (int)y + 1, (int)w - 2, 32, GB_PANEL);
+    FarmIcon(kind, x + 20, y + 17, 9);
+    Txt(fBold, t, x + 38, y + 5, 17, WHITE);
 }
 
 /* the player's student on a ride-on mower. dir: 0 = north (up the screen), 1 = east, 2 = south, 3 = west */
@@ -6045,329 +6311,3613 @@ static void FarmDrawMower(float cx, float fy, int dir, float sc, float blade, fl
 #undef K
 }
 
-static void FarmBlade(float x, float y, float h, float w, Color c, float sway)
+
+/* ------------------------------------------------------------------ */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wmisleading-indentation"
+#endif
+/*  Clockwork Farm: a programming game. You never farm by hand - you   */
+/*  write code (a small Python-like language) that drives the mower.   */
+/* ------------------------------------------------------------------ */
+enum { IT_HAY, IT_WOOD, IT_CARROT, IT_PUMPKIN, IT_POWER, IT_GOLD, IT_WATER, IT_N };
+enum { E_NONE, E_GRASS, E_BUSH, E_CARROT, E_TREE, E_PUMPKIN, E_SUNFLOWER };
+enum { EV_DOT, EV_GAIN, EV_BURST, EV_POOF, EV_PLANT, EV_SPLASH };
+enum {
+    U_SPEED1, U_BUSHES, U_LOOPS, U_FARM4, U_SOIL, U_FUNCS, U_SPEED2, U_CARROTS, U_FARM6, U_LISTS, U_TREES, U_WATER,
+    U_YIELD, U_SPEED3, U_FARM8, U_PUMPKINS, U_SUN, U_FARM10, U_SPEED4, U_MAZE, U_SPEED5, U_N
+};
+static const char* IT_NAME[IT_N] = { "Hay", "Wood", "Carrots", "Pumpkins", "Power", "Gold", "Water" };
+static const float F_GROW[7] = { 0, 3, 5, 7, 10, 12, 8 };
+static const float F_SPEEDM[6] = { 1, 0.7f, 0.5f, 0.35f, 0.22f, 0.14f };
+
+typedef struct { const char* name, * desc; int cost[IT_N]; int req[2]; } FUpg;
+static const FUpg FUPG[U_N] = {
+    { "Drone Speed I",  "Every action is 30% faster.",                          { 40 },                         { -1, -1 } },
+    { "Bushes",         "plant(Entities.Bush) gives 2 Wood.",                    { 60 },                         { -1, -1 } },
+    { "Loops",          "Unlocks for i in range(n): loops.",                     { 100 },                        { -1, -1 } },
+    { "Farm 4 x 4",     "Grow the plot to 16 tiles.",                            { 150 },                        { -1, -1 } },
+    { "Soil",           "till() and get_ground_type().",                         { 200, 50 },                    { U_BUSHES, -1 } },
+    { "Functions",      "Write your own def name(): functions.",                 { 150, 60 },                    { U_LOOPS, -1 } },
+    { "Drone Speed II", "Actions take half the time.",                           { 300, 100 },                   { U_SPEED1, -1 } },
+    { "Carrots",        "Carrots on soil. Cost 1 Hay + 1 Wood, give 2.",         { 400, 200 },                   { U_SOIL, -1 } },
+    { "Farm 6 x 6",     "Grow the plot to 36 tiles.",                            { 500, 150 },                   { U_FARM4, -1 } },
+    { "Lists",          "Lists with [ ], indexing, append() and pop().",         { 0, 250, 100 },                { U_CARROTS, U_FUNCS } },
+    { "Trees",          "Give 5 Wood. Slower next to other trees.",              { 0, 400, 120 },               { U_CARROTS, -1 } },
+    { "Watering",       "use_item(Items.Water) halves the wait.",                { 0, 300, 200 },               { U_CARROTS, -1 } },
+    { "Sharp Blades",   "Every grass harvest gives +1 Hay.",                     { 600, 300 },                   { U_SPEED2, -1 } },
+    { "Drone Speed III","Actions take about a third of the time.",               { 1500, 800, 400 },             { U_SPEED2, -1 } },
+    { "Farm 8 x 8",     "Grow the plot to 64 tiles.",                            { 0, 600, 300 },               { U_FARM6, -1 } },
+    { "Pumpkins",       "Ripe squares merge into giants. Some die.",             { 0, 500, 800 },               { U_TREES, U_WATER } },
+    { "Sunflowers",     "Power! measure() reads the petals.",                    { 0, 0, 1000, 200 },            { U_PUMPKINS, -1 } },
+    { "Farm 10 x 10",   "The biggest plot: 100 tiles.",                          { 0, 0, 1500, 400 },            { U_FARM8, -1 } },
+    { "Drone Speed IV", "Actions take a fifth of the time.",                     { 0, 0, 1000, 800 },            { U_SPEED3, U_SUN } },
+    { "Labyrinth",      "generate_maze() and can_move(). Gold prize.",           { 0, 500, 0, 1000, 100 },       { U_SUN, -1 } },
+    { "Drone Speed V",  "The final tune-up.",                                    { 0, 0, 0, 0, 0, 300 },         { U_SPEED4, U_MAZE } },
+};
+
+typedef struct { unsigned char type, dead, doomed, petals; float age; short gid; } FEnt;
+typedef struct { unsigned char soil; FEnt e; float emptyT; } FTile;
+typedef struct { int x0, y0, k; } FGiant;
+typedef struct { int k, x, y, item, n; } FEvent;
+
+static struct {                                     /* saved */
+    int magic; unsigned char unl[U_N]; int inv[IT_N]; unsigned char seen[IT_N]; int tut; int speed;
+} fsv;
+static FTile fT[10][10];
+static int fN = 3;
+static double fTime = 0, fActStart = 0, fCost = 0;
+static struct { int x, y, fx, fy, dir; double t0, t1; bool wrap; double flipT; } fD = { 0, 0, 0, 0, 0, 0, 0, false, -9 };
+static struct { bool on; unsigned char wE[10][10], wN[10][10]; int tx, ty; } fMaze;
+static FGiant fGi[100];
+static struct { int moves, harvests, plants; } fStat;
+static FEvent fEv[256];
+static int fEvN = 0, fPowerTick = 0;
+static unsigned fRng = 12345;
+static float fWaterT = 0, fGiantT = 0;
+static char fErr[200];
+static int FDX[4] = { 0, 1, 0, -1 }, FDY[4] = { 1, 0, -1, 0 };
+static void FarmOut(const char* s);                 /* prints into the output window */
+
+static float FRand(void) { fRng = fRng * 1103515245u + 12345u; return (float)((fRng >> 8) & 0xFFFF) / 65536.0f; }
+static void FEmit(int k, int x, int y, int item, int n) { if (fEvN < 256) fEv[fEvN++] = (FEvent){ k, x, y, item, n }; }
+static void FMsg(const char* fmt, ...)
 {
-    DrawRectangle((int)(x + sway), (int)(y - h), (int)w, (int)h, c);
-    DrawRectangle((int)(x + sway * 0.5f), (int)(y - h * 0.5f), (int)w, (int)(h * 0.5f + 1), c);
+    char b[260]; va_list ap; va_start(ap, fmt); vsnprintf(b, sizeof b, fmt, ap); va_end(ap);
+    char c[280]; snprintf(c, sizeof c, "%s\n", b); FarmOut(c);
 }
-
-static void FarmDrawTile(int x, int y)
+static int FSize(void) { return fsv.unl[U_FARM10] ? 10 : fsv.unl[U_FARM8] ? 8 : fsv.unl[U_FARM6] ? 6 : fsv.unl[U_FARM4] ? 4 : 3; }
+static FEnt FNew(int type)
 {
-    float ts = fgTs, sx = FarmTX((float)x), sy = FarmTY((float)y), t = (float)GetTime();
-    int isx = (int)sx, isy = (int)sy, its = (int)ceilf(ts);
-    int g = frGround[x][y], e = frEnt[x][y];
-    float frac = 0;
-    if (e > 0) {
-        frac = (float)(frTick - frPlanted[x][y]) / (float)FARM_GROW[e];
-        frac = frac < 0 ? 0 : (frac > 1 ? 1 : frac);
-    }
-    bool ripe = e > 0 && frac >= 1.0f;
-    unsigned h0 = Hash(x * 7 + 3, y * 13 + 5);
-
-    if (g == 0) {
-        Color base = ((x + y) & 1) ? (Color) { 112, 188, 86, 255 } : (Color) { 98, 174, 76, 255 };
-        if (e == 1 && ripe) base = ((x + y) & 1) ? (Color) { 84, 156, 66, 255 } : (Color) { 78, 148, 62, 255 };
-        DrawRectangle(isx, isy, its, its, base);
-        if (e != 1 || !ripe) DrawRectangleGradientV(isx, isy, its, its / 2, Fade(WHITE, 0.07f), Fade(WHITE, 0.0f));
-    }
-    else {
-        Color base = ((x + y) & 1) ? (Color) { 112, 78, 50, 255 } : (Color) { 104, 72, 46, 255 };
-        DrawRectangle(isx, isy, its, its, base);
-        for (int k = 1; k < 4; k++) DrawRectangle(isx + 2, isy + (int)(ts * k / 4.0f) - 1, its - 4, (int)(ts * 0.07f) + 1, (Color) { 84, 56, 36, 255 });
-        for (int k = 1; k < 4; k++) DrawRectangle(isx + 2, isy + (int)(ts * k / 4.0f) + (int)(ts * 0.07f), its - 4, 1, (Color) { 138, 100, 66, 255 });
-    }
-
-    if (e == 1) {                                           /* grass: blades grow with time */
-        int n = 3 + (int)(frac * 11);
-        float bh = ts * (0.07f + 0.34f * frac), bw = ts * 0.075f > 1 ? ts * 0.075f : 1;
-        for (int k = 0; k < n; k++) {
-            unsigned q = Hash(x * 31 + k * 7, y * 17 + k * 3) & 1023;
-            float bx = sx + ts * (0.07f + 0.86f * (q & 31) / 31.0f), by = sy + ts * (0.30f + 0.66f * ((q >> 5) & 31) / 31.0f);
-            float sway = sinf(t * 1.6f + x + k) * (ripe ? ts * 0.03f : 0);
-            Color c = ripe ? (Color) { 54, 128, 50, 255 } : (Color) { 130, 204, 96, 255 };
-            FarmBlade(bx, by, bh * (0.75f + 0.5f * (q & 7) / 7.0f), bw, c, sway);
-            FarmBlade(bx + bw, by - bh * 0.2f, bh * 0.45f, bw, ColorBrightness(c, 0.28f), sway);
-        }
-    }
-    else if (e == 2) {                                    /* bush */
-        float r = ts * (0.13f + 0.30f * frac), cx = sx + ts / 2, cy = sy + ts * 0.62f;
-        DrawEllipse((int)cx, (int)(cy + r * 0.8f), r * 1.1f, r * 0.35f, Fade(BLACK, 0.22f));
-        DrawCircle((int)(cx - r * 0.55f), (int)(cy + r * 0.1f), r * 0.75f, (Color) { 34, 104, 60, 255 });
-        DrawCircle((int)(cx + r * 0.55f), (int)(cy + r * 0.1f), r * 0.75f, (Color) { 34, 104, 60, 255 });
-        DrawCircle((int)cx, (int)(cy - r * 0.3f), r * 0.9f, (Color) { 40, 120, 68, 255 });
-        DrawCircle((int)(cx - r * 0.3f), (int)(cy - r * 0.5f), r * 0.4f, (Color) { 84, 164, 92, 255 });
-        if (ripe) for (int k = 0; k < 5; k++) {
-            unsigned q = Hash(x * 5 + k, y * 9 + k * 2) & 255;
-            DrawCircle((int)(cx + (q % 100 - 50) / 50.0f * r * 0.7f), (int)(cy - r * 0.2f + ((q / 3) % 100 - 50) / 50.0f * r * 0.6f), r * 0.14f + 1, (Color) { 224, 56, 72, 255 });
-        }
-    }
-    else if (e == 3) {                                    /* carrot */
-        float cx = sx + ts / 2, cy = sy + ts * 0.72f, r = ts * (0.08f + 0.28f * frac);
-        DrawEllipse((int)cx, (int)(cy + ts * 0.08f), ts * 0.2f, ts * 0.07f, (Color) { 84, 56, 36, 255 });
-        for (int k = -2; k <= 2; k++) {
-            float a = -1.5708f + k * 0.42f;
-            DrawLine((int)cx, (int)cy, (int)(cx + cosf(a) * r * 1.5f), (int)(cy + sinf(a) * r * 1.5f), (Color) { 70, 168, 74, 255 });
-            DrawCircle((int)(cx + cosf(a) * r * 1.5f), (int)(cy + sinf(a) * r * 1.5f), r * 0.28f + 1, (Color) { 96, 190, 88, 255 });
-        }
-        if (ripe) { DrawCircle((int)cx, (int)(cy + ts * 0.02f), ts * 0.11f, (Color) { 244, 142, 36, 255 }); DrawCircle((int)cx - 1, (int)(cy + ts * 0.0f), ts * 0.05f, (Color) { 255, 190, 90, 255 }); }
-    }
-    else if (e == 4) {                                    /* pumpkin */
-        float cx = sx + ts / 2, cy = sy + ts * 0.62f, r = ts * (0.08f + 0.32f * frac);
-        DrawEllipse((int)cx, (int)(cy + r * 0.8f), r * 1.1f, r * 0.3f, Fade(BLACK, 0.22f));
-        if (frac < 0.35f) {
-            DrawCircle((int)cx, (int)cy, r * 0.9f, (Color) { 84, 160, 72, 255 });
-        }
-        else {
-            DrawEllipse((int)cx, (int)cy, r * 1.05f, r * 0.85f, (Color) { 220, 112, 28, 255 });
-            DrawEllipse((int)(cx - r * 0.45f), (int)cy, r * 0.5f, r * 0.85f, (Color) { 236, 132, 36, 255 });
-            DrawEllipse((int)(cx + r * 0.45f), (int)cy, r * 0.5f, r * 0.85f, (Color) { 236, 132, 36, 255 });
-            DrawEllipse((int)cx, (int)cy, r * 0.5f, r * 0.85f, (Color) { 250, 156, 52, 255 });
-            DrawRectangle((int)(cx - r * 0.1f), (int)(cy - r * 1.05f), (int)(r * 0.22f + 1), (int)(r * 0.3f + 1), (Color) { 74, 120, 52, 255 });
-        }
-    }
-    if (ripe && e > 1) {                                    /* ripe sparkle */
-        float a = 0.5f + 0.5f * sinf(t * 4.0f + h0);
-        DrawRectangle((int)(sx + ts * 0.8f) - 2, (int)(sy + ts * 0.18f), 5, 1, Fade(WHITE, a));
-        DrawRectangle((int)(sx + ts * 0.8f), (int)(sy + ts * 0.18f) - 2, 1, 5, Fade(WHITE, a));
-    }
-    DrawRectangle(isx, isy, its, 1, Fade(BLACK, 0.07f));   /* faint tile edges */
-    DrawRectangle(isx, isy, 1, its, Fade(BLACK, 0.07f));
+    FEnt e; memset(&e, 0, sizeof e); e.type = (unsigned char)type;
+    if (type == E_PUMPKIN) e.doomed = FRand() < 0.18f;
+    if (type == E_SUNFLOWER) e.petals = (unsigned char)(7 + (int)(FRand() * 9));
+    return e;
 }
-
-static void FarmDrawLawn(Rectangle a)
+static void FarmBuild(void)
 {
-    float avail = (a.width < a.height ? a.width : a.height) - 30;
-    float ts = floorf(avail / (float)frN);
-    if (ts > 96) ts = 96;
-    fgTs = ts;
-    fgOx = floorf(a.x + (a.width - ts * frN) / 2);
-    fgOy = floorf(a.y + (a.height - ts * frN) / 2);
-    float gw = ts * frN, fw = ts * 0.12f + 3;
-
-    DrawRectangleRec(a, (Color) { 58, 112, 56, 255 });                       /* meadow around the lawn */
-    for (int k = 0; k < 40; k++) {
-        unsigned q = Hash(k * 11, 77);
-        DrawRectangle((int)(a.x + (q % (unsigned)a.width)), (int)(a.y + ((q >> 8) % (unsigned)a.height)), 2, 4, (Color) { 74, 132, 66, 255 });
+    int n = FSize();
+    for (int x = 0; x < n; x++) for (int y = 0; y < n; y++)
+        if (x >= fN || y >= fN || fN == 0) { fT[x][y].soil = 0; fT[x][y].e = FNew(E_GRASS); fT[x][y].e.age = F_GROW[E_GRASS]; fT[x][y].emptyT = 0; }
+    fN = n; if (fD.x >= n) fD.x = n - 1; if (fD.y >= n) fD.y = n - 1; fD.fx = fD.x; fD.fy = fD.y;
+}
+static void FarmReset(void)
+{
+    memset(&fsv, 0, sizeof fsv); fsv.magic = 0xFA12; fsv.speed = 1; fN = 0; fD.x = fD.y = 0; fMaze.on = false;
+    fTime = 0; fActStart = 0; fCost = 0; fEvN = 0; fPowerTick = 0; fWaterT = 0; fGiantT = 0; memset(&fStat, 0, sizeof fStat); memset(&fD, 0, sizeof fD); memset(fGi, 0, sizeof fGi);
+    memset(fT, 0, sizeof fT); FarmBuild();
+}
+static void SaveFarm(void) { FILE* f = fopen("farm2.dat", "wb"); if (f) { fwrite(&fsv, sizeof fsv, 1, f); fclose(f); } }
+static void LoadFarm(void)
+{
+    FarmReset();
+    FILE* f = fopen("farm2.dat", "rb"); if (!f) return;
+    if (fread(&fsv, sizeof fsv, 1, f) == 1 && fsv.magic == 0xFA12) { fN = 0; FarmBuild(); }
+    else FarmReset();
+    fclose(f);
+}
+static float FGrowTime(const FEnt* e, int x, int y)
+{
+    float g = F_GROW[e->type];
+    if (e->type == E_TREE) {
+        int n = 0;
+        for (int d = 0; d < 4; d++) if (fT[(x + FDX[d] + fN) % fN][(y + FDY[d] + fN) % fN].e.type == E_TREE) n++;
+        g *= 1 + 0.8f * n;
     }
-    DrawRectangle((int)(fgOx - fw), (int)(fgOy - fw), (int)(gw + 2 * fw), (int)(gw + 2 * fw), (Color) { 96, 64, 38, 255 });     /* fence */
-    DrawRectangle((int)(fgOx - fw * 0.6f), (int)(fgOy - fw * 0.6f), (int)(gw + 1.2f * fw), (int)(gw + 1.2f * fw), (Color) { 146, 102, 62, 255 });
+    return g;
+}
+static bool FRipe(const FEnt* e, int x, int y) { return e->type && !e->dead && e->age >= FGrowTime(e, x, y); }
+static float FFrac(const FEnt* e, int x, int y) { float f = e->age / FGrowTime(e, x, y); return f < 0 ? 0 : f > 1 ? 1 : f; }
 
-    for (int row = 0; row < frN; row++)                                       /* top row first, so tall grass overlaps correctly */
-        for (int x = 0; x < frN; x++) FarmDrawTile(x, frN - 1 - row);
-
-    float fx = FarmTX((float)frFX) + (FarmTX((float)frX) - FarmTX((float)frFX)) * frMove;
-    float fyy = FarmTY((float)frFY) + (FarmTY((float)frY) - FarmTY((float)frFY)) * frMove;
-    float sc = ts / 62.0f;
-    if (sc < 0.42f) sc = 0.42f;
-    if (sc > 1.5f) sc = 1.5f;
-    FarmDrawMower(fx + ts / 2, fyy + ts * 0.88f, frDir, sc, frBlade > 0 ? 1.0f : 0.0f, frFlip);
-
-    for (int i = 0; i < 120; i++)
-        if (fpart[i].life > 0)
-            DrawRectangle((int)fpart[i].x, (int)fpart[i].y, (int)fpart[i].size + 1, (int)fpart[i].size + 1, Fade(fpart[i].c, fpart[i].life > 0.3f ? 1.0f : fpart[i].life / 0.3f));
-    for (int i = 0; i < 10; i++)
-        if (fpop[i].age > 0) {
-            float k = fpop[i].age, al = k > 0.9f ? (1.3f - k) / 0.4f : 1.0f;
-            float px = FarmTX((float)fpop[i].tx) + ts / 2, py = FarmTY((float)fpop[i].ty) - k * 26;
-            float tw = TxtW(fBold, fpop[i].text, 15);
-            DrawRectangleRounded((Rectangle) { px - tw / 2 - 8, py - 2, tw + 16, 24 }, 0.5f, 6, Fade((Color) { 20, 24, 36, 255 }, 0.8f * al));
-            CenterTxt(fBold, fpop[i].text, px, py + 1, 15, Fade(fpop[i].c, al));
+static void FGiants(void)
+{
+    int n = fN, id = 0; static unsigned char ok[10][10]; static int dp[10][10];
+    for (int x = 0; x < n; x++) for (int y = 0; y < n; y++) { fT[x][y].e.gid = 0; ok[x][y] = fT[x][y].e.type == E_PUMPKIN && FRipe(&fT[x][y].e, x, y); }
+    for (;;) {
+        int best = 0, bx = 0, by = 0;
+        for (int x = 0; x < n; x++) for (int y = 0; y < n; y++) {
+            if (!ok[x][y]) { dp[x][y] = 0; continue; }
+            int m = 0;
+            if (x > 0 && y > 0) { m = dp[x - 1][y]; if (dp[x][y - 1] < m) m = dp[x][y - 1]; if (dp[x - 1][y - 1] < m) m = dp[x - 1][y - 1]; }
+            dp[x][y] = 1 + m;
+            if (dp[x][y] > best) { best = dp[x][y]; bx = x; by = y; }
         }
+        if (best < 2 || id >= 99) break;
+        id++; fGi[id] = (FGiant){ bx - best + 1, by - best + 1, best };
+        for (int x = fGi[id].x0; x <= bx; x++) for (int y = fGi[id].y0; y <= by; y++) { ok[x][y] = 0; fT[x][y].e.gid = (short)id; }
+    }
 }
-
-/* ---- the screen ---- */
-static void FarmLayout(void) { labW = 560; labH = 330; labOX = 24; labOY = 480; labOW = W - 48; labOH = 200; }
-
-static void FarmIdleView(void)
+static void FarmAdvance(double dt)
 {
-    for (int i = 0; i < 4; i++) frInv0[i] = fsv.inv[i];
-    fevN = 0;
-    FarmReplayStart();
+    fTime += dt; bool pump = false;
+    for (int x = 0; x < fN; x++) for (int y = 0; y < fN; y++) {
+        FTile* t = &fT[x][y];
+        if (t->e.type) {
+            if (!t->e.dead) {
+                t->e.age += (float)dt;
+                if (t->e.type == E_PUMPKIN) { pump = true; if (t->e.doomed && t->e.age >= F_GROW[E_PUMPKIN]) { t->e.dead = 1; t->e.gid = 0; } }
+            }
+        }
+        else if (!t->soil && !fMaze.on) { t->emptyT += (float)dt; if (t->emptyT > 1.5f) { t->e = FNew(E_GRASS); t->emptyT = 0; } }
+    }
+    if (pump) { fGiantT -= (float)dt; if (fGiantT <= 0) { fGiantT = 0.25f; FGiants(); } }
+    if (fsv.unl[U_WATER] && fsv.inv[IT_WATER] < 40) { fWaterT += (float)dt; if (fWaterT >= 4) { fWaterT -= 4; fsv.inv[IT_WATER]++; fsv.seen[IT_WATER] = 1; } }
 }
-
-static void FarmLoad(int i)
+static int FSpeedLevel(void)
 {
-    farmEx = i;
-    snprintf(labBuf, LAB_CAP + 1, "%s", FARM_EX[i].code);
-    labLen = (int)strlen(labBuf);
-    labCur = labAnc = 0; labWant = -1; labSX = labSY = labOutScroll = 0;
-    labOutLen = 0; labOut[0] = 0; labErrN = 0; labStatus = LAB_READY; labPending = 0;
+    static const int sp[5] = { U_SPEED1, U_SPEED2, U_SPEED3, U_SPEED4, U_SPEED5 };
+    int n = 0; for (int i = 0; i < 5; i++) if (fsv.unl[sp[i]]) n = i + 1;
+    return n;
 }
-
-static void StartFarm(void)
+static void FAct(double base)
 {
-    if (labOwner == 0) { StashSwap(); labOwner = 1; }
-    if (!farmInit) { FarmLoad(0); farmInit = true; FarmIdleView(); }
-    screen = SCR_FARM;
-    labFocus = 0; labPending = 0;
-    if (labStatus == LAB_COMPILING) labStatus = LAB_READY;
+    double c = base * F_SPEEDM[FSpeedLevel()];
+    if (fsv.inv[IT_POWER] >= 1) { c *= 0.5; if (++fPowerTick % 12 == 0) fsv.inv[IT_POWER]--; }
+    fCost = c;
 }
-
-static bool FarmUpgradeOk(int i)
+static void FGain(int item, int n, int x, int y)
 {
-    for (int k = 0; k < 2; k++) if (FUP_NEEDS[i][k] >= 0 && !fsv.unl[FUP_NEEDS[i][k]]) return false;
+    fsv.inv[item] += n;
+    if (!fsv.seen[item]) { fsv.seen[item] = 1; if (item != IT_HAY) GainCredits(10, "First item collected"); }
+    FEmit(EV_GAIN, x, y, item, n);
+}
+static bool FMazeOpen(int x, int y, int d)
+{
+    if (d == 1) return x + 1 < fN && !fMaze.wE[x][y];
+    if (d == 3) return x - 1 >= 0 && !fMaze.wE[x - 1][y];
+    if (d == 0) return y + 1 < fN && !fMaze.wN[x][y];
+    return y - 1 >= 0 && !fMaze.wN[x][y - 1];
+}
+static bool FMove(int d)
+{
+    FAct(0.3);
+    int nx = fD.x + FDX[d], ny = fD.y + FDY[d]; bool wrap = false;
+    if (fMaze.on) { if (!FMazeOpen(fD.x, fD.y, d)) { fCost *= 0.27; return false; } }
+    else { if (nx < 0 || nx >= fN || ny < 0 || ny >= fN) wrap = true; nx = (nx + fN) % fN; ny = (ny + fN) % fN; }
+    fD.fx = fD.x; fD.fy = fD.y; fD.x = nx; fD.y = ny; fD.t0 = fActStart; fD.t1 = fActStart + fCost; fD.wrap = wrap; fD.dir = d;
+    fStat.moves++; FEmit(EV_DOT, fD.fx, fD.fy, 0, 0);
+    return true;
+}
+static bool FHarvest(void)
+{
+    FAct(0.3); int x = fD.x, y = fD.y;
+    if (fMaze.on) {
+        if (x == fMaze.tx && y == fMaze.ty) {
+            int g = fN * fN * 3; FGain(IT_GOLD, g, x, y); fMaze.on = false; FEmit(EV_BURST, x, y, 0, 0); fStat.harvests++;
+            FMsg("Treasure found! +%d Gold. The hedges sink back into the ground.", g); return true;
+        }
+        fCost *= 0.2; return false;
+    }
+    FTile* t = &fT[x][y]; FEnt* e = &t->e;
+    if (!e->type) { fCost *= 0.3; return false; }
+    if (e->dead) { t->e = (FEnt){ 0 }; t->emptyT = 0; FEmit(EV_POOF, x, y, 0, 0); return false; }
+    if (!FRipe(e, x, y)) {
+        const char* nm[] = { "", "grass", "bush", "carrot", "tree", "pumpkin", "sunflower" };
+        FMsg("Harvested a %s before it was ripe, so it was wasted. Check can_harvest() first.", nm[e->type]);
+        t->e = e->type == E_GRASS ? FNew(E_GRASS) : (FEnt) { 0 }; t->emptyT = 0; FEmit(EV_POOF, x, y, 0, 0); return false;
+    }
+    fStat.harvests++;
+    switch (e->type) {
+    case E_GRASS: FGain(IT_HAY, 1 + (fsv.unl[U_YIELD] ? 1 : 0), x, y); t->e = FNew(E_GRASS); return true;
+    case E_BUSH: FGain(IT_WOOD, 2, x, y); t->e = (FEnt){ 0 }; t->emptyT = 0; return true;
+    case E_TREE: FGain(IT_WOOD, 5, x, y); t->e = (FEnt){ 0 }; t->emptyT = 0; return true;
+    case E_CARROT: FGain(IT_CARROT, 2, x, y); t->e = (FEnt){ 0 }; return true;
+    case E_SUNFLOWER: {
+        int mx = 0, cnt = 0;
+        for (int i = 0; i < fN; i++) for (int j = 0; j < fN; j++) if (fT[i][j].e.type == E_SUNFLOWER) { cnt++; if (fT[i][j].e.petals > mx) mx = fT[i][j].e.petals; }
+        bool best = cnt >= 5 && e->petals == mx;
+        FGain(IT_POWER, best ? 10 : 1, x, y);
+        if (best) { FEmit(EV_BURST, x, y, 0, 0); FMsg("The sunflower with the most petals (%d) gave a x10 power bonus!", mx); }
+        t->e = (FEnt){ 0 }; return true;
+    }
+    case E_PUMPKIN: {
+        FGiants(); int g = e->gid;
+        if (g) {
+            FGiant G = fGi[g];
+            for (int i = G.x0; i < G.x0 + G.k; i++) for (int j = G.y0; j < G.y0 + G.k; j++) fT[i][j].e = (FEnt){ 0 };
+            int n = G.k * G.k * G.k; FGain(IT_PUMPKIN, n, x, y); FEmit(EV_BURST, x, y, 0, 0);
+            FMsg("Giant pumpkin (%dx%d)! +%d Pumpkins", G.k, G.k, n);
+        }
+        else { FGain(IT_PUMPKIN, 1, x, y); t->e = (FEnt){ 0 }; }
+        return true;
+    }
+    }
+    return false;
+}
+static bool FCanHarvest(void)
+{
+    FAct(0.05);
+    if (fMaze.on) return fD.x == fMaze.tx && fD.y == fMaze.ty;
+    return FRipe(&fT[fD.x][fD.y].e, fD.x, fD.y);
+}
+/* returns 1 ok, 0 refused (a hint is printed), -1 error (message in fErr) */
+static int FPlant(int ent)
+{
+    FAct(0.3);
+    static const int type[6] = { E_GRASS, E_BUSH, E_CARROT, E_TREE, E_PUMPKIN, E_SUNFLOWER };
+    static const int req[6] = { -1, U_BUSHES, U_CARROTS, U_TREES, U_PUMPKINS, U_SUN };
+    static const char* nm[6] = { "grass", "bush", "carrot", "tree", "pumpkin", "sunflower" };
+    static const int cost[6][IT_N] = { { 0 }, { 0 }, { 1, 1 }, { 2 }, { 1, 0, 1 }, { 0, 0, 1 } };
+    if (ent < 0 || ent > 5) { snprintf(fErr, sizeof fErr, "That can't be planted. Try Grass, Bush, Carrot, Tree, Pumpkin or Sunflower"); return -1; }
+    if (req[ent] >= 0 && !fsv.unl[req[ent]]) { snprintf(fErr, sizeof fErr, "Entities.%c%s is locked. Unlock \"%s\" in the upgrades (the + button).", nm[ent][0] - 32, nm[ent] + 1, FUPG[req[ent]].name); return -1; }
+    if (fMaze.on) { FMsg("You cannot plant while the maze is growing."); fCost *= 0.2; return 0; }
+    FTile* t = &fT[fD.x][fD.y]; int ty = type[ent]; bool needSoil = ent == 2 || ent == 4 || ent == 5;
+    if (needSoil && !t->soil) { FMsg("A %s needs tilled soil. Use till() first.", nm[ent]); fCost *= 0.3; return 0; }
+    if (ent == 0 && t->soil) { FMsg("Grass only grows on grassland, not soil."); fCost *= 0.3; return 0; }
+    if (t->e.type && !t->e.dead && !(t->e.type == E_GRASS && ent != 0)) { FMsg("This tile is already occupied. harvest() it first."); fCost *= 0.3; return 0; }
+    for (int k = 0; k < IT_N; k++) if (fsv.inv[k] < cost[ent][k]) { FMsg("Not enough %s to plant a %s.", IT_NAME[k], nm[ent]); fCost *= 0.3; return 0; }
+    for (int k = 0; k < IT_N; k++) fsv.inv[k] -= cost[ent][k];
+    t->e = FNew(ty); fStat.plants++; FEmit(EV_PLANT, fD.x, fD.y, 0, 0);
+    return 1;
+}
+static bool FTill(void)
+{
+    FAct(0.3); if (fMaze.on) { fCost *= 0.2; return false; }
+    FTile* t = &fT[fD.x][fD.y]; t->soil = !t->soil; t->e = t->soil ? (FEnt) { 0 } : FNew(E_GRASS); FEmit(EV_POOF, fD.x, fD.y, 0, 0); return true;
+}
+static int FEntityId(void)                          /* -1 none; 0..5 plants, 6 dead pumpkin, 7 treasure */
+{
+    FAct(0.05);
+    if (fMaze.on) return fD.x == fMaze.tx && fD.y == fMaze.ty ? 7 : -1;
+    FEnt* e = &fT[fD.x][fD.y].e; if (!e->type) return -1;
+    return e->dead ? 6 : e->type - 1;
+}
+static bool FUseWater(void)
+{
+    FAct(0.3); FEnt* e = &fT[fD.x][fD.y].e;
+    if (fsv.inv[IT_WATER] < 1) { FMsg("No water left. A little more arrives every few seconds."); fCost *= 0.3; return false; }
+    if (!e->type || e->dead || FRipe(e, fD.x, fD.y)) { FMsg("Nothing growing here needs water."); fCost *= 0.3; return false; }
+    fsv.inv[IT_WATER]--; e->age += FGrowTime(e, fD.x, fD.y) * 0.5f; FEmit(EV_SPLASH, fD.x, fD.y, 0, 0); return true;
+}
+static int FMeasure(void) { FAct(0.05); FEnt* e = &fT[fD.x][fD.y].e; return e->type == E_SUNFLOWER ? e->petals : -1; }
+static void FFlip(void) { FAct(0.6); fD.flipT = fActStart; }
+static bool FCanMove(int d) { FAct(0.05); return !fMaze.on || FMazeOpen(fD.x, fD.y, d); }
+static bool FGenMaze(void)
+{
+    FAct(0.6); if (fMaze.on) return false;
+    int n = fN; static unsigned char seen[10][10]; int sx[100], sy[100], sp = 0;
+    memset(seen, 0, sizeof seen); memset(fMaze.wE, 1, sizeof fMaze.wE); memset(fMaze.wN, 1, sizeof fMaze.wN);
+    sx[0] = fD.x; sy[0] = fD.y; sp = 1; seen[fD.x][fD.y] = 1;
+    while (sp) {
+        int x = sx[sp - 1], y = sy[sp - 1], opt[4], no = 0;
+        for (int d = 0; d < 4; d++) { int nx = x + FDX[d], ny = y + FDY[d]; if (nx >= 0 && ny >= 0 && nx < n && ny < n && !seen[nx][ny]) opt[no++] = d; }
+        if (!no) { sp--; continue; }
+        int d = opt[(int)(FRand() * no) % no], nx = x + FDX[d], ny = y + FDY[d];
+        if (d == 1) fMaze.wE[x][y] = 0; else if (d == 3) fMaze.wE[nx][ny] = 0; else if (d == 0) fMaze.wN[x][y] = 0; else fMaze.wN[nx][ny] = 0;
+        seen[nx][ny] = 1; sx[sp] = nx; sy[sp] = ny; sp++;
+    }
+    int tx, ty, tries = 0, need = n - 2 < 2 ? 2 : n - 2;
+    do { tx = (int)(FRand() * n) % n; ty = (int)(FRand() * n) % n; tries++; } while (abs(tx - fD.x) + abs(ty - fD.y) < need && tries < 200);
+    fMaze.tx = tx; fMaze.ty = ty; fMaze.on = true; FEmit(EV_BURST, fD.x, fD.y, 0, 0);
+    FMsg("A hedge maze grows around you. Find the treasure and harvest() it!");
     return true;
 }
 
-static void DrawFarmUpgrades(Rectangle a)
+
+/* ================= the farm language: a small Python-like script, compiled to bytecode ================= */
+typedef enum { V_UNDEF, V_NONE, V_BOOL, V_NUM, V_STR, V_LIST, V_ENUM, V_FUNC, V_BUILTIN } PVT;
+typedef struct PList PList;
+typedef struct { unsigned char t; int a; union { double n; const char* s; PList* l; } u; } PV;
+struct PList { int n, cap; PV* v; };
+
+enum {
+    BI_MOVE, BI_HARVEST, BI_CANHARV, BI_PLANT, BI_TILL, BI_ENTITY, BI_GROUND, BI_POSX, BI_POSY, BI_WSIZE, BI_NUMITEMS, BI_USEITEM, BI_MEASURE,
+    BI_MAZE, BI_CANMOVE, BI_FLIP, BI_PRINT, BI_LEN, BI_RANGE, BI_STR, BI_INT, BI_ABS, BI_ROUND, BI_MIN, BI_MAX, BI_RANDOM, BI_RANDINT, BI_N
+};
+static const struct { const char* name; bool act; int req; } PBI[BI_N] = {
+    { "move", 1, -1 }, { "harvest", 1, -1 }, { "can_harvest", 1, -1 }, { "plant", 1, -1 }, { "till", 1, U_SOIL }, { "get_entity_type", 1, -1 },
+    { "get_ground_type", 1, U_SOIL }, { "get_pos_x", 1, -1 }, { "get_pos_y", 1, -1 }, { "get_world_size", 1, -1 }, { "num_items", 1, -1 },
+    { "use_item", 1, U_WATER }, { "measure", 1, U_SUN }, { "generate_maze", 1, U_MAZE }, { "can_move", 1, U_MAZE }, { "do_a_flip", 1, -1 },
+    { "print", 0, -1 }, { "len", 0, -1 }, { "range", 0, U_LOOPS }, { "str", 0, -1 }, { "int", 0, -1 }, { "abs", 0, -1 }, { "round", 0, -1 },
+    { "min", 0, -1 }, { "max", 0, -1 }, { "random", 0, -1 }, { "randint", 0, -1 },
+};
+static const char* P_ENTN[8] = { "Grass", "Bush", "Carrot", "Tree", "Pumpkin", "Sunflower", "Dead_Pumpkin", "Treasure" };
+static const char* P_ITEMN[7] = { "Hay", "Wood", "Carrot", "Pumpkin", "Power", "Gold", "Water" };
+static const char* P_DIRN[4] = { "North", "East", "South", "West" };
+static const char* P_GRDN[2] = { "Grassland", "Soil" };
+
+static int PfCaseCmp(const char* a, const char* b)
 {
-    for (int i = 0; i < FARM_NUP; i++) {
-        float y = a.y + 2 + i * 47.0f;
-        Rectangle row = { a.x, y, a.width, 43 };
-        bool owned = fsv.unl[i], ok = FarmUpgradeOk(i);
-        bool can = !owned && ok && fsv.inv[0] >= FUP[i].hay && fsv.inv[1] >= FUP[i].wood;
-        Panel(row, 0.15f, owned ? (Color) { 26, 52, 40, 255 } : SURF, owned ? GOOD : BORDER);
-        TxtFit(fBold, FUP[i].name, row.x + 14, y + 3, 16, 250, owned ? GOOD : TXT);
-        TxtFit(fReg, FUP[i].desc, row.x + 14, y + 23, 12, 330, DIM);
-        if (owned) {
-            CenterTxt(fBold, "Unlocked", row.x + row.width - 62, y + 12, 15, GOOD);
+    for (; *a && *b; a++, b++) { int x = tolower((unsigned char)*a), y = tolower((unsigned char)*b); if (x != y) return x - y; }
+    return tolower((unsigned char)*a) - tolower((unsigned char)*b);
+}
+static jmp_buf pfJmp;
+static char pfMsg[320];
+static int pfLine = 0;
+static void PfFail(int ln, const char* fmt, ...)
+{
+    va_list ap; va_start(ap, fmt); vsnprintf(pfMsg, sizeof pfMsg, fmt, ap); va_end(ap);
+    pfLine = ln; longjmp(pfJmp, 1);
+}
+
+/* ---- memory: one text arena and a list table, both reset on every run ---- */
+static char pfStrBuf[1 << 18]; static int pfStrLen = 0, pfStrBase = 0;
+static const char* PfStr(const char* s, int len, int ln)
+{
+    if (pfStrLen + len + 1 >= (int)sizeof pfStrBuf) PfFail(ln, "The program is using too much text memory");
+    char* d = pfStrBuf + pfStrLen; memcpy(d, s, (size_t)len); d[len] = 0; pfStrLen += len + 1; return d;
+}
+static PList* plAll[20000]; static int plN = 0;
+static PList* PfListNew(int cap, int ln)
+{
+    if (plN >= 20000) PfFail(ln, "The program made too many lists");
+    PList* l = (PList*)malloc(sizeof * l); if (!l) PfFail(ln, "Out of memory");
+    l->n = 0; l->cap = cap < 4 ? 4 : cap; l->v = (PV*)malloc(sizeof(PV) * (size_t)l->cap); if (!l->v) { free(l); PfFail(ln, "Out of memory"); }
+    plAll[plN++] = l; return l;
+}
+static void PfListFreeAll(void) { for (int i = 0; i < plN; i++) { free(plAll[i]->v); free(plAll[i]); } plN = 0; }
+static void PfListPush(PList* l, PV v, int ln)
+{
+    if (l->n >= l->cap) { if (l->cap > 200000) PfFail(ln, "That list is too big"); l->cap *= 2; PV* nv = (PV*)realloc(l->v, sizeof(PV) * (size_t)l->cap); if (!nv) PfFail(ln, "Out of memory"); l->v = nv; }
+    l->v[l->n++] = v;
+}
+
+/* ---- values ---- */
+static PV VNone(void) { PV v; memset(&v, 0, sizeof v); v.t = V_NONE; return v; }
+static PV VNum(double n) { PV v; memset(&v, 0, sizeof v); v.t = V_NUM; v.u.n = n; return v; }
+static PV VBool(int b) { PV v; memset(&v, 0, sizeof v); v.t = V_BOOL; v.u.n = b ? 1 : 0; return v; }
+static PV VStrV(const char* s) { PV v; memset(&v, 0, sizeof v); v.t = V_STR; v.u.s = s; return v; }
+static PV VEnum(int code) { PV v; memset(&v, 0, sizeof v); v.t = V_ENUM; v.a = code; return v; }
+static bool VTruthy(PV v)
+{
+    switch (v.t) { case V_NONE: case V_UNDEF: return false; case V_BOOL: case V_NUM: return v.u.n != 0; case V_STR: return v.u.s[0] != 0; case V_LIST: return v.u.l->n > 0; default: return true; }
+}
+static bool VIsNum(PV v) { return v.t == V_NUM || v.t == V_BOOL; }
+static bool VEq(PV a, PV b)
+{
+    if (VIsNum(a) && VIsNum(b)) return a.u.n == b.u.n;
+    if (a.t != b.t) return false;
+    switch (a.t) {
+    case V_NONE: return true; case V_ENUM: case V_FUNC: case V_BUILTIN: return a.a == b.a; case V_STR: return strcmp(a.u.s, b.u.s) == 0;
+    case V_LIST: if (a.u.l->n != b.u.l->n) return false; for (int i = 0; i < a.u.l->n; i++) if (!VEq(a.u.l->v[i], b.u.l->v[i])) return false; return true;
+    default: return false;
+    }
+}
+static const char* VTName(PV v)
+{
+    switch (v.t) { case V_NONE: return "None"; case V_BOOL: return "True/False"; case V_NUM: return "number"; case V_STR: return "text"; case V_LIST: return "list"; case V_ENUM: return "game value"; default: return "function"; }
+}
+static void PfNumStr(char* b, size_t n, double d)
+{
+    if (d == floor(d) && fabs(d) < 1e15) snprintf(b, n, "%.0f", d); else snprintf(b, n, "%.6g", d);
+}
+static void VRepr(PV v, char* o, int cap, bool top)
+{
+    char t[64];
+    switch (v.t) {
+    case V_NONE: case V_UNDEF: snprintf(o, (size_t)cap, "None"); break;
+    case V_BOOL: snprintf(o, (size_t)cap, v.u.n ? "True" : "False"); break;
+    case V_NUM: PfNumStr(t, sizeof t, v.u.n); snprintf(o, (size_t)cap, "%s", t); break;
+    case V_STR: if (top) snprintf(o, (size_t)cap, "%s", v.u.s); else snprintf(o, (size_t)cap, "'%s'", v.u.s); break;
+    case V_LIST: {
+        int p = 0; o[p++] = '['; o[p] = 0;
+        for (int i = 0; i < v.u.l->n && p < cap - 20; i++) { if (i) { o[p++] = ','; o[p++] = ' '; } VRepr(v.u.l->v[i], o + p, cap - p, false); p += (int)strlen(o + p); }
+        if (p < cap - 2) { o[p++] = ']'; o[p] = 0; } break;
+    }
+    case V_ENUM: {
+        int k = v.a >> 4, i = v.a & 15;
+        if (k == 0) snprintf(o, (size_t)cap, "%s", P_DIRN[i & 3]); else if (k == 1) snprintf(o, (size_t)cap, "Entities.%s", P_ENTN[i & 7]);
+        else if (k == 2) snprintf(o, (size_t)cap, "Items.%s", P_ITEMN[i % 7]); else snprintf(o, (size_t)cap, "Grounds.%s", P_GRDN[i & 1]); break;
+    }
+    default: snprintf(o, (size_t)cap, "<function>"); break;
+    }
+}
+
+/* ---- tokenizer ---- */
+enum { T_NUM, T_STR, T_NAME, T_KW, T_OP, T_NL, T_IND, T_DED, T_EOF };
+typedef struct { unsigned char t; int ln; double n; char s[32]; } PTok;
+#define PT_MAX 7000
+static PTok pt[PT_MAX]; static int ptn = 0, ptp = 0;
+static bool PfIsKw(const char* w)
+{
+    static const char* kw[] = { "if", "elif", "else", "while", "for", "in", "def", "return", "pass", "break", "continue", "and", "or", "not", "True", "False", "None", "global", NULL };
+    for (int i = 0; kw[i]; i++) if (!strcmp(w, kw[i])) return true;
+    return false;
+}
+static PTok* PtAdd(int t, int ln)
+{
+    if (ptn >= PT_MAX - 2) PfFail(ln, "This program is too long");
+    PTok* k = &pt[ptn++]; memset(k, 0, sizeof * k); k->t = (unsigned char)t; k->ln = ln; return k;
+}
+static void PfLex(const char* src)
+{
+    int ind[64], ni = 1, ln = 1; ind[0] = 0; ptn = 0; const char* p = src; int lastLn = 1;
+    while (*p) {
+        const char* ls = p; int col = 0;
+        while (*p == ' ' || *p == '\t') { col += *p == '\t' ? 4 : 1; p++; }
+        if (*p == '\r') p++;
+        if (*p == '\n' || *p == '#' || *p == 0) { while (*p && *p != '\n') p++; if (*p == '\n') p++; ln++; (void)ls; continue; }
+        lastLn = ln;
+        if (col > ind[ni - 1]) { if (ni >= 60) PfFail(ln, "Too many nested blocks"); ind[ni++] = col; PtAdd(T_IND, ln); }
+        else {
+            while (col < ind[ni - 1]) { ni--; PtAdd(T_DED, ln); }
+            if (col != ind[ni - 1]) PfFail(ln, "This line is indented differently from the lines above it");
+        }
+        while (*p && *p != '\n') {
+            char c = *p;
+            if (c == ' ' || c == '\t' || c == '\r') { p++; continue; }
+            if (c == '#') { while (*p && *p != '\n') p++; break; }
+            if (isdigit((unsigned char)c) || (c == '.' && isdigit((unsigned char)p[1]))) {
+                char* e; double v = strtod(p, &e); PTok* k = PtAdd(T_NUM, ln); k->n = v; p = e; continue;
+            }
+            if (isalpha((unsigned char)c) || c == '_') {
+                int n = 0; char w[40];
+                while (isalnum((unsigned char)*p) || *p == '_') { if (n < 31) w[n++] = *p; p++; }
+                w[n] = 0; PTok* k = PtAdd(PfIsKw(w) ? T_KW : T_NAME, ln); memcpy(k->s, w, (size_t)n + 1); continue;
+            }
+            if (c == '"' || c == '\'') {
+                char buf[500]; int n = 0; p++;
+                while (*p && *p != '\n' && *p != c) {
+                    if (*p == '\\' && p[1]) { p++; buf[n++] = *p == 'n' ? '\n' : *p == 't' ? '\t' : *p; p++; }
+                    else buf[n++] = *p++;
+                    if (n > 480) PfFail(ln, "That text is too long");
+                }
+                if (*p != c) PfFail(ln, "This text is missing its closing quote (%c)", c);
+                p++; PTok* k = PtAdd(T_STR, ln); k->n = (double)(PfStr(buf, n, ln) - pfStrBuf); continue;
+            }
+            static const char* two[] = { "**", "//", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", NULL };
+            PTok* k = NULL;
+            if (!strncmp(p, "//=", 3)) { k = PtAdd(T_OP, ln); strcpy(k->s, "//="); p += 3; continue; }
+            for (int i = 0; two[i]; i++) if (!strncmp(p, two[i], 2)) { k = PtAdd(T_OP, ln); strcpy(k->s, two[i]); p += 2; break; }
+            if (k) continue;
+            if (strchr("+-*/%<>=()[],:.", c)) { k = PtAdd(T_OP, ln); k->s[0] = c; p++; continue; }
+            PfFail(ln, "I don't understand the character '%c'", c);
+        }
+        PtAdd(T_NL, ln); if (*p == '\n') p++; ln++;
+    }
+    while (ni > 1) { ni--; PtAdd(T_DED, lastLn); }
+    PtAdd(T_EOF, lastLn);
+}
+
+/* ---- compiler: tokens -> bytecode ---- */
+enum {
+    OP_NUM, OP_STR, OP_NONE, OP_TRUE, OP_FALSE, OP_ENUM, OP_LOADG, OP_STOREG, OP_LOADL, OP_STOREL, OP_BUILTIN, OP_POP, OP_DUP2,
+    OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_IDIV, OP_MOD, OP_POW, OP_EQ, OP_NE, OP_LT, OP_GT, OP_LE, OP_GE, OP_IN, OP_NOTIN, OP_NOT, OP_NEG,
+    OP_JMP, OP_JF, OP_JFK, OP_JTK, OP_LIST, OP_INDEX, OP_SETINDEX, OP_CALL, OP_METHOD, OP_RET, OP_FUNC, OP_TOLIST, OP_LEN, OP_END
+};
+typedef struct { short op; int a; int ln; } PIns;
+static PIns pcode[24000]; static int pcn = 0;
+static double pnum[3000]; static int pnn = 0;
+static char pgName[300][32]; static int pgn = 0;
+typedef struct { int entry, np, nl; } PFn;
+static PFn pfn[64]; static int pfnn = 0;
+static bool pInFn = false; static char pLoc[64][32]; static int pLocN = 0; static char pGd[16][32]; static int pGdN = 0;
+typedef struct { int brk[64], nb, cont[64], nc; } PLoopC;
+static PLoopC plp[20]; static int plpn = 0, pLoopBase = 0, pHid = 0;
+
+static int PEmit(int op, int a, int ln)
+{
+    if (pcn >= 23990) PfFail(ln, "This program is too long");
+    pcode[pcn].op = (short)op; pcode[pcn].a = a; pcode[pcn].ln = ln; return pcn++;
+}
+static int PFindG(const char* nm) { for (int i = 0; i < pgn; i++) if (!strcmp(pgName[i], nm)) return i; return -1; }
+static int PAddG(const char* nm, int ln)
+{
+    int i = PFindG(nm); if (i >= 0) return i;
+    if (pgn >= 299) PfFail(ln, "Too many different variable names");
+    snprintf(pgName[pgn], 32, "%s", nm); return pgn++;
+}
+static int PFindL(const char* nm) { for (int i = 0; i < pLocN; i++) if (!strcmp(pLoc[i], nm)) return i; return -1; }
+static bool PIsGd(const char* nm) { for (int i = 0; i < pGdN; i++) if (!strcmp(pGd[i], nm)) return true; return false; }
+static int PBuiltinId(const char* nm) { for (int i = 0; i < BI_N; i++) if (!strcmp(PBI[i].name, nm)) return i; return -1; }
+static void PEmitLoad(const char* nm, int ln)
+{
+    if (pInFn) { if (PIsGd(nm)) { PEmit(OP_LOADG, PAddG(nm, ln), ln); return; } int s = PFindL(nm); if (s >= 0) { PEmit(OP_LOADL, s, ln); return; } }
+    int g = PFindG(nm); if (g >= 0) { PEmit(OP_LOADG, g, ln); return; }
+    int b = PBuiltinId(nm); if (b >= 0) { PEmit(OP_BUILTIN, b, ln); return; }
+    PEmit(OP_LOADG, PAddG(nm, ln), ln);
+}
+static void PEmitStore(const char* nm, int ln)
+{
+    if (pInFn && !PIsGd(nm)) {
+        int s = PFindL(nm);
+        if (s < 0) { if (pLocN >= 60) PfFail(ln, "Too many variables in this function"); snprintf(pLoc[pLocN], 32, "%s", nm); s = pLocN++; }
+        PEmit(OP_STOREL, s, ln); return;
+    }
+    PEmit(OP_STOREG, PAddG(nm, ln), ln);
+}
+static void PNeed(int id, const char* what, int ln)
+{
+    if (!fsv.unl[id]) PfFail(ln, "%s locked. Unlock \"%s\" in the upgrades (the + button).", what, FUPG[id].name);
+}
+static bool PIsOp(const char* s) { return pt[ptp].t == T_OP && !strcmp(pt[ptp].s, s); }
+static bool PKw(const char* s) { return pt[ptp].t == T_KW && !strcmp(pt[ptp].s, s); }
+static const char* PDesc(const PTok* k)
+{
+    static char b[64];
+    switch (k->t) {
+    case T_NL: return "the end of the line"; case T_EOF: return "the end of the program"; case T_IND: return "extra indentation"; case T_DED: return "a dedent";
+    case T_NUM: snprintf(b, sizeof b, "the number %g", k->n); return b; case T_STR: return "some text"; default: snprintf(b, sizeof b, "'%s'", k->s); return b;
+    }
+}
+static void PExpectOp(const char* s, const char* what)
+{
+    if (!PIsOp(s)) PfFail(pt[ptp].ln, "Expected '%s'%s%s but found %s", s, what ? " " : "", what ? what : "", PDesc(&pt[ptp]));
+    ptp++;
+}
+static void PExpr(void);
+static void PArgs(int* argc)
+{
+    *argc = 0;
+    while (!PIsOp(")")) { PExpr(); (*argc)++; if (PIsOp(",")) ptp++; else break; }
+    if (!PIsOp(")")) PfFail(pt[ptp].ln, "Expected ')' to close this call but found %s", PDesc(&pt[ptp]));
+    ptp++;
+}
+static int PNamespaceMember(const char* ns, const char* mem, int ln)
+{
+    int k = !strcmp(ns, "Entities") ? 1 : !strcmp(ns, "Items") ? 2 : 3, n = k == 1 ? 8 : k == 2 ? 7 : 2;
+    const char** tab = k == 1 ? P_ENTN : k == 2 ? P_ITEMN : P_GRDN;
+    for (int i = 0; i < n; i++) if (!strcmp(tab[i], mem)) return (k << 4) | i;
+    char list[200]; list[0] = 0;
+    for (int i = 0; i < n; i++) { strcat(list, tab[i]); if (i < n - 1) strcat(list, ", "); }
+    PfFail(ln, "%s has no '%s'. Try: %s", ns, mem, list); return 0;
+}
+static void PAtom(void)
+{
+    PTok* k = &pt[ptp]; int ln = k->ln;
+    if (k->t == T_NUM) { if (pnn >= 2999) PfFail(ln, "Too many numbers"); pnum[pnn] = k->n; PEmit(OP_NUM, pnn++, ln); ptp++; return; }
+    if (k->t == T_STR) { PEmit(OP_STR, (int)k->n, ln); ptp++; return; }
+    if (k->t == T_NAME) {
+        char nm[32]; snprintf(nm, 32, "%s", k->s); ptp++;
+        if ((!strcmp(nm, "Entities") || !strcmp(nm, "Items") || !strcmp(nm, "Grounds")) && PIsOp(".")) {
+            ptp++; if (pt[ptp].t != T_NAME) PfFail(ln, "Expected a name after '%s.'", nm);
+            PEmit(OP_ENUM, PNamespaceMember(nm, pt[ptp].s, ln), ln); ptp++; return;
+        }
+        for (int d = 0; d < 4; d++) if (!strcmp(nm, P_DIRN[d])) { PEmit(OP_ENUM, d, ln); return; }
+        PEmitLoad(nm, ln); return;
+    }
+    if (k->t == T_KW && (!strcmp(k->s, "True") || !strcmp(k->s, "False") || !strcmp(k->s, "None"))) { PEmit(k->s[0] == 'T' ? OP_TRUE : k->s[0] == 'F' ? OP_FALSE : OP_NONE, 0, ln); ptp++; return; }
+    if (PIsOp("(")) { ptp++; PExpr(); PExpectOp(")", NULL); return; }
+    if (PIsOp("[")) {
+        PNeed(U_LISTS, "Lists are", ln); ptp++; int n = 0;
+        while (!PIsOp("]")) { PExpr(); n++; if (PIsOp(",")) ptp++; else break; }
+        PExpectOp("]", "to close the list"); PEmit(OP_LIST, n, ln); return;
+    }
+    PfFail(ln, "Unexpected %s here", PDesc(k));
+}
+static void PPostfix(void)
+{
+    PAtom();
+    for (;;) {
+        int ln = pt[ptp].ln;
+        if (PIsOp("(")) { ptp++; int argc; PArgs(&argc); PEmit(OP_CALL, argc, ln); }
+        else if (PIsOp("[")) { PNeed(U_LISTS, "Indexing with [ ] is", ln); ptp++; PExpr(); PExpectOp("]", NULL); PEmit(OP_INDEX, 0, ln); }
+        else if (PIsOp(".")) {
+            ptp++; if (pt[ptp].t != T_NAME) PfFail(ln, "Expected a name after '.'");
+            int id = !strcmp(pt[ptp].s, "append") ? 0 : !strcmp(pt[ptp].s, "pop") ? 1 : -1;
+            if (id < 0) PfFail(ln, "This value has no attribute '%s'. Lists have append() and pop()", pt[ptp].s);
+            PNeed(U_LISTS, "Lists are", ln); ptp++;
+            if (!PIsOp("(")) PfFail(ln, "Expected '(' after .%s", id ? "pop" : "append");
+            ptp++; int argc; PArgs(&argc); PEmit(OP_METHOD, (argc << 4) | id, ln);
+        }
+        else break;
+    }
+}
+static void PUnary(void);
+static void PPow(void)
+{
+    PPostfix();
+    if (PIsOp("**")) { int ln = pt[ptp].ln; ptp++; PUnary(); PEmit(OP_POW, 0, ln); }
+}
+static void PUnary(void)
+{
+    if (PIsOp("-")) { int ln = pt[ptp].ln; ptp++; PUnary(); PEmit(OP_NEG, 0, ln); return; }
+    if (PIsOp("+")) { ptp++; PUnary(); return; }
+    PPow();
+}
+static void PTerm(void)
+{
+    PUnary();
+    for (;;) {
+        int op = PIsOp("*") ? OP_MUL : PIsOp("/") ? OP_DIV : PIsOp("//") ? OP_IDIV : PIsOp("%") ? OP_MOD : -1;
+        if (op < 0) break; int ln = pt[ptp].ln; ptp++; PUnary(); PEmit(op, 0, ln);
+    }
+}
+static void PArith(void)
+{
+    PTerm();
+    while (PIsOp("+") || PIsOp("-")) { int op = PIsOp("+") ? OP_ADD : OP_SUB, ln = pt[ptp].ln; ptp++; PTerm(); PEmit(op, 0, ln); }
+}
+static void PCmp(void)
+{
+    PArith();
+    for (;;) {
+        int ln = pt[ptp].ln, op = -1;
+        if (PIsOp("==")) op = OP_EQ; else if (PIsOp("!=")) op = OP_NE; else if (PIsOp("<")) op = OP_LT; else if (PIsOp(">")) op = OP_GT;
+        else if (PIsOp("<=")) op = OP_LE; else if (PIsOp(">=")) op = OP_GE; else if (PKw("in")) op = OP_IN;
+        else if (PKw("not") && pt[ptp + 1].t == T_KW && !strcmp(pt[ptp + 1].s, "in")) { op = OP_NOTIN; ptp++; }
+        if (op < 0) break; ptp++; PArith(); PEmit(op, 0, ln);
+    }
+}
+static void PNot(void) { if (PKw("not")) { int ln = pt[ptp].ln; ptp++; PNot(); PEmit(OP_NOT, 0, ln); } else PCmp(); }
+static void PAnd(void)
+{
+    PNot(); int pl[16], n = 0;
+    while (PKw("and")) { int ln = pt[ptp].ln; ptp++; if (n < 16) pl[n++] = PEmit(OP_JFK, 0, ln); PNot(); }
+    for (int i = 0; i < n; i++) pcode[pl[i]].a = pcn;
+}
+static void POr(void)
+{
+    PAnd(); int pl[16], n = 0;
+    while (PKw("or")) { int ln = pt[ptp].ln; ptp++; if (n < 16) pl[n++] = PEmit(OP_JTK, 0, ln); PAnd(); }
+    for (int i = 0; i < n; i++) pcode[pl[i]].a = pcn;
+}
+static void PExpr(void) { POr(); }
+
+static void PStmt(void);
+static void PEndLine(void)
+{
+    if (pt[ptp].t == T_NL) ptp++;
+    else if (pt[ptp].t != T_EOF && pt[ptp].t != T_DED) PfFail(pt[ptp].ln, "Unexpected %s - expected the end of the line", PDesc(&pt[ptp]));
+}
+static void PBlock(void)
+{
+    PExpectOp(":", "at the end of this line");
+    if (pt[ptp].t == T_NL) {
+        ptp++;
+        if (pt[ptp].t != T_IND) PfFail(pt[ptp].ln, "Expected an indented block here (press Tab to indent)");
+        ptp++;
+        while (pt[ptp].t != T_DED && pt[ptp].t != T_EOF) PStmt();
+        if (pt[ptp].t == T_DED) ptp++;
+        return;
+    }
+    PStmt();
+}
+static int PAssignOp(const PTok* k)
+{
+    if (k->t != T_OP) return -1;
+    static const char* o[] = { "=", "+=", "-=", "*=", "/=", "//=", "%=" }; static const int c[] = { -2, OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_IDIV, OP_MOD };
+    for (int i = 0; i < 7; i++) if (!strcmp(k->s, o[i])) return c[i];
+    return -1;
+}
+static bool PIsIndexAssign(void)
+{
+    int q = ptp + 1;
+    if (pt[ptp].t != T_NAME || !(pt[q].t == T_OP && !strcmp(pt[q].s, "["))) return false;
+    while (pt[q].t == T_OP && !strcmp(pt[q].s, "[")) {
+        int d = 0;
+        for (; pt[q].t != T_NL && pt[q].t != T_EOF; q++) { if (pt[q].t == T_OP && !strcmp(pt[q].s, "[")) d++; else if (pt[q].t == T_OP && !strcmp(pt[q].s, "]")) { d--; if (!d) { q++; break; } } }
+    }
+    return PAssignOp(&pt[q]) != -1;
+}
+static void PLoopEnd(int contTarget, int brkTarget)
+{
+    PLoopC* l = &plp[plpn - 1];
+    for (int i = 0; i < l->nc; i++) pcode[l->cont[i]].a = contTarget;
+    for (int i = 0; i < l->nb; i++) pcode[l->brk[i]].a = brkTarget;
+    plpn--;
+}
+static void PStmt(void)
+{
+    PTok* t = &pt[ptp]; int ln = t->ln;
+    if (t->t == T_IND) PfFail(ln, "This line is indented but nothing above it asks for a block");
+    if (t->t == T_KW) {
+        const char* k = t->s;
+        if (!strcmp(k, "if")) {
+            ptp++; int ends[40], ne = 0; PExpr(); int jf = PEmit(OP_JF, 0, ln); PBlock();
+            for (;;) {
+                if (PKw("elif")) { int l2 = pt[ptp].ln; ptp++; if (ne < 39) ends[ne++] = PEmit(OP_JMP, 0, l2); pcode[jf].a = pcn; PExpr(); jf = PEmit(OP_JF, 0, l2); PBlock(); }
+                else if (PKw("else")) { int l2 = pt[ptp].ln; ptp++; if (ne < 39) ends[ne++] = PEmit(OP_JMP, 0, l2); pcode[jf].a = pcn; jf = -1; PBlock(); break; }
+                else break;
+            }
+            if (jf >= 0) pcode[jf].a = pcn;
+            for (int i = 0; i < ne; i++) pcode[ends[i]].a = pcn;
+            return;
+        }
+        if (!strcmp(k, "while")) {
+            ptp++; int top = pcn; PExpr(); int jf = PEmit(OP_JF, 0, ln);
+            if (plpn >= 19) PfFail(ln, "Too many nested loops"); memset(&plp[plpn++], 0, sizeof(PLoopC));
+            PBlock(); PEmit(OP_JMP, top, ln); pcode[jf].a = pcn; PLoopEnd(top, pcn); return;
+        }
+        if (!strcmp(k, "for")) {
+            PNeed(U_LOOPS, "'for' loops are", ln); ptp++;
+            if (pt[ptp].t != T_NAME) PfFail(ln, "A for loop needs a variable name, like: for i in range(3):");
+            char var[32]; snprintf(var, 32, "%s", pt[ptp].s); ptp++;
+            if (!PKw("in")) PfFail(ln, "Expected 'in' after the loop variable"); ptp++;
+            char hl[32], hi[32]; snprintf(hl, 32, "$l%d", pHid); snprintf(hi, 32, "$i%d", pHid); pHid++;
+            PExpr(); PEmit(OP_TOLIST, 0, ln); PEmitStore(hl, ln); int z = pnn; pnum[pnn++] = 0; PEmit(OP_NUM, z, ln); PEmitStore(hi, ln);
+            int top = pcn; PEmitLoad(hi, ln); PEmitLoad(hl, ln); PEmit(OP_LEN, 0, ln); PEmit(OP_LT, 0, ln); int jf = PEmit(OP_JF, 0, ln);
+            PEmitLoad(hl, ln); PEmitLoad(hi, ln); PEmit(OP_INDEX, 0, ln); PEmitStore(var, ln);
+            if (plpn >= 19) PfFail(ln, "Too many nested loops"); memset(&plp[plpn++], 0, sizeof(PLoopC));
+            PBlock();
+            int inc = pcn; int one = pnn; pnum[pnn++] = 1; PEmitLoad(hi, ln); PEmit(OP_NUM, one, ln); PEmit(OP_ADD, 0, ln); PEmitStore(hi, ln); PEmit(OP_JMP, top, ln);
+            pcode[jf].a = pcn; PLoopEnd(inc, pcn); return;
+        }
+        if (!strcmp(k, "def")) {
+            PNeed(U_FUNCS, "'def' functions are", ln); ptp++;
+            if (pInFn) PfFail(ln, "Functions can't be defined inside other functions");
+            if (pt[ptp].t != T_NAME) PfFail(ln, "def needs a function name");
+            char nm[32]; snprintf(nm, 32, "%s", pt[ptp].s); ptp++; int gi = PAddG(nm, ln);
+            PExpectOp("(", NULL); char params[16][32]; int np = 0;
+            while (!PIsOp(")")) { if (pt[ptp].t != T_NAME) PfFail(ln, "Expected a parameter name"); if (np < 16) snprintf(params[np++], 32, "%s", pt[ptp].s); ptp++; if (PIsOp(",")) ptp++; else break; }
+            PExpectOp(")", NULL);
+            int jmp = PEmit(OP_JMP, 0, ln); if (pfnn >= 63) PfFail(ln, "Too many functions"); int fi = pfnn++;
+            pfn[fi].entry = pcn; pfn[fi].np = np; pInFn = true; pLocN = 0; pGdN = 0; pLoopBase = plpn;
+            for (int i = 0; i < np; i++) { snprintf(pLoc[pLocN], 32, "%s", params[i]); pLocN++; }
+            PBlock(); PEmit(OP_NONE, 0, ln); PEmit(OP_RET, 0, ln);
+            pfn[fi].nl = pLocN; pInFn = false; pLoopBase = 0; pcode[jmp].a = pcn;
+            PEmit(OP_FUNC, fi, ln); PEmit(OP_STOREG, gi, ln); return;
+        }
+        if (!strcmp(k, "return")) {
+            ptp++; if (pt[ptp].t != T_NL && pt[ptp].t != T_EOF) PExpr(); else PEmit(OP_NONE, 0, ln);
+            PEmit(pInFn ? OP_RET : OP_END, 0, ln); PEndLine(); return;
+        }
+        if (!strcmp(k, "pass")) { ptp++; PEndLine(); return; }
+        if (!strcmp(k, "break") || !strcmp(k, "continue")) {
+            bool br = k[0] == 'b'; ptp++;
+            if (plpn <= pLoopBase) PfFail(ln, "'%s' only works inside a loop", br ? "break" : "continue");
+            PLoopC* l = &plp[plpn - 1]; int j = PEmit(OP_JMP, 0, ln);
+            if (br) { if (l->nb < 63) l->brk[l->nb++] = j; }
+            else { if (l->nc < 63) l->cont[l->nc++] = j; }
+            PEndLine(); return;
+        }
+        if (!strcmp(k, "global")) {
+            ptp++;
+            while (pt[ptp].t == T_NAME) { if (pInFn && pGdN < 16) snprintf(pGd[pGdN++], 32, "%s", pt[ptp].s); ptp++; if (PIsOp(",")) ptp++; else break; }
+            PEndLine(); return;
+        }
+    }
+    int aop = (t->t == T_NAME) ? PAssignOp(&pt[ptp + 1]) : -1;
+    if (aop != -1) {
+        char nm[32]; snprintf(nm, 32, "%s", t->s); ptp += 2;
+        if (aop != -2) PEmitLoad(nm, ln);
+        PExpr(); if (aop != -2) PEmit(aop, 0, ln);
+        PEmitStore(nm, ln); PEndLine(); return;
+    }
+    if (PIsIndexAssign()) {
+        PNeed(U_LISTS, "Changing list items is", ln);
+        PEmitLoad(t->s, ln); ptp++;
+        for (;;) {
+            PExpectOp("[", NULL); PExpr(); PExpectOp("]", NULL);
+            if (PIsOp("[")) PEmit(OP_INDEX, 0, ln); else break;
+        }
+        int op = PAssignOp(&pt[ptp]); ptp++;
+        if (op != -2) PEmit(OP_DUP2, 0, ln), PEmit(OP_INDEX, 0, ln);
+        PExpr(); if (op != -2) PEmit(op, 0, ln);
+        PEmit(OP_SETINDEX, 0, ln); PEndLine(); return;
+    }
+    PExpr();
+    if (PAssignOp(&pt[ptp]) != -1) PfFail(ln, "You can only assign to a variable or a list item");
+    PEmit(OP_POP, 0, ln); PEndLine();
+}
+static bool PfCompile(const char* src)
+{
+    if (setjmp(pfJmp)) return false;
+    pcn = pnn = pgn = pfnn = 0; pInFn = false; plpn = pLoopBase = pHid = 0; pfStrLen = 0; ptp = 0;
+    PfLex(src);
+    while (pt[ptp].t != T_EOF) PStmt();
+    PEmit(OP_END, 0, pt[ptn - 1].ln); pfStrBase = pfStrLen;
+    return true;
+}
+
+/* ---- virtual machine ---- */
+typedef struct { int ret, base, callee; } PFrame;
+static PV pst[4096]; static int psp = 0; static PFrame pfr[120]; static int pfrn = 0; static PV pgv[300]; static int ppc = 0; static long pfIdle = 0;
+enum { PF_YIELD, PF_DONE, PF_ERR, PF_BUSY };
+#define PF_IDLE 1500000L
+static void PfStart(void)
+{
+    PfListFreeAll(); pfStrLen = pfStrBase; psp = 0; pfrn = 0; ppc = 0; pfIdle = 0;
+    for (int i = 0; i < 300; i++) { memset(&pgv[i], 0, sizeof pgv[i]); pgv[i].t = V_UNDEF; }
+}
+static const char* PfDidYouMean(const char* nm)
+{
+    for (int i = 0; i < BI_N; i++) if (!PfCaseCmp(PBI[i].name, nm) && strcmp(PBI[i].name, nm)) return PBI[i].name;
+    for (int i = 0; i < pgn; i++) if (!PfCaseCmp(pgName[i], nm) && strcmp(pgName[i], nm)) return pgName[i];
+    static const char* ex[] = { "North", "East", "South", "West", "Entities", "Items", "Grounds", NULL };
+    for (int i = 0; ex[i]; i++) if (!PfCaseCmp(ex[i], nm) && strcmp(ex[i], nm)) return ex[i];
+    return NULL;
+}
+static double PfNumOf(PV v, int ln, const char* what)
+{
+    if (!VIsNum(v)) PfFail(ln, "%s needs a number but got a %s", what, VTName(v));
+    return v.u.n;
+}
+static PV PfArith(int op, PV a, PV b, int ln)
+{
+    if (VIsNum(a) && VIsNum(b)) {
+        double x = a.u.n, y = b.u.n;
+        switch (op) {
+        case OP_ADD: return VNum(x + y); case OP_SUB: return VNum(x - y); case OP_MUL: return VNum(x * y);
+        case OP_DIV: if (y == 0) PfFail(ln, "You tried to divide by zero"); return VNum(x / y);
+        case OP_IDIV: if (y == 0) PfFail(ln, "You tried to divide by zero"); return VNum(floor(x / y));
+        case OP_MOD: if (y == 0) PfFail(ln, "You tried to divide by zero (in %%)"); return VNum(x - y * floor(x / y));
+        case OP_POW: return VNum(pow(x, y));
+        }
+    }
+    if (op == OP_ADD && a.t == V_STR && b.t == V_STR) {
+        int la = (int)strlen(a.u.s), lb = (int)strlen(b.u.s); char* t = (char*)malloc((size_t)(la + lb + 1)); memcpy(t, a.u.s, (size_t)la); memcpy(t + la, b.u.s, (size_t)lb); t[la + lb] = 0;
+        const char* r = PfStr(t, la + lb, ln); free(t); return VStrV(r);
+    }
+    if (op == OP_ADD && a.t == V_LIST && b.t == V_LIST) {
+        PList* l = PfListNew(a.u.l->n + b.u.l->n, ln);
+        for (int i = 0; i < a.u.l->n; i++) PfListPush(l, a.u.l->v[i], ln);
+        for (int i = 0; i < b.u.l->n; i++) PfListPush(l, b.u.l->v[i], ln);
+        PV v; memset(&v, 0, sizeof v); v.t = V_LIST; v.u.l = l; return v;
+    }
+    static const char* sym[] = { "+", "-", "*", "/", "//", "%", "**" };
+    PfFail(ln, "Can't use '%s' between %s and %s%s", sym[op - OP_ADD], VTName(a), VTName(b), (op == OP_ADD && (a.t == V_STR || b.t == V_STR)) ? ". Use str() to turn a number into text." : "");
+    return VNone();
+}
+static PV PfCompare(int op, PV a, PV b, int ln)
+{
+    if (op == OP_EQ) return VBool(VEq(a, b));
+    if (op == OP_NE) return VBool(!VEq(a, b));
+    if (op == OP_IN || op == OP_NOTIN) {
+        bool f = false;
+        if (b.t == V_LIST) { for (int i = 0; i < b.u.l->n; i++) if (VEq(a, b.u.l->v[i])) { f = true; break; } }
+        else if (b.t == V_STR && a.t == V_STR) f = strstr(b.u.s, a.u.s) != NULL;
+        else PfFail(ln, "'in' needs a list or text on the right");
+        return VBool(op == OP_IN ? f : !f);
+    }
+    double c;
+    if (VIsNum(a) && VIsNum(b)) c = a.u.n - b.u.n;
+    else if (a.t == V_STR && b.t == V_STR) c = strcmp(a.u.s, b.u.s);
+    else { static const char* sym[] = { "<", ">", "<=", ">=" }; PfFail(ln, "Can't compare %s with %s using '%s'", VTName(a), VTName(b), sym[op - OP_LT]); return VNone(); }
+    return VBool(op == OP_LT ? c < 0 : op == OP_GT ? c > 0 : op == OP_LE ? c <= 0 : c >= 0);
+}
+static int PfIndexOf(PV o, PV i, int ln, int* len)
+{
+    if (o.t != V_LIST && o.t != V_STR) PfFail(ln, "Can't index a %s", VTName(o));
+    if (!VIsNum(i)) PfFail(ln, "A list index must be a number");
+    int n = o.t == V_LIST ? o.u.l->n : (int)strlen(o.u.s), k = (int)i.u.n; if (k < 0) k += n;
+    if (k < 0 || k >= n || i.u.n != floor(i.u.n)) PfFail(ln, "List index %g is out of range (the list has %d items)", i.u.n, n);
+    if (len) *len = n; return k;
+}
+static int PfDirArg(PV v, int ln, const char* fn)
+{
+    if (v.t != V_ENUM || (v.a >> 4) != 0) PfFail(ln, "%s needs a direction: North, East, South or West", fn);
+    return v.a & 15;
+}
+/* runs a built-in; returns true when it is a drone action (the program then waits for its duration) */
+static bool PfBuiltin(int id, PV* a, int argc, int ln, PV* out)
+{
+    if (PBI[id].req >= 0 && !fsv.unl[PBI[id].req]) PfFail(ln, "%s() is locked. Unlock \"%s\" in the upgrades (the + button).", PBI[id].name, FUPG[PBI[id].req].name);
+    *out = VNone();
+    switch (id) {
+    case BI_MOVE: *out = VBool(FMove(PfDirArg(argc ? a[0] : VNone(), ln, "move()"))); break;
+    case BI_HARVEST: *out = VBool(FHarvest()); break;
+    case BI_CANHARV: *out = VBool(FCanHarvest()); break;
+    case BI_PLANT: {
+        if (argc < 1 || a[0].t != V_ENUM || (a[0].a >> 4) != 1) PfFail(ln, "plant() needs a crop type, e.g. plant(Entities.Bush)");
+        int r = FPlant(a[0].a & 15); if (r < 0) PfFail(ln, "%s", fErr); *out = VBool(r == 1); break;
+    }
+    case BI_TILL: *out = VBool(FTill()); break;
+    case BI_ENTITY: { int e = FEntityId(); *out = e < 0 ? VNone() : VEnum((1 << 4) | e); break; }
+    case BI_GROUND: FAct(0.05); *out = VEnum((3 << 4) | fT[fD.x][fD.y].soil); break;
+    case BI_POSX: FAct(0.05); *out = VNum(fD.x); break;
+    case BI_POSY: FAct(0.05); *out = VNum(fD.y); break;
+    case BI_WSIZE: FAct(0.05); *out = VNum(fN); break;
+    case BI_NUMITEMS:
+        if (argc < 1 || a[0].t != V_ENUM || (a[0].a >> 4) != 2) PfFail(ln, "num_items() needs an item, e.g. num_items(Items.Hay)");
+        FAct(0.05); *out = VNum(fsv.inv[(a[0].a & 15) % IT_N]); break;
+    case BI_USEITEM:
+        if (argc < 1 || a[0].t != V_ENUM || (a[0].a >> 4) != 2) PfFail(ln, "use_item() needs an item, e.g. use_item(Items.Water)");
+        if ((a[0].a & 15) != 6) PfFail(ln, "use_item() only works with Items.Water for now");
+        *out = VBool(FUseWater()); break;
+    case BI_MEASURE: { int m = FMeasure(); *out = m < 0 ? VNone() : VNum(m); break; }
+    case BI_MAZE: *out = VBool(FGenMaze()); break;
+    case BI_CANMOVE: *out = VBool(FCanMove(PfDirArg(argc ? a[0] : VNone(), ln, "can_move()"))); break;
+    case BI_FLIP: FFlip(); break;
+    case BI_PRINT: {
+        char line[1200]; int p = 0; line[0] = 0;
+        for (int i = 0; i < argc && p < 1000; i++) { if (i) line[p++] = ' '; VRepr(a[i], line + p, 1190 - p, true); p += (int)strlen(line + p); }
+        line[p++] = '\n'; line[p] = 0; FarmOut(line); break;
+    }
+    case BI_LEN: if (argc != 1 || (a[0].t != V_LIST && a[0].t != V_STR)) PfFail(ln, "len() needs a list or text"); *out = VNum(a[0].t == V_LIST ? a[0].u.l->n : (double)strlen(a[0].u.s)); break;
+    case BI_RANGE: {
+        double s = 0, e, st = 1;
+        if (argc == 1) e = PfNumOf(a[0], ln, "range()");
+        else if (argc == 2) { s = PfNumOf(a[0], ln, "range()"); e = PfNumOf(a[1], ln, "range()"); }
+        else if (argc == 3) { s = PfNumOf(a[0], ln, "range()"); e = PfNumOf(a[1], ln, "range()"); st = PfNumOf(a[2], ln, "range()"); }
+        else { PfFail(ln, "range() takes 1, 2 or 3 numbers"); return false; }
+        if (st == 0) PfFail(ln, "range() step cannot be 0");
+        if (fabs((e - s) / st) > 100000) PfFail(ln, "That range is too big (limit 100000)");
+        PList* l = PfListNew((int)fabs((e - s) / st) + 1, ln);
+        if (st > 0) for (double i = s; i < e; i += st) PfListPush(l, VNum(i), ln); else for (double i = s; i > e; i += st) PfListPush(l, VNum(i), ln);
+        out->t = V_LIST; out->u.l = l; break;
+    }
+    case BI_STR: { char b[1200]; VRepr(argc ? a[0] : VNone(), b, sizeof b, true); *out = VStrV(PfStr(b, (int)strlen(b), ln)); break; }
+    case BI_INT:
+        if (argc && a[0].t == V_STR) { char* e; double d = strtod(a[0].u.s, &e); if (e == a[0].u.s) PfFail(ln, "int() can't turn '%s' into a number", a[0].u.s); *out = VNum(trunc(d)); }
+        else *out = VNum(trunc(PfNumOf(argc ? a[0] : VNone(), ln, "int()")));
+        break;
+    case BI_ABS: *out = VNum(fabs(PfNumOf(argc ? a[0] : VNone(), ln, "abs()"))); break;
+    case BI_ROUND: *out = VNum(floor(PfNumOf(argc ? a[0] : VNone(), ln, "round()") + 0.5)); break;
+    case BI_MIN: case BI_MAX: {
+        PV* l = a; int n = argc;
+        if (argc == 1 && a[0].t == V_LIST) { l = a[0].u.l->v; n = a[0].u.l->n; }
+        if (n < 1) PfFail(ln, "%s() needs values", PBI[id].name);
+        PV best = l[0];
+        for (int i = 1; i < n; i++) if (VTruthy(PfCompare(id == BI_MIN ? OP_LT : OP_GT, l[i], best, ln))) best = l[i];
+        *out = best; break;
+    }
+    case BI_RANDOM: *out = VNum(FRand()); break;
+    case BI_RANDINT: {
+        double lo = PfNumOf(argc > 0 ? a[0] : VNone(), ln, "randint()"), hi = PfNumOf(argc > 1 ? a[1] : VNone(), ln, "randint()");
+        *out = VNum(lo + floor(FRand() * (hi - lo + 1))); break;
+    }
+    }
+    return PBI[id].act;
+}
+#define PUSH(v) do { if (psp >= 4090) PfFail(in->ln, "Too many things on the stack"); pst[psp++] = (v); } while (0)
+static int PfExec(long budget)
+{
+    if (setjmp(pfJmp)) return PF_ERR;
+    for (long it = 0; it < budget; it++) {
+        const PIns* in = &pcode[ppc++];
+        if (++pfIdle > PF_IDLE) PfFail(in->ln, "This program ran a very long time without the drone doing anything. Add an action like harvest() or move(), or a break.");
+        switch (in->op) {
+        case OP_NUM: PUSH(VNum(pnum[in->a])); break;
+        case OP_STR: PUSH(VStrV(pfStrBuf + in->a)); break;
+        case OP_NONE: PUSH(VNone()); break;
+        case OP_TRUE: PUSH(VBool(1)); break;
+        case OP_FALSE: PUSH(VBool(0)); break;
+        case OP_ENUM: PUSH(VEnum(in->a)); break;
+        case OP_LOADG: {
+            PV v = pgv[in->a];
+            if (v.t == V_UNDEF) {
+                const char* h = PfDidYouMean(pgName[in->a]);
+                if (h) PfFail(in->ln, "The name '%s' is not defined. Did you mean '%s'?", pgName[in->a], h);
+                PfFail(in->ln, "The name '%s' is not defined. Check the spelling, or create it with %s = ...", pgName[in->a], pgName[in->a]);
+            }
+            PUSH(v); break;
+        }
+        case OP_STOREG: pgv[in->a] = pst[--psp]; break;
+        case OP_LOADL: PUSH(pst[pfr[pfrn - 1].base + in->a]); break;
+        case OP_STOREL: pst[pfr[pfrn - 1].base + in->a] = pst[--psp]; break;
+        case OP_BUILTIN: { PV v; memset(&v, 0, sizeof v); v.t = V_BUILTIN; v.a = in->a; PUSH(v); break; }
+        case OP_POP: psp--; break;
+        case OP_DUP2: { PV d1 = pst[psp - 2], d2 = pst[psp - 1]; PUSH(d1); PUSH(d2); break; }
+        case OP_ADD: case OP_SUB: case OP_MUL: case OP_DIV: case OP_IDIV: case OP_MOD: case OP_POW: { PV b = pst[--psp], a = pst[--psp]; PUSH(PfArith(in->op, a, b, in->ln)); break; }
+        case OP_EQ: case OP_NE: case OP_LT: case OP_GT: case OP_LE: case OP_GE: case OP_IN: case OP_NOTIN: { PV b = pst[--psp], a = pst[--psp]; PUSH(PfCompare(in->op, a, b, in->ln)); break; }
+        case OP_NOT: pst[psp - 1] = VBool(!VTruthy(pst[psp - 1])); break;
+        case OP_NEG: { PV v = pst[psp - 1]; if (!VIsNum(v)) PfFail(in->ln, "Can't negate a %s", VTName(v)); pst[psp - 1] = VNum(-v.u.n); break; }
+        case OP_JMP: ppc = in->a; break;
+        case OP_JF: if (!VTruthy(pst[--psp])) ppc = in->a; break;
+        case OP_JFK: if (!VTruthy(pst[psp - 1])) ppc = in->a; else psp--; break;
+        case OP_JTK: if (VTruthy(pst[psp - 1])) ppc = in->a; else psp--; break;
+        case OP_LIST: { PList* l = PfListNew(in->a, in->ln); for (int i = 0; i < in->a; i++) PfListPush(l, pst[psp - in->a + i], in->ln); psp -= in->a; PV v; memset(&v, 0, sizeof v); v.t = V_LIST; v.u.l = l; PUSH(v); break; }
+        case OP_INDEX: {
+            PV i = pst[--psp], o = pst[--psp]; int k = PfIndexOf(o, i, in->ln, NULL);
+            if (o.t == V_LIST) PUSH(o.u.l->v[k]); else PUSH(VStrV(PfStr(o.u.s + k, 1, in->ln))); break;
+        }
+        case OP_SETINDEX: { PV v = pst[--psp], i = pst[--psp], o = pst[--psp]; if (o.t != V_LIST) PfFail(in->ln, "You can only change items inside a list"); o.u.l->v[PfIndexOf(o, i, in->ln, NULL)] = v; break; }
+        case OP_TOLIST: {
+            PV v = pst[psp - 1];
+            if (v.t == V_STR) { PList* l = PfListNew((int)strlen(v.u.s), in->ln); for (const char* c = v.u.s; *c; c++) PfListPush(l, VStrV(PfStr(c, 1, in->ln)), in->ln); pst[psp - 1].t = V_LIST; pst[psp - 1].u.l = l; }
+            else if (v.t != V_LIST) PfFail(in->ln, "A for loop needs a list or range(...) to loop over");
+            break;
+        }
+        case OP_LEN: pst[psp - 1] = VNum(pst[psp - 1].u.l->n); break;
+        case OP_FUNC: { PV v; memset(&v, 0, sizeof v); v.t = V_FUNC; v.a = in->a; PUSH(v); break; }
+        case OP_METHOD: {
+            int argc = in->a >> 4, id = in->a & 15; PV o = pst[psp - argc - 1];
+            if (o.t != V_LIST) PfFail(in->ln, "Only lists have append() and pop()");
+            PV r = VNone();
+            if (id == 0) { if (argc != 1) PfFail(in->ln, "append() needs one value"); PfListPush(o.u.l, pst[psp - 1], in->ln); }
+            else {
+                if (!o.u.l->n) PfFail(in->ln, "pop() from an empty list");
+                int k = o.u.l->n - 1; if (argc) k = PfIndexOf(o, pst[psp - 1], in->ln, NULL);
+                r = o.u.l->v[k]; memmove(&o.u.l->v[k], &o.u.l->v[k + 1], sizeof(PV) * (size_t)(o.u.l->n - k - 1)); o.u.l->n--;
+            }
+            psp -= argc + 1; PUSH(r); break;
+        }
+        case OP_CALL: {
+            int argc = in->a; PV c = pst[psp - argc - 1];
+            if (c.t == V_BUILTIN) {
+                PV out; bool act = PfBuiltin(c.a, &pst[psp - argc], argc, in->ln, &out);
+                psp -= argc + 1; PUSH(out);
+                if (act) { pfIdle = 0; return PF_YIELD; }
+                break;
+            }
+            if (c.t == V_FUNC) {
+                PFn* f = &pfn[c.a];
+                if (argc != f->np) PfFail(in->ln, "This function needs %d value%s but you gave it %d", f->np, f->np == 1 ? "" : "s", argc);
+                if (pfrn >= 110) PfFail(in->ln, "Too many nested function calls. Is a function calling itself forever?");
+                pfr[pfrn].ret = ppc; pfr[pfrn].base = psp - argc; pfr[pfrn].callee = psp - argc - 1; pfrn++;
+                for (int k = argc; k < f->nl; k++) PUSH(VNone());
+                ppc = f->entry; break;
+            }
+            PfFail(in->ln, "This is not a function, so it can't be called with ( )"); break;
+        }
+        case OP_RET: { PV v = pst[--psp]; PFrame fr = pfr[--pfrn]; psp = fr.callee; PUSH(v); ppc = fr.ret; break; }
+        case OP_END: return PF_DONE;
+        }
+    }
+    return PF_BUSY;
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Clockwork Farm: tilted 3-D style renderer                          */
+/* ------------------------------------------------------------------ */
+static void FItemIcon(int item, float cx, float cy, float r)
+{
+    if (item <= 3) { FarmIcon(item, cx, cy, r); return; }
+    if (item == 4) {                                    /* power: lightning bolt */
+        Color y = { 255, 214, 60, 255 };
+        DrawTriangle((Vector2) { cx + r * 0.1f, cy - r }, (Vector2) { cx - r * 0.7f, cy + r * 0.15f }, (Vector2) { cx + r * 0.2f, cy + r * 0.15f }, y);
+        DrawTriangle((Vector2) { cx - r * 0.2f, cy - r * 0.15f }, (Vector2) { cx + r * 0.7f, cy - r * 0.15f }, (Vector2) { cx - r * 0.1f, cy + r }, y);
+    }
+    else if (item == 5) {                             /* gold coin */
+        DrawCircle((int)cx, (int)cy, r, (Color) { 176, 128, 24, 255 });
+        DrawCircle((int)cx, (int)cy, r * 0.82f, (Color) { 250, 208, 70, 255 });
+        DrawCircle((int)cx, (int)cy, r * 0.5f, (Color) { 232, 176, 40, 255 });
+    }
+    else {                                            /* water drop */
+        DrawCircle((int)cx, (int)(cy + r * 0.2f), r * 0.7f, (Color) { 70, 150, 240, 255 });
+        DrawTriangle((Vector2) { cx - r * 0.62f, cy + r * 0.05f }, (Vector2) { cx + r * 0.62f, cy + r * 0.05f }, (Vector2) { cx, cy - r }, (Color) { 70, 150, 240, 255 });
+    }
+}
+
+static void FChip(float x, float y, int item, int n)
+{
+    const char* t = TextFormat("%d", n);
+    float w = TxtW(fBold, t, 17) + 52;
+    DrawRectangle((int)x, (int)y, (int)w, 34, GB_DARK);
+    DrawRectangle((int)x + 1, (int)y + 1, (int)w - 2, 32, GB_PANEL);
+    FItemIcon(item, x + 20, y + 17, 9);
+    Txt(fBold, t, x + 38, y + 5, 17, WHITE);
+}
+
+/* ---- projection ---- */
+static struct { float s, cx, cy; } fv = { 40, 800, 400 };
+#define F_PHI 0.95f
+static Vector2 FP(float u, float v, float h, float* k)
+{
+    float X = u - fN * 0.5f, Y = v - fN * 0.5f, D = fN * 2.2f + 4;
+    float cp = cosf(F_PHI), sp = sinf(F_PHI);
+    float dep = (D + Y * sp - h * cp) / D, up = Y * cp + h * sp;
+    if (k) *k = fv.s / dep;
+    return (Vector2) { fv.cx + X * fv.s / dep, fv.cy - up * fv.s / dep };
+}
+static void FFit(Rectangle a)
+{
+    fv.s = 1; fv.cx = fv.cy = 0;
+    float n = (float)fN, minx = 1e9f, maxx = -1e9f, miny = 1e9f, maxy = -1e9f;
+    float pts[6][3] = { { 0, 0, -0.4f }, { n, 0, -0.4f }, { 0, n, 1.5f }, { n, n, 1.5f }, { 0, 0, 0 }, { n, 0, 0 } };
+    for (int i = 0; i < 6; i++) {
+        Vector2 p = FP(pts[i][0], pts[i][1], pts[i][2], NULL);
+        if (p.x < minx) minx = p.x; if (p.x > maxx) maxx = p.x;
+        if (p.y < miny) miny = p.y; if (p.y > maxy) maxy = p.y;
+    }
+    float s = fminf((a.width - 30) / (maxx - minx), (a.height - 30) / (maxy - miny));
+    if (s > 110) s = 110;
+    fv.s = s;
+    fv.cx = a.x + a.width / 2 - s * (minx + maxx) / 2;
+    fv.cy = a.y + a.height / 2 - s * (miny + maxy) / 2;
+}
+
+/* two triangles, wound the way raylib wants them (it culls the other way round) */
+static void FTri(Vector2 a, Vector2 b, Vector2 c, Color col)
+{
+    float cr = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    if (cr < 0) DrawTriangle(a, b, c, col); else DrawTriangle(a, c, b, col);
+}
+static void FQuad(Vector2 a, Vector2 b, Vector2 c, Vector2 d, Color col) { FTri(a, b, c, col); FTri(a, c, d, col); }
+static Color FShade(Color c, float f) { return (Color) { (unsigned char)fminf(255, c.r * f), (unsigned char)fminf(255, c.g * f), (unsigned char)fminf(255, c.b * f), c.a }; }
+static float FRnd(int a, int b) { return (float)(Hash(a, b) % 1000) / 1000.0f; }
+
+/* ---- particles ---- */
+typedef struct { float u, v, t, life; int kind, item, n, seed; } FPart;
+static FPart fPt[320];
+static int fPtN = 0;
+static void FSpawn(int kind, float u, float v, float life, int item, int n)
+{
+    if (fPtN >= 320) { memmove(fPt, fPt + 1, sizeof(FPart) * 319); fPtN = 319; }
+    fPt[fPtN++] = (FPart){ u, v, 0, life, kind, item, n, (int)(FRand() * 9999) };
+}
+static void FEatEvents(void)
+{
+    for (int i = 0; i < fEvN; i++) {
+        FEvent* e = &fEv[i];
+        float u = e->x + 0.5f, v = e->y + 0.5f;
+        switch (e->k) {
+        case EV_DOT:    FSpawn(0, u, v, 2.4f, 0, 0); break;
+        case EV_GAIN:   FSpawn(1, u, v, 1.3f, e->item, e->n); break;
+        case EV_BURST:  FSpawn(2, u, v, 0.9f, 0, 0); break;
+        case EV_POOF:   FSpawn(3, u, v, 0.55f, 0, 0); break;
+        case EV_PLANT:  FSpawn(4, u, v, 0.5f, 0, 0); break;
+        case EV_SPLASH: FSpawn(5, u, v, 0.7f, 0, 0); break;
+        }
+    }
+    fEvN = 0;
+}
+static void FPartUpdate(float dt)
+{
+    int j = 0;
+    for (int i = 0; i < fPtN; i++) { fPt[i].t += dt; if (fPt[i].t < fPt[i].life) fPt[j++] = fPt[i]; }
+    fPtN = j;
+}
+static void FPartDraw(void)
+{
+    for (int i = 0; i < fPtN; i++) {
+        FPart* p = &fPt[i]; float k, f = p->t / p->life;
+        Vector2 b = FP(p->u, p->v, 0, &k);
+        switch (p->kind) {
+        case 0: { Color c = { 255, 206, 60, (unsigned char)(220 * (1 - f)) }; DrawCircle((int)b.x, (int)b.y, k * 0.085f, c); DrawCircle((int)b.x, (int)b.y, k * 0.045f, Fade((Color) { 255, 240, 160, 255 }, 1 - f)); break; }
+        case 1: {
+            float y = b.y - k * (0.5f + 0.9f * f), a = f > 0.7f ? 1 - (f - 0.7f) / 0.3f : 1;
+            const char* t = TextFormat("+%d", p->n);
+            float w = TxtW(fBold, t, 18);
+            DrawRectangle((int)(b.x - w / 2 - 20), (int)(y - 4), (int)(w + 32), 26, Fade(GB_DARK, 0.8f * a));
+            FItemIcon(p->item, b.x - w / 2 - 8, y + 9, 8);
+            Txt(fBold, t, b.x - w / 2 + 6, y, 18, Fade(WHITE, a));
+            break;
+        }
+        case 2: for (int s = 0; s < 14; s++) {
+            float an = s * 0.449f + p->seed, r = k * (0.2f + 0.9f * f), up = k * (0.3f + 0.6f * f) * (0.4f + 0.6f * FRnd(p->seed, s));
+            DrawCircle((int)(b.x + cosf(an) * r), (int)(b.y - up + sinf(an) * r * 0.5f), 3.2f * (1 - f) + 0.6f, Fade((Color) { 255, 226, 90, 255 }, 1 - f));
+        } break;
+        case 3: for (int s = 0; s < 5; s++) {
+            float an = s * 1.26f + p->seed;
+            DrawCircle((int)(b.x + cosf(an) * k * 0.3f * f), (int)(b.y - k * 0.1f - sinf(an) * k * 0.15f * f), k * (0.07f + 0.1f * f), Fade((Color) { 190, 160, 120, 255 }, 0.55f * (1 - f)));
+        } break;
+        case 4: for (int s = 0; s < 6; s++) {
+            float an = s * 1.047f + f * 2;
+            DrawCircle((int)(b.x + cosf(an) * k * 0.28f), (int)(b.y - k * 0.2f * (1 + f) + sinf(an) * k * 0.1f), 2.4f, Fade((Color) { 150, 240, 120, 255 }, 1 - f));
+        } break;
+        case 5: for (int s = 0; s < 7; s++) {
+            float an = s * 0.9f + p->seed, fall = f * f * k * 0.5f;
+            DrawCircle((int)(b.x + cosf(an) * k * 0.3f * f), (int)(b.y - k * 0.7f + fall - sinf(an) * k * 0.1f), 3.0f * (1 - f) + 0.8f, Fade((Color) { 90, 170, 255, 255 }, 1 - f));
+        } break;
+        }
+    }
+}
+
+/* ---- ground ---- */
+static void FDrawGround(void)
+{
+    float n = (float)fN;
+    Vector2 a = FP(0, 0, 0, NULL), b = FP(n, 0, 0, NULL), c = FP(n, n, 0, NULL), d = FP(0, n, 0, NULL);
+    for (int i = 1; i <= 4; i++) FQuad((Vector2) { a.x - i * 3, a.y + i * 3 }, (Vector2) { b.x + i * 3, b.y + i * 3 }, (Vector2) { c.x + i * 3, c.y - i * 2 }, (Vector2) { d.x - i * 3, d.y - i * 2 }, Fade(BLACK, 0.07f));
+    Vector2 a2 = FP(0, 0, -0.35f, NULL), b2 = FP(n, 0, -0.35f, NULL);
+    FQuad(a, b, b2, a2, (Color) { 104, 64, 36, 255 });
+    FQuad(a, b, FP(n, 0, -0.1f, NULL), FP(0, 0, -0.1f, NULL), (Color) { 128, 80, 44, 255 });
+    for (int y = 0; y < fN; y++) for (int x = 0; x < fN; x++) {
+        FTile* t = &fT[x][y];
+        Color c1;
+        bool alt = (x + y) & 1;
+        if (fMaze.on) c1 = alt ? (Color) { 150, 196, 100, 255 } : (Color) { 142, 188, 94, 255 };
+        else if (t->soil) c1 = alt ? (Color) { 178, 100, 50, 255 } : (Color) { 168, 92, 44, 255 };
+        else c1 = alt ? (Color) { 108, 168, 66, 255 } : (Color) { 100, 160, 60, 255 };
+        Vector2 p0 = FP((float)x, (float)y, 0, NULL), p1 = FP(x + 1.0f, (float)y, 0, NULL), p2 = FP(x + 1.0f, y + 1.0f, 0, NULL), p3 = FP((float)x, y + 1.0f, 0, NULL);
+        FQuad(p0, p1, p2, p3, c1);
+        if (t->soil) {                                  /* furrows */
+            for (int s = 1; s < 4; s++) { float v = y + s / 4.0f; DrawLineV(FP((float)x + 0.06f, v, 0, NULL), FP(x + 0.94f, v, 0, NULL), Fade(BLACK, 0.16f)); }
+        }
+        DrawLineV(p0, p1, Fade(BLACK, 0.13f)); DrawLineV(p0, p3, Fade(BLACK, 0.13f));
+    }
+    DrawLineV(FP(n, 0, 0, NULL), FP(n, n, 0, NULL), Fade(BLACK, 0.2f)); DrawLineV(FP(0, n, 0, NULL), FP(n, n, 0, NULL), Fade(BLACK, 0.2f));
+}
+
+/* ---- plants ---- */
+static void FDrawEnt(int x, int y)
+{
+    FEnt* e = &fT[x][y].e;
+    if (!e->type) return;
+    float k; Vector2 b = FP(x + 0.5f, y + 0.5f, 0, &k);
+    float fr = FFrac(e, x, y); bool ripe = FRipe(e, x, y);
+    float t = (float)GetTime(), sway = sinf(t * 1.7f + x * 1.3f + y * 0.7f) * 0.06f;
+    switch (e->type) {
+    case E_GRASS:
+        for (int j = 0; j < 9; j++) {
+            float bu = x + 0.1f + 0.8f * FRnd(x * 9 + j, y * 5 + 1), bv = y + 0.1f + 0.8f * FRnd(x * 3 + 7, y * 11 + j);
+            float kk; Vector2 p = FP(bu, bv, 0, &kk);
+            float h = kk * (0.07f + 0.36f * fr) * (0.7f + 0.6f * FRnd(j, x + y * 13)), w = kk * 0.045f, sw = sway * kk * (h / kk + 0.2f);
+            Color c = ripe ? (Color) { 70, 168, 52, 255 } : (Color) { 96, 178, 70, 255 };
+            if (j & 1) c = FShade(c, 0.86f);
+            FTri((Vector2) { p.x - w, p.y }, (Vector2) { p.x + w, p.y }, (Vector2) { p.x + sw, p.y - h }, c);
+        }
+        break;
+    case E_BUSH: {
+        float r = k * (0.1f + 0.26f * fr);
+        DrawEllipse((int)b.x, (int)b.y, r * 1.1f, r * 0.4f, Fade(BLACK, 0.25f));
+        DrawCircle((int)b.x, (int)(b.y - r * 0.85f), r, (Color) { 40, 112, 52, 255 });
+        DrawCircle((int)(b.x - r * 0.25f), (int)(b.y - r * 1.05f), r * 0.68f, (Color) { 60, 148, 64, 255 });
+        DrawCircle((int)(b.x + r * 0.35f), (int)(b.y - r * 0.8f), r * 0.55f, (Color) { 50, 130, 58, 255 });
+        if (ripe) for (int j = 0; j < 5; j++) DrawCircle((int)(b.x + (FRnd(x, y + j) - 0.5f) * r * 1.6f), (int)(b.y - r * (0.5f + FRnd(y, x + j))), 2.4f, (Color) { 230, 70, 80, 255 });
+        break;
+    }
+    case E_CARROT: {
+        float h = k * (0.12f + 0.3f * fr);
+        for (int j = 0; j < 5; j++) {
+            float ox = (j - 2) * k * 0.09f, sw = sway * k * 0.4f + (j - 2) * k * 0.03f;
+            FTri((Vector2) { b.x + ox - k * 0.035f, b.y }, (Vector2) { b.x + ox + k * 0.035f, b.y }, (Vector2) { b.x + ox + sw, b.y - h * (0.7f + 0.15f * (j & 1)) }, (Color) { 76, 176, 70, 255 });
+        }
+        if (ripe) { DrawTriangle((Vector2) { b.x - k * 0.09f, b.y - 2 }, (Vector2) { b.x, b.y + k * 0.05f }, (Vector2) { b.x + k * 0.09f, b.y - 2 }, (Color) { 244, 140, 36, 255 }); }
+        break;
+    }
+    case E_TREE: {
+        float th = k * (0.2f + 0.45f * fr), r = k * (0.14f + 0.24f * fr);
+        DrawEllipse((int)b.x, (int)b.y, r * 1.1f, r * 0.4f, Fade(BLACK, 0.25f));
+        DrawRectangle((int)(b.x - k * 0.05f), (int)(b.y - th), (int)(k * 0.1f + 1), (int)th, (Color) { 112, 74, 42, 255 });
+        Color g = ripe ? (Color) { 48, 138, 56, 255 } : (Color) { 58, 150, 64, 255 };
+        DrawCircle((int)b.x, (int)(b.y - th - r * 0.4f), r, FShade(g, 0.8f));
+        DrawCircle((int)(b.x - r * 0.5f), (int)(b.y - th - r * 0.1f), r * 0.7f, g);
+        DrawCircle((int)(b.x + r * 0.5f), (int)(b.y - th - r * 0.15f), r * 0.7f, FShade(g, 0.9f));
+        DrawCircle((int)(b.x - r * 0.2f), (int)(b.y - th - r * 0.7f), r * 0.55f, FShade(g, 1.15f));
+        break;
+    }
+    case E_PUMPKIN: {
+        if (e->gid > 0 && !e->dead) return;                        /* drawn as part of the giant */
+        float r = k * (0.1f + 0.3f * fr);
+        Color c = e->dead ? (Color) { 112, 92, 72, 255 } : (Color) { 236, 128, 30, 255 };
+        DrawEllipse((int)b.x, (int)b.y, r * 1.1f, r * 0.4f, Fade(BLACK, 0.25f));
+        DrawEllipse((int)b.x, (int)(b.y - r * 0.7f), r, r * (e->dead ? 0.55f : 0.78f), c);
+        if (!e->dead) { DrawEllipse((int)b.x, (int)(b.y - r * 0.7f), r * 0.45f, r * 0.78f, (Color) { 250, 160, 56, 255 }); DrawRectangle((int)(b.x - 2), (int)(b.y - r * 1.5f), 4, (int)(r * 0.35f), (Color) { 80, 130, 56, 255 }); }
+        else DrawLine((int)(b.x - r * 0.5f), (int)(b.y - r * 0.9f), (int)(b.x + r * 0.5f), (int)(b.y - r * 0.4f), (Color) { 60, 48, 40, 255 });
+        break;
+    }
+    case E_SUNFLOWER: {
+        float sh = k * (0.15f + 0.5f * fr), hr = k * (0.06f + 0.16f * fr);
+        float hx = b.x + sway * k * 0.6f, hy = b.y - sh;
+        DrawLineEx(b, (Vector2) { hx, hy }, k * 0.04f + 1, (Color) { 70, 150, 60, 255 });
+        DrawEllipse((int)(b.x + k * 0.08f), (int)(b.y - sh * 0.45f), k * 0.1f, k * 0.04f, (Color) { 80, 164, 66, 255 });
+        if (fr < 0.35f) DrawCircle((int)hx, (int)hy, hr * 0.8f, (Color) { 90, 170, 70, 255 });
+        else {
+            int np = e->petals > 5 ? e->petals : 8;
+            for (int j = 0; j < np; j++) {
+                float an = j * 6.2832f / np;
+                DrawCircle((int)(hx + cosf(an) * hr * 1.05f), (int)(hy + sinf(an) * hr * 1.05f), hr * (ripe ? 0.46f : 0.38f), (Color) { 252, 206, 40, 255 });
+            }
+            DrawCircle((int)hx, (int)hy, hr * 0.62f, (Color) { 104, 66, 30, 255 });
+        }
+        break;
+    }
+    }
+}
+static void FDrawGiant(int gid)
+{
+    FGiant G = fGi[gid]; float k;
+    Vector2 b = FP(G.x0 + G.k * 0.5f, G.y0 + G.k * 0.5f, 0, &k);
+    float rx = k * G.k * 0.47f, ry = rx * 0.78f;
+    DrawEllipse((int)b.x, (int)(b.y + ry * 0.1f), rx * 1.08f, ry * 0.5f, Fade(BLACK, 0.28f));
+    DrawEllipse((int)b.x, (int)(b.y - ry * 0.75f), rx, ry, (Color) { 228, 118, 26, 255 });
+    for (int j = -2; j <= 2; j++) DrawEllipse((int)(b.x + j * rx * 0.3f), (int)(b.y - ry * 0.75f), rx * (j == 0 ? 0.3f : 0.2f), ry * 0.96f, j & 1 ? (Color) { 214, 104, 22, 255 } : (Color) { 246, 152, 50, 255 });
+    DrawRectangle((int)(b.x - rx * 0.06f), (int)(b.y - ry * 1.9f), (int)(rx * 0.12f + 1), (int)(ry * 0.4f), (Color) { 80, 130, 56, 255 });
+}
+
+/* ---- maze hedges ---- */
+static void FHedgeFront(float u0, float v0, float u1, float v1, float h)    /* wall from (u0,v0) to (u1,v1) */
+{
+    Color g = { 36, 104, 50, 255 }, top = { 70, 160, 72, 255 };
+    FQuad(FP(u0, v0, 0, NULL), FP(u1, v1, 0, NULL), FP(u1, v1, h, NULL), FP(u0, v0, h, NULL), g);
+    float q = 0.07f; bool horiz = v0 == v1;
+    if (horiz) FQuad(FP(u0 - q, v0 - q, h, NULL), FP(u1 + q, v0 - q, h, NULL), FP(u1 + q, v0 + q, h, NULL), FP(u0 - q, v0 + q, h, NULL), top);
+    else       FQuad(FP(u0 - q, v0 - q, h, NULL), FP(u0 + q, v0 - q, h, NULL), FP(u0 + q, v1 + q, h, NULL), FP(u0 - q, v1 + q, h, NULL), top);
+    float k; Vector2 m = FP((u0 + u1) / 2, (v0 + v1) / 2, h * 0.5f, &k);
+    for (int j = 0; j < 4; j++) DrawCircle((int)(m.x + (FRnd((int)(u0 * 10), (int)(v0 * 10) + j) - 0.5f) * k * 0.8f * (horiz ? 1 : 0.3f)), (int)(m.y + (FRnd(j, (int)(u1 * 7)) - 0.5f) * k * 0.3f), k * 0.05f, (Color) { 52, 132, 60, 255 });
+}
+static void FDrawTreasure(void)
+{
+    float k; Vector2 b = FP(fMaze.tx + 0.5f, fMaze.ty + 0.5f, 0, &k);
+    float pulse = 0.5f + 0.5f * sinf((float)GetTime() * 4);
+    DrawCircle((int)b.x, (int)(b.y - k * 0.2f), k * (0.4f + 0.06f * pulse), Fade((Color) { 255, 220, 90, 255 }, 0.22f));
+    DrawEllipse((int)b.x, (int)b.y, k * 0.3f, k * 0.1f, Fade(BLACK, 0.3f));
+    DrawRectangleRounded((Rectangle) { b.x - k * 0.24f, b.y - k * 0.3f, k * 0.48f, k * 0.28f }, 0.25f, 4, (Color) { 168, 112, 36, 255 });
+    DrawRectangleRounded((Rectangle) { b.x - k * 0.24f, b.y - k * 0.42f, k * 0.48f, k * 0.16f }, 0.5f, 4, (Color) { 214, 160, 56, 255 });
+    DrawRectangle((int)(b.x - k * 0.03f), (int)(b.y - k * 0.3f), (int)(k * 0.06f + 1), (int)(k * 0.1f), (Color) { 255, 226, 110, 255 });
+    DrawCircle((int)(b.x + cosf((float)GetTime() * 3) * k * 0.3f), (int)(b.y - k * 0.4f + sinf((float)GetTime() * 3) * k * 0.1f), 2.5f, WHITE);
+}
+
+/* ---- the drone: the student on the mower ---- */
+static void FDroneView(float* u, float* v)
+{
+    double p = fD.t1 > fD.t0 ? (fTime - fD.t0) / (fD.t1 - fD.t0) : 1;
+    if (p > 1) p = 1; if (p < 0) p = 0;
+    float dx = (float)FDX[fD.dir & 3], dy = (float)FDY[fD.dir & 3], pf = (float)p;
+    if (fD.wrap) { if (pf < 0.5f) { *u = fD.fx + dx * pf; *v = fD.fy + dy * pf; } else { *u = fD.x - dx * (1 - pf); *v = fD.y - dy * (1 - pf); } }
+    else { *u = fD.fx + (fD.x - fD.fx) * pf; *v = fD.fy + (fD.y - fD.fy) * pf; }
+}
+static void FDrawDrone(bool running)
+{
+    float u, v, k; FDroneView(&u, &v);
+    Vector2 b = FP(u + 0.5f, v + 0.5f, 0, &k);
+    float p = (float)((fTime - fD.flipT) / 0.6), flip = (p >= 0 && p < 1) ? 0.7f * (1 - p) : 0;
+    float sc = k * 0.0145f; if (sc < 0.25f) sc = 0.25f;
+    FarmDrawMower(b.x, b.y + k * 0.1f, fD.dir & 3, sc, running ? 1.0f : 0.0f, flip);
+}
+
+static void FDrawFarm(bool running)
+{
+    FDrawGround();
+    float du, dv; FDroneView(&du, &dv);
+    int drow = (int)floorf(dv + 0.5f); if (drow < 0) drow = 0; if (drow >= fN) drow = fN - 1;
+    bool dr = false;
+    if (fMaze.on) {
+        for (int x = 0; x < fN; x++) FHedgeFront((float)x, (float)fN, x + 1.0f, (float)fN, 0.6f);
+    }
+    for (int y = fN - 1; y >= 0; y--) {
+        if (fMaze.on) {
+            for (int x = 0; x < fN; x++) {
+                if (y < fN - 1 && fMaze.wN[x][y]) FHedgeFront((float)x, y + 1.0f, x + 1.0f, y + 1.0f, 0.6f);
+                if (x == 0) FHedgeFront(0, (float)y, 0, y + 1.0f, 0.6f);
+                if (x < fN - 1 && fMaze.wE[x][y]) FHedgeFront(x + 1.0f, (float)y, x + 1.0f, y + 1.0f, 0.6f);
+                if (x == fN - 1) FHedgeFront((float)fN, (float)y, (float)fN, y + 1.0f, 0.6f);
+            }
+            if (y == fMaze.ty) FDrawTreasure();
         }
         else {
-            float cx = row.x + row.width - 292;
-            if (FUP[i].hay > 0) { FarmIcon(0, cx, y + 21, 9); Txt(fBold, TextFormat("%d", FUP[i].hay), cx + 14, y + 11, 15, fsv.inv[0] >= FUP[i].hay ? TXT : (Color) { 240, 110, 110, 255 }); cx += 62; }
-            if (FUP[i].wood > 0) { FarmIcon(1, cx, y + 21, 9); Txt(fBold, TextFormat("%d", FUP[i].wood), cx + 14, y + 11, 15, fsv.inv[1] >= FUP[i].wood ? TXT : (Color) { 240, 110, 110, 255 }); }
-            Rectangle b = { row.x + row.width - 112, y + 5, 100, 33 };
-            if (!ok) {
-                DrawRectangleRounded(b, 0.3f, 8, SURF2);
-                CenterTxt(fMed, "Locked", b.x + b.width / 2, b.y + 7, 14, DIM);
-            }
-            else if (Button(b, "Unlock", can ? (Color) { 36, 150, 96, 255 } : (Color) { 82, 86, 108, 255 }, 15)) {
-                if (can) {
-                    fsv.inv[0] -= FUP[i].hay; fsv.inv[1] -= FUP[i].wood; fsv.unl[i] = 1; SaveFarm();
-                    GainCredits(FUP[i].credits, "Farm upgrade");
-                    Notify(TextFormat("Unlocked: %s", FUP[i].name), GOOD);
-                    Burst(b.x, b.y, 30);
-                    if (!frPlaying) FarmIdleView(); else for (int k = 0; k < 4; k++) frInv0[k] = fsv.inv[k];
-                }
-                else {
-                    Notify(!ok ? "Unlock the requirement first" : "Not enough hay or wood yet", BAD);
-                }
+            for (int x = 0; x < fN; x++) {
+                FEnt* e = &fT[x][y].e;
+                if (e->type == E_PUMPKIN && e->gid > 0 && !e->dead) { if (fGi[e->gid].x0 == x && fGi[e->gid].y0 == y) FDrawGiant(e->gid); }
+                else FDrawEnt(x, y);
             }
         }
+        if (y == drow) { FDrawDrone(running); dr = true; }
+    }
+    if (!dr) FDrawDrone(running);
+    if (fMaze.on) for (int x = 0; x < fN; x++) FHedgeFront((float)x, 0, x + 1.0f, 0, 0.6f);
+    FPartDraw();
+}
+
+/* tile under the mouse (or -1) */
+static bool FPick(Vector2 m, int* tx, int* ty)
+{
+    for (int y = 0; y < fN; y++) for (int x = 0; x < fN; x++) {
+        Vector2 p[4] = { FP((float)x, (float)y, 0, NULL), FP(x + 1.0f, (float)y, 0, NULL), FP(x + 1.0f, y + 1.0f, 0, NULL), FP((float)x, y + 1.0f, 0, NULL) };
+        bool in = false;
+        for (int i = 0, j = 3; i < 4; j = i++)
+            if (((p[i].y > m.y) != (p[j].y > m.y)) && (m.x < (p[j].x - p[i].x) * (m.y - p[i].y) / (p[j].y - p[i].y) + p[i].x)) in = !in;
+        if (in) { *tx = x; *ty = y; return true; }
+    }
+    return false;
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Clockwork Farm: runner, floating windows and the screen            */
+/* ------------------------------------------------------------------ */
+#define F_DEFAULT_CODE "while True:\n    if can_harvest():\n        harvest()\n    move(North)\n"
+
+static const struct { const char* title, * code; } FEX[] = {
+    { "Mow everything", F_DEFAULT_CODE },
+    { "Bush farm (Bushes)", "while True:\n    if can_harvest():\n        harvest()\n        plant(Entities.Bush)\n    move(North)\n" },
+    { "Sweep the plot (Loops)", "n = get_world_size()\nwhile True:\n    for x in range(n):\n        for y in range(n):\n            if can_harvest():\n                harvest()\n            move(North)\n        move(East)\n" },
+    { "Carrot field (Soil, Carrots)", "while True:\n    if can_harvest():\n        harvest()\n    if get_entity_type() == None:\n        if get_ground_type() != Grounds.Soil:\n            till()\n        plant(Entities.Carrot)\n    move(North)\n" },
+    { "Helper function (Functions)", "def tend():\n    if can_harvest():\n        harvest()\n        plant(Entities.Bush)\n\nwhile True:\n    tend()\n    move(North)\n    tend()\n    move(East)\n" },
+    { "Tree grove (Trees)", "while True:\n    if can_harvest():\n        harvest()\n    if get_entity_type() == None:\n        if (get_pos_x() + get_pos_y()) % 2 == 0:\n            plant(Entities.Tree)\n        else:\n            plant(Entities.Bush)\n    move(North)\n    if get_pos_y() == 0:\n        move(East)\n" },
+    { "Pumpkin patch (Pumpkins)", "def fill():\n    if get_ground_type() != Grounds.Soil:\n        till()\n    plant(Entities.Pumpkin)\n\nn = get_world_size()\nfor x in range(n):\n    for y in range(n):\n        fill()\n        move(North)\n    move(East)\nwhile True:\n    for x in range(n):\n        for y in range(n):\n            if get_entity_type() == Entities.Dead_Pumpkin:\n                harvest()\n                fill()\n            move(North)\n        move(East)\n" },
+    { "Sunflower power (Sunflowers)", "while True:\n    if get_ground_type() != Grounds.Soil:\n        till()\n    if can_harvest():\n        harvest()\n    if get_entity_type() == None:\n        plant(Entities.Sunflower)\n    move(North)\n" },
+    { "Maze solver (Labyrinth)", "generate_maze()\ndirs = [North, East, South, West]\nd = 1\nwhile get_entity_type() != Entities.Treasure:\n    for turn in [1, 0, 3, 2]:\n        nd = (d + turn) % 4\n        if can_move(dirs[nd]):\n            d = nd\n            move(dirs[d])\n            break\nharvest()\n" },
+};
+#define F_NEX ((int)(sizeof FEX / sizeof FEX[0]))
+static int fEx = 0;
+
+/* ---- runner ---- */
+static bool fRunning = false, fInit = false, fErrFlash = false;
+static double fRt = 0;
+static const int F_SPEEDS[4] = { 1, 2, 5, 10 };
+static float fSaveT = 0;
+static char fCodeSaved[LAB_CAP + 1];
+
+static void FarmOut(const char* s)
+{
+    int n = (int)strlen(s);
+    if (labOutLen + n >= LAB_OUTCAP - 12) {                      /* keep the newest half of a long log */
+        int cut = labOutLen / 2;
+        while (cut < labOutLen && labOut[cut] != '\n') cut++;
+        if (cut < labOutLen) cut++;
+        memmove(labOut, labOut + cut, (size_t)(labOutLen - cut));
+        labOutLen -= cut; labOut[labOutLen] = 0;
+    }
+    LabAppend(s, n);
+}
+static void FarmFail(const char* what)
+{
+    char m[460]; snprintf(m, sizeof m, "Line %d: %s\n", pfLine, pfMsg); FarmOut(m);
+    labErr[0] = pfLine; labErrN = 1; labStatus = LAB_RUNTIME_ERR; fErrFlash = true; (void)what;
+}
+static void FarmLaunch(void)
+{
+    labOutLen = 0; labOut[0] = 0; labErrN = 0; labStatus = LAB_READY; fErrFlash = false;
+    if (!PfCompile(labBuf)) { FarmFail("compile"); labStatus = LAB_COMPILE_ERR; fRunning = false; return; }
+    PfStart(); fRunning = true; fRt = fTime; fsv.tut |= 1; labStatus = LAB_OK;
+}
+static void FarmStop(void) { if (fRunning) { fRunning = false; FarmOut("Stopped.\n"); } }
+
+static void FarmFrame(float dt)
+{
+    if (labPending) { labPending = 0; FarmLaunch(); }
+    double mult = fRunning ? F_SPEEDS[fsv.speed & 3] : 1, target = fTime + dt * mult, t0 = GetTime();
+    while (fTime < target - 1e-9) {
+        double st = target - fTime; if (st > 0.05) st = 0.05;
+        FarmAdvance(st);
+        if (fRunning) while (fRt <= fTime) {
+            fActStart = fRt; fCost = 0;
+            int r = PfExec(200000);
+            if (r == PF_YIELD) { if (fCost < 0.02) fCost = 0.02; fRt += fCost; }
+            else if (r == PF_DONE) { fRunning = false; FarmOut("Program finished.\n"); break; }
+            else if (r == PF_ERR) { fRunning = false; FarmFail("run"); break; }
+            else break;
+            if (GetTime() - t0 > 0.012) break;
+        }
+        if (GetTime() - t0 > 0.012) break;
     }
 }
 
-static void DrawFarmHelp(Rectangle a)
+/* ---- code is kept between visits ---- */
+static void FarmSaveCode(void)
 {
-    static const char* fn[11] = { "harvest() / mow()", "can_harvest()", "move(dir)", "plant(ENT_..)", "till()", "get_entity()", "get_ground()",
-                                  "get_pos_x() / y()", "get_world_size()", "num_items(ITEM_..)", "do_a_flip()" };
-    static const char* ds[11] = { "cut or pick what is on this tile (returns 1 if it was ripe)", "1 when the plant here is fully grown",
-                                  "NORTH, EAST, SOUTH or WEST - the lawn wraps around", "ENT_BUSH, ENT_CARROT or ENT_PUMPKIN (unlock first)",
-                                  "grass <-> soil (unlock Soil first)", "ENT_NONE / ENT_GRASS / ENT_BUSH / ENT_CARROT / ENT_PUMPKIN",
-                                  "GROUND_GRASS or GROUND_SOIL", "where the mower is (0,0 is bottom-left)", "the lawn is n x n tiles",
-                                  "ITEM_HAY, ITEM_WOOD, ITEM_CARROT, ITEM_PUMPKIN", "a victory spin (costs one action)" };
-    Txt(fBold, "Write  void farm(void)  and press Run.", a.x + 6, a.y - 2, 16, (Color) { 255, 205, 90, 255 });
-    for (int i = 0; i < 11; i++) {
-        float y = a.y + 24 + i * 22.0f;
-        Txt(fBold, fn[i], a.x + 6, y, 14, LABC);
-        TxtFit(fReg, ds[i], a.x + 190, y, 13, a.width - 200, TXT);
-    }
-    Txt(fReg, "Every call is one action (tick). Plants grow with each action: grass 6, bush 14, carrot 24, pumpkin 40.", a.x + 6, a.y + 24 + 11 * 22.0f + 4, 12, DIM);
+    if (!fInit || strcmp(fCodeSaved, labBuf) == 0) return;
+    FILE* f = fopen("farm2_code.txt", "wb");
+    if (f) { fwrite(labBuf, 1, (size_t)labLen, f); fclose(f); strcpy(fCodeSaved, labBuf); }
+}
+static void FarmSetCode(const char* s)
+{
+    int n = (int)strlen(s); if (n > LAB_CAP - 1) n = LAB_CAP - 1;
+    memcpy(labBuf, s, (size_t)n); labBuf[n] = 0; labLen = n; labCur = labAnc = 0; labSX = labSY = 0; labErrN = 0;
 }
 
-static void DrawFarm(void)
-{
-    float dt = GetFrameTime();
-    if (dt > 0.05f) dt = 0.05f;
-    if (labPending == 2) { FarmRun(); labPending = 0; }
-    else if (labPending == 1) labPending = 2;
+/* ---- floating windows ---- */
+enum { W_ED, W_OUT, W_UPG, W_HELP, W_TUT, W_N };
+typedef struct { float x, y, w, h; bool open, min; const char* title; float minW, minH; } FWin;
+static FWin fw[W_N];
+static int fz[W_N] = { W_TUT, W_HELP, W_UPG, W_OUT, W_ED };           /* back to front */
+static int fDragW = -1, fSizeW = -1, fTop = -1;
+static float fDragDX, fDragDY;
+static bool fMenu = false, fResetArm = false, fFocusEd = true;
+static float fUpgScroll = 0, fHelpScroll = 0, fOutScroll = 0;
+static int fOutLast = -1;
+static const float FTB = 50, FTITLE = 28;
 
-    FarmLayout();
-    labFocus = 0;
+static void FArrange(void)
+{
+    fw[W_ED] = (FWin){ 10, 60, 500, 410, true, false, "Code editor", 340, 200 };
+    fw[W_OUT] = (FWin){ 10, 478, 500, 274, true, false, "Output", 240, 100 };
+    fw[W_UPG] = (FWin){ 520, 62, 440, 560, false, false, "Upgrades", 320, 200 };
+    fw[W_HELP] = (FWin){ 520, 62, 480, 600, false, false, "Documentation", 320, 200 };
+    fw[W_TUT] = (FWin){ 890, 522, 300, 230, true, false, "Getting started", 240, 120 };
+    int o[W_N] = { W_TUT, W_HELP, W_UPG, W_OUT, W_ED }; memcpy(fz, o, sizeof o);
+}
+static Rectangle FWRect(int i) { return (Rectangle) { fw[i].x, fw[i].y, fw[i].w, fw[i].min ? FTITLE : fw[i].h }; }
+static void FToFront(int id)
+{
+    int j = 0; for (int i = 0; i < W_N; i++) if (fz[i] != id) fz[j++] = fz[i];
+    fz[W_N - 1] = id;
+}
+static void FOpen(int id) { fw[id].open = true; fw[id].min = false; FToFront(id); }
+static void FToggle(int id) { if (fw[id].open) fw[id].open = false; else FOpen(id); }
+static void FHide(bool h) { SetMouseOffset(h ? -100000 : (int)-gOffX, h ? -100000 : (int)-gOffY); }
+static Rectangle FBtnClose(int i) { return (Rectangle) { fw[i].x + fw[i].w - 26, fw[i].y + 3, 22, 22 }; }
+static Rectangle FBtnMin(int i) { return (Rectangle) { fw[i].x + fw[i].w - 52, fw[i].y + 3, 22, 22 }; }
+static Rectangle FGrip(int i) { return (Rectangle) { fw[i].x + fw[i].w - 18, fw[i].y + fw[i].h - 18, 18, 18 }; }
+
+static void FWinInput(Vector2 m)
+{
+    fTop = -1;
+    for (int i = W_N - 1; i >= 0; i--) { int id = fz[i]; if (fw[id].open && CheckCollisionPointRec(m, FWRect(id))) { fTop = id; break; } }
+    if (fMenu) fTop = -2;
+    if (fDragW >= 0 || fSizeW >= 0) {
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            if (fDragW >= 0) {
+                fw[fDragW].x = fminf(fmaxf(m.x - fDragDX, -fw[fDragW].w + 80), W - 80);
+                fw[fDragW].y = fminf(fmaxf(m.y - fDragDY, FTB + 2), H - FTITLE);
+            }
+            else {
+                fw[fSizeW].w = fminf(fmaxf(m.x - fw[fSizeW].x + 6, fw[fSizeW].minW), W - fw[fSizeW].x + 40);
+                fw[fSizeW].h = fminf(fmaxf(m.y - fw[fSizeW].y + 6, fw[fSizeW].minH), H - fw[fSizeW].y + 40);
+            }
+            hand = true;
+        }
+        else fDragW = fSizeW = -1;
+        return;
+    }
+    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) return;
+    if (fTop < 0) { fFocusEd = false; return; }
+    int id = fTop; FToFront(id); fFocusEd = (id == W_ED);
+    if (CheckCollisionPointRec(m, FBtnClose(id))) { fw[id].open = false; return; }
+    if (CheckCollisionPointRec(m, FBtnMin(id))) { fw[id].min = !fw[id].min; return; }
+    if (!fw[id].min && CheckCollisionPointRec(m, FGrip(id))) { fSizeW = id; return; }
+    if (m.y < fw[id].y + FTITLE) { fDragW = id; fDragDX = m.x - fw[id].x; fDragDY = m.y - fw[id].y; }
+}
+
+/* frame; returns the content area (zero-size if folded away) */
+static Rectangle FWinFrame(int id)
+{
+    FWin* w = &fw[id];
+    float h = w->min ? FTITLE : w->h;
+    DrawRectangle((int)w->x + 4, (int)w->y + 5, (int)w->w, (int)h, Fade(BLACK, 0.3f));
+    DrawRectangle((int)w->x, (int)w->y, (int)w->w, (int)h, (Color) { 16, 18, 24, 244 });
+    DrawRectangle((int)w->x, (int)w->y, (int)w->w, (int)FTITLE, id == fz[W_N - 1] ? (Color) { 52, 56, 70, 255 } : (Color) { 40, 43, 54, 255 });
+    DrawRectangleLines((int)w->x, (int)w->y, (int)w->w, (int)h, id == fz[W_N - 1] ? (Color) { 120, 126, 146, 255 } : GB_EDGE);
+    Txt(fBold, w->title, w->x + 10, w->y + 4, 16, WHITE);
+    Rectangle c = FBtnClose(id), mn = FBtnMin(id);
+    DrawRectangleRec(c, (Color) { 74, 40, 44, 255 }); DrawLine((int)c.x + 6, (int)c.y + 6, (int)c.x + 16, (int)c.y + 16, WHITE); DrawLine((int)c.x + 16, (int)c.y + 6, (int)c.x + 6, (int)c.y + 16, WHITE);
+    DrawRectangleRec(mn, (Color) { 58, 62, 78, 255 }); DrawRectangle((int)mn.x + 6, (int)mn.y + 14, 10, 2, WHITE);
+    if (w->min) return (Rectangle) { 0, 0, 0, 0 };
+    Rectangle g = FGrip(id);
+    DrawTriangle((Vector2) { g.x + 16, g.y + 3 }, (Vector2) { g.x + 3, g.y + 16 }, (Vector2) { g.x + 16, g.y + 16 }, GB_EDGE);
+    return (Rectangle) { w->x + 1, w->y + FTITLE, w->w - 2, w->h - FTITLE - 1 };
+}
+
+/* ---- window contents ---- */
+static void FEditorWin(Rectangle r)
+{
+    float tb = 36;
+    DrawRectangle((int)r.x, (int)r.y, (int)r.width, (int)tb, GB_PANEL);
+    float x = r.x + 4;
+    if (GBtn((Rectangle) { x, r.y + 3, 66, 30 }, fRunning ? "Stop" : "Run", fRunning ? (Color) { 190, 60, 60, 255 } : (Color) { 40, 150, 70, 255 }, 16)) { if (fRunning) FarmStop(); else LabRequestRun(); }
+    x += 72;
+    for (int i = 0; i < 4; i++) {
+        if (GBtn((Rectangle) { x, r.y + 3, 34, 30 }, TextFormat("%dx", F_SPEEDS[i]), i == (fsv.speed & 3) ? (Color) { 40, 150, 70, 255 } : (Color) { 58, 62, 78, 255 }, 14)) { fsv.speed = i; SaveFarm(); }
+        x += 36;
+    }
+    x += 6;
+    float rightEdge = r.x + r.width - 4;
+    if (rightEdge - x > 160) {
+        if (GBtn((Rectangle) { rightEdge - 52, r.y + 3, 52, 30 }, "Load", (Color) { 58, 62, 78, 255 }, 14)) { FarmSetCode(FEX[fEx].code); labEnsure = true; }
+        float tx = x, tw = rightEdge - 52 - 6 - x - 52;
+        if (GBtn((Rectangle) { tx, r.y + 3, 24, 30 }, "<", (Color) { 58, 62, 78, 255 }, 16)) fEx = (fEx + F_NEX - 1) % F_NEX;
+        DrawRectangle((int)tx + 26, (int)r.y + 3, (int)tw, 30, GB_DARK);
+        TxtFit(fReg, FEX[fEx].title, tx + 32, r.y + 8, 14, tw - 12, (Color) { 210, 214, 226, 255 });
+        if (GBtn((Rectangle) { tx + 28 + tw, r.y + 3, 24, 30 }, ">", (Color) { 58, 62, 78, 255 }, 16)) fEx = (fEx + 1) % F_NEX;
+    }
+    labX = (int)r.x; labY = (int)(r.y + tb); labW = (int)r.width; labH = (int)(r.height - tb);
     float cw = MeasureTextEx(fCode, "M", LAB_FS, 0).x;
-    LabEdit();
-
-    Rectangle ed = { LAB_X, LAB_Y, LAB_W, LAB_H };
+    Rectangle ed = { (float)labX, (float)labY, (float)labW, (float)labH };
     Vector2 m = GetMousePosition();
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, ed)) {
         bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
-        LabMove(LabPosFromMouse(m.x, m.y, cw), shift);
-        labDrag = true; labWant = -1;
+        LabMove(LabPosFromMouse(m.x, m.y, cw), shift); labDrag = true; labWant = -1; fFocusEd = true;
     }
     if (labDrag) {
-        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) { labCur = LabPosFromMouse(m.x, m.y, cw); labWant = -1; }
+        Vector2 rm = GetMousePosition();
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) { if (fTop == W_ED || rm.x > -50000) { labCur = LabPosFromMouse(rm.x, rm.y, cw); labWant = -1; } }
         else labDrag = false;
     }
     if (labEnsure) { LabKeepCursorVisible(cw); labEnsure = false; }
     if (CheckCollisionPointRec(m, ed)) ibeam = true;
-    FarmUpdate(dt);
-
-    /* top bar */
-    TopBar();
-    if (Button((Rectangle) { 24, 14, 124, 44 }, BACKL, SURF2, 16)) GoMenu();
-    Txt(fBold, "Lawn Mower Farm", 168, 17, 25, (Color) { 130, 214, 110, 255 });
-    DrawCreditsChip(W - 24, 16);
-    {
-        float x = W - 24 - 128 - 4 * 100.0f;
-        for (int i = 0; i < 4; i++) FarmChip(x + i * 100.0f, 16, i, frPlaying || frIdx > 0 ? frInv[i] : fsv.inv[i]);
-    }
-
-    /* toolbar */
-    if (Button((Rectangle) { 24, 86, 44, 44 }, "<", SURF2, 20)) FarmLoad((farmEx + FARM_NEX - 1) % FARM_NEX);
-    Panel((Rectangle) { 74, 86, 360, 44 }, 0.3f, SURF, BORDER);
-    bool dirty = strcmp(labBuf, FARM_EX[farmEx].code) != 0;
-    TxtFit(fMed, FARM_EX[farmEx].title, 90, 95, 17, dirty ? 270 : 330, TXT);
-    if (dirty) Txt(fReg, "edited", 434 - 16 - TxtW(fReg, "edited", 14), 99, 14, (Color) { 240, 180, 60, 255 });
-    if (Button((Rectangle) { 440, 86, 44, 44 }, ">", SURF2, 20)) FarmLoad((farmEx + 1) % FARM_NEX);
-    if (Button((Rectangle) { 494, 86, 100, 44 }, "Reset", SURF2, 17)) FarmLoad(farmEx);
-    Txt(fMed, "Speed", 612, 98, 15, DIM);
-    for (int i = 0; i < 5; i++) {
-        Rectangle r = { 668.0f + i * 56, 90, 52, 36 };
-        bool hov = CheckCollisionPointRec(m, r);
-        if (hov) hand = true;
-        Panel(r, 0.3f, i == frSpeed ? (Color) { 30, 74, 52, 255 } : SURF, i == frSpeed ? GOOD : (hov ? DIM : BORDER));
-        CenterTxt(fBold, FR_SPEEDN[i], r.x + r.width / 2, r.y + 7, 15, i == frSpeed ? GOOD : TXT);
-        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) frSpeed = i;
-    }
-    {
-        Rectangle rb = { W - 24 - 190, 86, 190, 44 };
-        bool busy = labPending != 0;
-        if (frPlaying && !busy) {
-            if (Button(rb, "Skip >>", (Color) { 70, 100, 190, 255 }, 18)) FarmSkip();
-        }
-        else {
-            if (Button(rb, busy ? "   Running..." : "     Run", busy ? SURF2 : (Color) { 36, 160, 100, 255 }, 18) && !busy) LabRequestRun();
-            if (!busy) DrawTriangle((Vector2) { rb.x + 52, rb.y + 13 }, (Vector2) { rb.x + 52, rb.y + 31 }, (Vector2) { rb.x + 68, rb.y + 22 }, WHITE);
-        }
-    }
-
-    /* editor (left) and the lawn panel (right) */
     LabDrawEditor(cw);
-    Rectangle pn = { 600, 140, 576, 330 };
-    Panel(pn, 0.02f, CODEBG, BORDER);
-    static const char* tabN[3] = { "Lawn", "Upgrades", "Help" };
-    for (int i = 0; i < 3; i++) {
-        Rectangle r = { pn.x + 8 + i * 122.0f, pn.y + 6, 116, 30 };
-        bool hov = CheckCollisionPointRec(m, r), act = (i == farmTab);
-        if (hov) hand = true;
-        if (act) DrawRectangleRounded(r, 0.3f, 8, (Color) { 40, 110, 70, 255 });
-        CenterTxt(fBold, tabN[i], r.x + r.width / 2, r.y + 4, 16, act ? WHITE : DIM);
-        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) farmTab = i;
-    }
-    {
-        const char* st = frPlaying ? "Replaying your run..." : (fevN > 0 ? "Run complete" : "Press Run to start");
-        Txt(fReg, st, pn.x + pn.width - 14 - TxtW(fReg, st, 14), pn.y + 12, 14, frPlaying ? (Color) { 255, 205, 90, 255 } : DIM);
-    }
-    DrawLine((int)pn.x + 1, (int)pn.y + 42, (int)(pn.x + pn.width) - 1, (int)pn.y + 42, BORDER);
-    Rectangle body = { pn.x + 8, pn.y + 48, pn.width - 16, pn.height - 56 };
-    if (farmTab == 0) {
-        BeginScissorMode((int)body.x, (int)body.y, (int)body.width, (int)body.height);
-        FarmDrawLawn(body);
-        EndScissorMode();
-    }
-    else if (farmTab == 1) DrawFarmUpgrades(body);
-    else DrawFarmHelp(body);
+}
 
-    LabDrawOutput(cw);
-    TxtFit(fReg, "F5 or Ctrl+Enter: run     Tab: 4 spaces     Esc: leave (your code is kept)     Hay, wood and upgrades are saved between visits",
-        LAB_X, 736, 13, W - 48, DIM);
+static void FOutWin(Rectangle r)
+{
+    if (GBtn((Rectangle) { r.x + r.width - 62, r.y + 3, 56, 24 }, "Clear", (Color) { 58, 62, 78, 255 }, 13)) { labOutLen = 0; labOut[0] = 0; labErrN = 0; }
+    DrawRectangle((int)r.x, (int)r.y + 30, (int)r.width, (int)r.height - 30, CODEBG);
+    Rectangle body = { r.x, r.y + 30, r.width, r.height - 30 };
+    const float fs = 16, lh = 22; float cw = MeasureTextEx(fCode, "M", fs, 0).x;
+    int cols = (int)((body.width - 24) / cw); if (cols < 8) cols = 8;
+    if (labOutLen == 0) {
+        Wrapped(fReg, "Press Run (or F5) to start your program. print() output, hints and error messages show up here.", body.x + 12, body.y + 10, body.width - 24, 14, DIM);
+        return;
+    }
+    int lines = 0;
+    for (const char* p = labOut; *p;) { const char* e = strchr(p, '\n'); int len = e ? (int)(e - p) : (int)strlen(p); lines += len ? (len + cols - 1) / cols : 1; p += len; if (*p == '\n') p++; }
+    float total = lines * lh + 16, maxS = total - body.height; if (maxS < 0) maxS = 0;
+    if (CheckCollisionPointRec(GetMousePosition(), body)) fOutScroll -= GetMouseWheelMove() * lh * 3;
+    if (labOutLen != fOutLast) { fOutScroll = maxS; fOutLast = labOutLen; }
+    if (fOutScroll < 0) fOutScroll = 0; if (fOutScroll > maxS) fOutScroll = maxS;
+    ScissorT((int)body.x, (int)body.y, (int)body.width, (int)body.height);
+    float y = body.y + 8 - fOutScroll;
+    for (const char* p = labOut; *p;) {
+        const char* e = strchr(p, '\n'); int len = e ? (int)(e - p) : (int)strlen(p);
+        char line[300]; int cl = len > 299 ? 299 : len; memcpy(line, p, (size_t)cl); line[cl] = 0;
+        Color col = { 215, 218, 235, 255 };
+        if (!strncmp(line, "Line ", 5)) col = (Color){ 255, 130, 140, 255 };
+        else if (!strncmp(line, "Program finished", 16) || !strncmp(line, "Stopped", 7)) col = DIM;
+        else if (!strncmp(line, "Treasure", 8) || !strncmp(line, "Giant", 5) || !strncmp(line, "The sunflower", 13)) col = (Color){ 255, 214, 100, 255 };
+        if (len == 0) y += lh;
+        else for (int off = 0; off < len; off += cols) {
+            char chunk[200]; int cn = len - off < cols ? len - off : cols; if (cn > 190) cn = 190;
+            if (off + cn > cl) cn = cl > off ? cl - off : 0;
+            memcpy(chunk, line + off, (size_t)cn); chunk[cn] = 0;
+            if (y > body.y - lh && y < body.y + body.height) DrawTextEx(fCode, chunk, (Vector2) { body.x + 12, y }, fs, 0, col);
+            y += lh;
+        }
+        p += len; if (*p == '\n') p++;
+    }
+    EndScissorMode();
+}
+
+static bool FUpgReady(int i) { for (int k = 0; k < 2; k++) if (FUPG[i].req[k] >= 0 && !fsv.unl[FUPG[i].req[k]]) return false; return true; }
+static bool FUpgAfford(int i) { for (int k = 0; k < IT_N; k++) if (fsv.inv[k] < FUPG[i].cost[k]) return false; return true; }
+static bool FAnyUpgrade(void) { for (int i = 0; i < U_N; i++) if (!fsv.unl[i] && FUpgReady(i) && FUpgAfford(i)) return true; return false; }
+
+static void FUpgWin(Rectangle r)
+{
+    const float ch = 86, gap = 8;
+    float total = U_N * (ch + gap) + 8, maxS = total - r.height; if (maxS < 0) maxS = 0;
+    if (CheckCollisionPointRec(GetMousePosition(), r)) fUpgScroll -= GetMouseWheelMove() * 50;
+    if (fUpgScroll < 0) fUpgScroll = 0; if (fUpgScroll > maxS) fUpgScroll = maxS;
+    ScissorT((int)r.x, (int)r.y, (int)r.width, (int)r.height);
+    for (int i = 0; i < U_N; i++) {
+        float y = r.y + 8 + i * (ch + gap) - fUpgScroll;
+        if (y > r.y + r.height || y + ch < r.y) continue;
+        Rectangle c = { r.x + 8, y, r.width - 16, ch };
+        bool own = fsv.unl[i], ready = FUpgReady(i), aff = FUpgAfford(i);
+        DrawRectangleRec(c, own ? (Color) { 24, 50, 38, 255 } : GB_PANEL);
+        DrawRectangleLines((int)c.x, (int)c.y, (int)c.width, (int)c.height, own ? GOOD : (ready && aff ? (Color) { 230, 180, 50, 255 } : GB_EDGE));
+        TxtFit(fBold, FUPG[i].name, c.x + 10, y + 5, 17, c.width - 130, ready || own ? WHITE : DIM);
+        TxtFit(fReg, FUPG[i].desc, c.x + 10, y + 27, 13, c.width - 20, (Color) { 176, 182, 198, 255 });
+        if (own) { Txt(fBold, "Unlocked", c.x + c.width - 10 - TxtW(fBold, "Unlocked", 15), y + 8, 15, GOOD); continue; }
+        float cx = c.x + 14;
+        for (int k = 0; k < IT_N; k++) if (FUPG[i].cost[k] > 0) {
+            FItemIcon(k, cx, y + 62, 9);
+            Txt(fBold, TextFormat("%d", FUPG[i].cost[k]), cx + 14, y + 52, 15, fsv.inv[k] >= FUPG[i].cost[k] ? WHITE : (Color) { 240, 110, 110, 255 });
+            cx += 22 + TxtW(fBold, TextFormat("%d", FUPG[i].cost[k]), 15) + 12;
+        }
+        Rectangle b = { c.x + c.width - 96, y + ch - 36, 86, 28 };
+        if (!ready) {
+            char need[120] = "Needs: ";
+            for (int k = 0; k < 2; k++) if (FUPG[i].req[k] >= 0 && !fsv.unl[FUPG[i].req[k]]) { strcat(need, FUPG[i].name == NULL ? "" : FUPG[FUPG[i].req[k]].name); strcat(need, " "); }
+            Txt(fReg, need, c.x + c.width - 10 - fminf(TxtW(fReg, need, 12), c.width * 0.45f), y + 8, 12, (Color) { 220, 150, 90, 255 });
+            DrawRectangleRec(b, (Color) { 36, 38, 48, 255 }); CenterTxt(fBold, "Locked", b.x + b.width / 2, b.y + 5, 14, DIM);
+        }
+        else if (GBtn(b, "Unlock", aff ? (Color) { 40, 150, 70, 255 } : (Color) { 70, 74, 90, 255 }, 15) && aff) {
+            for (int k = 0; k < IT_N; k++) fsv.inv[k] -= FUPG[i].cost[k];
+            fsv.unl[i] = 1; FarmBuild(); SaveFarm();
+            GainCredits(15, "Farm upgrade"); Notify(TextFormat("Unlocked: %s", FUPG[i].name), GOOD);
+        }
+    }
+    EndScissorMode();
+}
+
+static const struct { const char* sig, * desc; int req; } FHELP[] = {
+    { "move(North)", "Move one tile North, South, East or West. Walking off an edge wraps around to the other side.", -1 },
+    { "harvest()", "Cut or pick whatever is ripe on this tile. Unripe plants are lost, so check can_harvest() first.", -1 },
+    { "can_harvest()", "True when the plant on this tile is ripe (or the treasure is under you in a maze).", -1 },
+    { "plant(Entities.Bush)", "Plant a crop on this tile. Needs an empty tile and the right resources.", -1 },
+    { "till()", "Turn grass into soil, or soil back into grass.", U_SOIL },
+    { "get_entity_type()", "What is on this tile: Entities.Grass, Bush, Carrot, Tree, Pumpkin, Sunflower, Dead_Pumpkin, Treasure or None.", -1 },
+    { "get_ground_type()", "Grounds.Grassland or Grounds.Soil.", U_SOIL },
+    { "get_pos_x() / get_pos_y()", "Where the drone is. (0, 0) is the south-west corner.", -1 },
+    { "get_world_size()", "How many tiles wide and tall the plot is.", -1 },
+    { "num_items(Items.Hay)", "How much of an item you own. Items: Hay, Wood, Carrot, Pumpkin, Power, Gold, Water.", -1 },
+    { "use_item(Items.Water)", "Water the plant here; it grows in half the remaining time.", U_WATER },
+    { "measure()", "Sunflower petal count (7 to 15). The flower with the most petals pays a x10 Power bonus.", U_SUN },
+    { "generate_maze()", "Grows a hedge maze around the drone with a treasure inside. harvest() it for Gold.", U_MAZE },
+    { "can_move(North)", "True if there is no hedge in that direction (maze only).", U_MAZE },
+    { "do_a_flip()", "A pointless but very stylish loop-the-loop.", -1 },
+    { "print(a, b, ...)", "Write values to the Output window.", -1 },
+    { "len(x)  str(x)  int(x)  abs(x)", "Handy helpers. Also round, min, max, random() and randint(a, b).", -1 },
+    { "range(n)", "Used by for loops: for i in range(5):", U_LOOPS },
+};
+static const struct { const char* name; int grow; const char* cost, * gives; } FCROP[] = {
+    { "Grass",     3,  "free",           "1 Hay (2 with Sharp Blades)" },
+    { "Bush",      5,  "free",           "1 Wood (2 with Bushes)" },
+    { "Carrot",    7,  "1 Hay, 1 Wood",  "2 Carrots (needs soil)" },
+    { "Tree",     10,  "2 Hay",          "5 Wood; slower beside trees" },
+    { "Pumpkin",  12,  "1 Hay, 1 Carrot", "Squares of ripe pumpkins merge into giants (n x n x n). 18% die" },
+    { "Sunflower", 8,  "1 Carrot",       "1 Power; most petals gives 10" },
+};
+static void FHelpWin(Rectangle r)
+{
+    float yTop = r.y + 8 - fHelpScroll, y = yTop, w = r.width - 24, x = r.x + 12;
+    ScissorT((int)r.x, (int)r.y, (int)r.width, (int)r.height);
+    Txt(fBold, "The language", x, y, 17, (Color) { 255, 214, 100, 255 }); y += 26;
+    y += Wrapped(fReg, "A small Python. Variables, numbers, text, True/False/None, lists, if / elif / else, while, for ... in range(n), def and return, and / or / not, # comments. Indent with 4 spaces. Some of it is locked until you buy the upgrade.", x, y, w, 14, (Color) { 190, 196, 212, 255 });
+    y += 14;
+    Txt(fBold, "Functions", x, y, 17, (Color) { 255, 214, 100, 255 }); y += 28;
+    for (int i = 0; i < (int)(sizeof FHELP / sizeof FHELP[0]); i++) {
+        bool lock = FHELP[i].req >= 0 && !fsv.unl[FHELP[i].req];
+        DrawTextEx(fCode, FHELP[i].sig, (Vector2) { x, y }, 15, 0, lock ? (Color) { 150, 120, 120, 255 } : (Color) { 130, 226, 210, 255 }); y += 21;
+        y += Wrapped(fReg, FHELP[i].desc, x + 10, y, w - 10, 13, (Color) { 190, 196, 212, 255 });
+        if (lock) { Txt(fReg, TextFormat("Locked: buy \"%s\"", FUPG[FHELP[i].req].name), x + 10, y, 12, (Color) { 230, 140, 90, 255 }); y += 18; }
+        y += 8;
+    }
+    y += 6;
+    Txt(fBold, "Crops", x, y, 17, (Color) { 255, 214, 100, 255 }); y += 28;
+    for (int i = 0; i < 6; i++) {
+        Txt(fBold, TextFormat("%s  -  %ds", FCROP[i].name, FCROP[i].grow), x, y, 15, WHITE); y += 20;
+        y += Wrapped(fReg, TextFormat("Costs %s. %s.", FCROP[i].cost, FCROP[i].gives), x + 10, y, w - 10, 13, (Color) { 190, 196, 212, 255 }); y += 8;
+    }
+    float total = y - yTop + 20, maxS = total - r.height; if (maxS < 0) maxS = 0;
+    if (CheckCollisionPointRec(GetMousePosition(), r)) fHelpScroll -= GetMouseWheelMove() * 50;
+    if (fHelpScroll < 0) fHelpScroll = 0; if (fHelpScroll > maxS) fHelpScroll = maxS;
+    EndScissorMode();
+}
+
+static const struct { const char* text; } FTUT[] = {
+    { "Press Run. The drone starts mowing the grass on its own." },
+    { "Collect 10 Hay. Every harvest of ripe grass gives 1." },
+    { "Open Upgrades (the + button) and buy Drone Speed I." },
+    { "Change the code (add move(East) somewhere) and Run it again." },
+    { "Buy Bushes, then plant one and harvest it for Wood." },
+    { "Buy Loops, so you can write for i in range(n):" },
+    { "Grow the plot to 4 x 4 with Farm 4 x 4." },
+    { "Unlock Soil and Carrots, then harvest your first Carrot." },
+    { "Sunflowers, giant pumpkins, a hedge maze... keep unlocking!" },
+};
+#define F_NTUT ((int)(sizeof FTUT / sizeof FTUT[0]))
+static bool FTutDone(int i)
+{
+    switch (i) {
+    case 0: return fsv.tut & 1;
+    case 1: return fsv.inv[IT_HAY] >= 10 || fsv.unl[U_SPEED1] || fsv.unl[U_BUSHES];
+    case 2: return fsv.unl[U_SPEED1];
+    case 3: return (fsv.tut & 2) != 0;
+    case 4: return fsv.unl[U_BUSHES] && fsv.seen[IT_WOOD];
+    case 5: return fsv.unl[U_LOOPS];
+    case 6: return fsv.unl[U_FARM4];
+    case 7: return fsv.unl[U_CARROTS] && fsv.seen[IT_CARROT];
+    case 8: return fsv.unl[U_PUMPKINS] && fsv.unl[U_SUN] && fsv.unl[U_MAZE];
+    }
+    return false;
+}
+static void FTutUpdate(void)
+{
+    if ((fsv.tut & 1) && !(fsv.tut & 2) && strcmp(labBuf, F_DEFAULT_CODE) != 0 && fRunning) fsv.tut |= 2;
+    for (int i = 0; i < F_NTUT; i++)
+        if (FTutDone(i) && !(fsv.tut & (1 << (i + 8)))) { fsv.tut |= 1 << (i + 8); if (i < F_NTUT - 1) { GainCredits(5, "Farm tutorial"); } else GainCredits(50, "Farm mastery"); }
+}
+static void FTutWin(Rectangle r)
+{
+    float y = r.y + 8, w = r.width - 20;
+    int cur = -1; for (int i = 0; i < F_NTUT; i++) if (!(fsv.tut & (1 << (i + 8)))) { cur = i; break; }
+    for (int i = 0; i < F_NTUT; i++) {
+        bool done = (fsv.tut & (1 << (i + 8))) != 0;
+        if (i > cur + 1 && cur >= 0) break;
+        Rectangle bx = { r.x + 10, y + 3, 16, 16 };
+        DrawRectangleRec(bx, done ? (Color) { 40, 150, 70, 255 } : GB_DARK); DrawRectangleLines((int)bx.x, (int)bx.y, 16, 16, i == cur ? (Color) { 255, 214, 100, 255 } : GB_EDGE);
+        if (done) { DrawLine((int)bx.x + 3, (int)bx.y + 8, (int)bx.x + 7, (int)bx.y + 12, WHITE); DrawLine((int)bx.x + 7, (int)bx.y + 12, (int)bx.x + 13, (int)bx.y + 4, WHITE); }
+        Color c = done ? DIM : (i == cur ? WHITE : (Color) { 150, 156, 172, 255 });
+        y += Wrapped(fReg, FTUT[i].text, r.x + 34, y, w - 26, 13, c) + 6;
+    }
+    if (cur < 0) Wrapped(fReg, "Tutorial complete! The farm is yours.", r.x + 12, y + 4, w, 14, GOOD);
+}
+
+/* ---- top bar and menu ---- */
+static Rectangle FTopBtn(int i) { return (Rectangle) { W - 8 - 4 * 42 + i * 42.0f, 7, 36, 36 }; }
+static void FTopBar(void)
+{
+    DrawRectangle(0, 0, W, (int)FTB, GB_DARK);
+    DrawRectangle(0, (int)FTB, W, 2, GB_EDGE);
+    if (GBtn((Rectangle) { 8, 7, 100, 36 }, BACKL, (Color) { 70, 74, 90, 255 }, 15)) { FarmSaveCode(); SaveFarm(); GoMenu(); }
+    float x = 118;
+    for (int i = 0; i < IT_N; i++) if (fsv.seen[i] || i == IT_HAY) { FChip(x, 8, i, fsv.inv[i]); x += TxtW(fBold, TextFormat("%d", fsv.inv[i]), 17) + 52 + 6; }
+    DrawCreditsChip(W - 8 - 4 * 42 - 6, 5);
+    float pulse = 0.5f + 0.5f * sinf((float)GetTime() * 5);
+    Rectangle b0 = FTopBtn(0), b1 = FTopBtn(1), b2 = FTopBtn(2), b3 = FTopBtn(3);
+    if (GBtn(b0, "!", fErrFlash ? (Color) { 150 + (int)(70 * pulse), 50, 50, 255 } : (Color) { 70, 74, 90, 255 }, 20)) { FToggle(W_OUT); fErrFlash = false; }
+    if (GBtn(b1, "+", FAnyUpgrade() ? (Color) { 170 + (int)(50 * pulse), 130, 30, 255 } : (Color) { 70, 74, 90, 255 }, 22)) FToggle(W_UPG);
+    if (GBtn(b2, "i", (Color) { 70, 74, 90, 255 }, 20)) FToggle(W_HELP);
+    if (GBtn(b3, "", fMenu ? (Color) { 100, 106, 130, 255 } : (Color) { 70, 74, 90, 255 }, 20)) { fMenu = !fMenu; fResetArm = false; }
+    for (int a = 0; a < 2; a++) for (int b = 0; b < 2; b++) DrawRectangle((int)(b3.x + 8 + a * 11), (int)(b3.y + 8 + b * 11), 9, 9, WHITE);
+}
+static void FMenu(Vector2 m)
+{
+    float w = 232, x = W - 8 - w, y = FTB + 6;
+    const char* nm[W_N] = { "Code editor", "Output", "Upgrades", "Documentation", "Getting started" };
+    float h = 12 + W_N * 30 + 8 + 4 * 32 + 8;
+    Rectangle pop = { x, y, w, h };
+    DrawRectangle((int)x + 4, (int)y + 5, (int)w, (int)h, Fade(BLACK, 0.3f));
+    DrawRectangleRec(pop, (Color) { 24, 26, 34, 250 }); DrawRectangleLines((int)x, (int)y, (int)w, (int)h, GB_EDGE);
+    float yy = y + 10;
+    for (int i = 0; i < W_N; i++) {
+        Rectangle row = { x + 6, yy, w - 12, 28 };
+        bool hov = CheckCollisionPointRec(m, row); if (hov) { hand = true; DrawRectangleRec(row, GB_PANEL); }
+        DrawRectangleLines((int)row.x + 6, (int)row.y + 6, 16, 16, GB_EDGE);
+        if (fw[i].open) DrawRectangle((int)row.x + 9, (int)row.y + 9, 10, 10, (Color) { 70, 200, 120, 255 });
+        Txt(fReg, nm[i], row.x + 32, row.y + 4, 15, WHITE);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) FToggle(i);
+        yy += 30;
+    }
+    DrawLine((int)x + 8, (int)yy + 2, (int)(x + w - 8), (int)yy + 2, GB_EDGE); yy += 8;
+    if (GBtn((Rectangle) { x + 8, yy, w - 16, 28 }, "Arrange windows", (Color) { 58, 62, 78, 255 }, 14)) { FArrange(); fMenu = false; } yy += 32;
+    if (GBtn((Rectangle) { x + 8, yy, w - 16, 28 }, IsWindowFullscreen() ? "Leave fullscreen (F11)" : "Fullscreen (F11)", (Color) { 58, 62, 78, 255 }, 14)) ToggleFull(); yy += 32;
+    if (GBtn((Rectangle) { x + 8, yy, w - 16, 28 }, "Stop program", (Color) { 58, 62, 78, 255 }, 14)) { FarmStop(); fMenu = false; } yy += 32;
+    if (GBtn((Rectangle) { x + 8, yy, w - 16, 28 }, fResetArm ? "Click again to erase" : "Reset all progress", fResetArm ? (Color) { 190, 60, 60, 255 } : (Color) { 110, 52, 56, 255 }, 14)) {
+        if (!fResetArm) fResetArm = true;
+        else { FarmStop(); FarmReset(); SaveFarm(); fPtN = 0; fResetArm = false; fMenu = false; Notify("Farm progress reset", BAD); }
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !CheckCollisionPointRec(m, pop) && !CheckCollisionPointRec(m, FTopBtn(3))) { fMenu = false; fResetArm = false; }
+}
+
+static void StartFarm(void)
+{
+    LabOwn(1);
+    if (!fInit) {
+        fInit = true; FArrange();
+        FILE* f = fopen("farm2_code.txt", "rb"); bool ok = false;
+        if (f) { int n = (int)fread(labBuf, 1, LAB_CAP - 1, f); fclose(f); if (n > 0) { labBuf[n] = 0; labLen = n; labCur = labAnc = 0; ok = true; } }
+        if (!ok) FarmSetCode(F_DEFAULT_CODE);
+        strcpy(fCodeSaved, labBuf);
+        labOutLen = 0; labOut[0] = 0;
+        FarmOut("Welcome! Press Run to start the drone.\nEdit the code on the left; buy upgrades with the + button.\n");
+    }
+    screen = SCR_FARM; labFocus = 0; labPending = 0; labStatus = LAB_READY; fFocusEd = true; fMenu = false;
+}
+
+static void DrawFarm(void)
+{
+    float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
+    Vector2 m = GetMousePosition();
+
+    /* simulation */
+    FarmFrame(dt); FEatEvents(); FPartUpdate(dt); FTutUpdate();
+    fSaveT += dt; if (fSaveT > 4) { fSaveT = 0; SaveFarm(); FarmSaveCode(); }
+
+    /* keys go to the editor only while it has focus */
+    if (fFocusEd && fw[W_ED].open && !fw[W_ED].min) { labFocus = 0; LabEdit(); }
+    else if (IsKeyPressed(KEY_F5)) LabRequestRun();
+
+    FWinInput(m);
+
+    /* the farm */
+    DrawRectangleGradientV(0, 0, W, H, (Color) { 34, 40, 50, 255 }, (Color) { 22, 26, 34, 255 });
+    FFit((Rectangle) { 470, FTB + 6, W - 470, H - FTB - 12 });
+    FDrawFarm(fRunning);
+
+    /* tile tooltip */
+    int tx, ty;
+    if (fTop == -1 && m.y > FTB && FPick(m, &tx, &ty)) {
+        FEnt* e = &fT[tx][ty].e; char l1[80], l2[120] = "";
+        const char* nm[7] = { "Empty", "Grass", "Bush", "Carrot", "Tree", "Pumpkin", "Sunflower" };
+        if (fMaze.on) snprintf(l1, sizeof l1, "(%d, %d)  %s", tx, ty, (tx == fMaze.tx && ty == fMaze.ty) ? "Treasure!" : "Hedge maze");
+        else {
+            snprintf(l1, sizeof l1, "(%d, %d)  %s%s", tx, ty, e->dead ? "Dead " : "", nm[e->type]);
+            if (e->type && !e->dead) snprintf(l2, sizeof l2, FRipe(e, tx, ty) ? "Ripe - harvest it!" : "Growing: %d%%", (int)(FFrac(e, tx, ty) * 100));
+            else if (fT[tx][ty].soil) snprintf(l2, sizeof l2, "Soil");
+            if (e->type == E_SUNFLOWER) strcat(l2, TextFormat("  %d petals", e->petals));
+        }
+        float tw = fmaxf(TxtW(fBold, l1, 15), TxtW(fReg, l2, 13)) + 20, th = l2[0] ? 50 : 30;
+        float bx = fminf(m.x + 16, W - tw - 6), by = fminf(m.y + 18, H - th - 6);
+        DrawRectangle((int)bx, (int)by, (int)tw, (int)th, Fade(GB_DARK, 0.94f)); DrawRectangleLines((int)bx, (int)by, (int)tw, (int)th, GB_EDGE);
+        Txt(fBold, l1, bx + 10, by + 5, 15, WHITE);
+        if (l2[0]) Txt(fReg, l2, bx + 10, by + 27, 13, (Color) { 190, 196, 212, 255 });
+    }
+
+    FTopBar();
+
+    /* windows, back to front; a window that is covered must not see the mouse */
+    bool dragging = fDragW >= 0 || fSizeW >= 0;
+    for (int i = 0; i < W_N; i++) {
+        int id = fz[i]; if (!fw[id].open) continue;
+        Rectangle c = FWinFrame(id);
+        if (c.width <= 0) continue;
+        FHide(dragging || fMenu || id != fTop);
+        switch (id) {
+        case W_ED:   FEditorWin(c); break;
+        case W_OUT:  FOutWin(c);    break;
+        case W_UPG:  FUpgWin(c);    break;
+        case W_HELP: FHelpWin(c);   break;
+        case W_TUT:  FTutWin(c);    break;
+        }
+        FHide(false);
+    }
+    if (fMenu) FMenu(m);
+
+    /* status */
+    const char* st = fRunning ? "Running" : "Idle";
+    Txt(fBold, st, W - 20 - TxtW(fBold, st, 14), H - 22, 14, fRunning ? (Color) { 255, 205, 90, 255 } : DIM);
 }
 
 
+static void ToggleFull(void)
+{
+    if (!IsWindowFullscreen()) {
+        int m = GetCurrentMonitor();
+        SetWindowSize(GetMonitorWidth(m), GetMonitorHeight(m));
+        ToggleFullscreen();
+    }
+    else {
+        ToggleFullscreen();
+        SetWindowSize(W, H);
+    }
+}
+
+
+/* ======================================================================
+   MEMORY LAB  (from the Stack Trace project)
+   Step through a lesson's code one line at a time and watch the stack,
+   the heap and the pointer arrows change. A heap block that nothing
+   points at is marked LEAKED. Left/Right arrow keys step, Esc goes back.
+   ====================================================================== */
+static const Color COL_AMBER_M = { 255, 180, 84, 255 };
+typedef struct { const char* area, * name, * type, * addr, * val; int changed; } MCell;
+typedef struct { int line; const char* explain; int n; const MCell* cells; } MStep;
+typedef struct { const char* track, * topic, * title, * text; int nlines; const char* const* code; int ns; const MStep* steps; } MLesson;
+
+static const char* const ML0_code[] = {
+    "int a = 7, b = 2;",
+    "int q = a / b;",
+    "double d = a / b;",
+    "double e = (double)a / b;",
+    "char c = 'A' + 2;",
+    "printf(\"%d %.1f %.1f %c\\n\", q, d, e, c);",
+};
+
+static const MCell ML0_s0[] = {
+    { "main", "a", "int", "1000", "7", 1 },
+    { "main", "b", "int", "1004", "2", 1 },
+};
+
+static const MCell ML0_s1[] = {
+    { "main", "a", "int", "1000", "7", 0 },
+    { "main", "b", "int", "1004", "2", 0 },
+    { "main", "q", "int", "1008", "3", 1 },
+};
+
+static const MCell ML0_s2[] = {
+    { "main", "a", "int", "1000", "7", 0 },
+    { "main", "b", "int", "1004", "2", 0 },
+    { "main", "q", "int", "1008", "3", 0 },
+    { "main", "d", "double", "1016", "3.0", 1 },
+};
+
+static const MCell ML0_s3[] = {
+    { "main", "a", "int", "1000", "7", 0 },
+    { "main", "b", "int", "1004", "2", 0 },
+    { "main", "q", "int", "1008", "3", 0 },
+    { "main", "d", "double", "1016", "3.0", 0 },
+    { "main", "e", "double", "1024", "3.5", 1 },
+};
+
+static const MCell ML0_s4[] = {
+    { "main", "a", "int", "1000", "7", 0 },
+    { "main", "b", "int", "1004", "2", 0 },
+    { "main", "q", "int", "1008", "3", 0 },
+    { "main", "d", "double", "1016", "3.0", 0 },
+    { "main", "e", "double", "1024", "3.5", 0 },
+    { "main", "c", "char", "1032", "'C'", 1 },
+};
+
+static const MCell ML0_s5[] = {
+    { "main", "a", "int", "1000", "7", 0 },
+    { "main", "b", "int", "1004", "2", 0 },
+    { "main", "q", "int", "1008", "3", 0 },
+    { "main", "d", "double", "1016", "3.0", 0 },
+    { "main", "e", "double", "1024", "3.5", 0 },
+    { "main", "c", "char", "1032", "'C'", 0 },
+};
+
+static const MStep ML0_steps[] = {
+    { 1, "a and b are ints: 4 bytes each, side by side on the stack.", 2, ML0_s0 },
+    { 2, "int divided by int gives an int. The remainder is thrown away, so 7 / 2 is 3.", 3, ML0_s1 },
+    { 3, "Still 3.0, not 3.5! a / b is worked out as int division first (3), and only then turned into a double. A double is 8 bytes.", 4, ML0_s2 },
+    { 4, "(double)a turns a into 7.0 before dividing, so this is double division: 3.5.", 5, ML0_s3 },
+    { 5, "A char is a 1-byte number. 'A' is 65, plus 2 is 67, which is 'C'.", 6, ML0_s4 },
+    { 6, "Prints: 3 3.0 3.5 C. Each % in the format matches one value: %d an int, %f a double, %c a char.", 6, ML0_s5 },
+};
+
+static const char* const ML1_code[] = {
+    "int sum = 0;",
+    "for (int i = 1; i <= 3; i++) {",
+    "    if (i % 2 == 1)",
+    "        sum += i;",
+    "}",
+    "printf(\"%d\\n\", sum);",
+};
+
+static const MCell ML1_s0[] = {
+    { "main", "sum", "int", "1000", "0", 1 },
+};
+
+static const MCell ML1_s1[] = {
+    { "main", "sum", "int", "1000", "0", 0 },
+    { "main", "i", "int", "1004", "1", 1 },
+};
+
+static const MCell ML1_s2[] = {
+    { "main", "sum", "int", "1000", "1", 1 },
+    { "main", "i", "int", "1004", "1", 0 },
+};
+
+static const MCell ML1_s3[] = {
+    { "main", "sum", "int", "1000", "1", 0 },
+    { "main", "i", "int", "1004", "2", 1 },
+};
+
+static const MCell ML1_s4[] = {
+    { "main", "sum", "int", "1000", "1", 0 },
+    { "main", "i", "int", "1004", "2", 0 },
+};
+
+static const MCell ML1_s5[] = {
+    { "main", "sum", "int", "1000", "1", 0 },
+    { "main", "i", "int", "1004", "3", 1 },
+};
+
+static const MCell ML1_s6[] = {
+    { "main", "sum", "int", "1000", "4", 1 },
+    { "main", "i", "int", "1004", "3", 0 },
+};
+
+static const MCell ML1_s7[] = {
+    { "main", "sum", "int", "1000", "4", 0 },
+    { "main", "i", "int", "1004", "4", 1 },
+};
+
+static const MCell ML1_s8[] = {
+    { "main", "sum", "int", "1000", "4", 0 },
+};
+
+static const MStep ML1_steps[] = {
+    { 1, "sum starts at 0.", 1, ML1_s0 },
+    { 2, "The loop starts: i is 1. 1 <= 3 is true, so the body runs.", 2, ML1_s1 },
+    { 4, "1 % 2 is 1, so i is odd and the if is true: sum += 1.", 2, ML1_s2 },
+    { 2, "End of the body, so i++ makes i 2. 2 <= 3, so round again.", 2, ML1_s3 },
+    { 3, "2 % 2 is 0, so the if is false and sum += i is skipped.", 2, ML1_s4 },
+    { 2, "i++ makes i 3. 3 <= 3 is still true.", 2, ML1_s5 },
+    { 4, "3 is odd, so sum += 3 makes sum 4.", 2, ML1_s6 },
+    { 2, "i++ makes i 4. 4 <= 3 is false, so the loop stops here, before the body.", 2, ML1_s7 },
+    { 6, "Prints 4 (1 + 3). i is gone: it was declared in the for, so it only existed inside the loop.", 1, ML1_s8 },
+};
+
+static const char* const ML2_code[] = {
+    "int a[4] = {3, 8, 1, 6};",
+    "int max = a[0];",
+    "for (int i = 1; i < 4; i++)",
+    "    if (a[i] > max) max = a[i];",
+    "int g[2][2] = {{1, 2}, {3, 4}};",
+};
+
+static const MCell ML2_s0[] = {
+    { "main", "a[0]", "int", "1000", "3", 1 },
+    { "main", "a[1]", "int", "1004", "8", 1 },
+    { "main", "a[2]", "int", "1008", "1", 1 },
+    { "main", "a[3]", "int", "1012", "6", 1 },
+};
+
+static const MCell ML2_s1[] = {
+    { "main", "a[0]", "int", "1000", "3", 0 },
+    { "main", "a[1]", "int", "1004", "8", 0 },
+    { "main", "a[2]", "int", "1008", "1", 0 },
+    { "main", "a[3]", "int", "1012", "6", 0 },
+    { "main", "max", "int", "1016", "3", 1 },
+};
+
+static const MCell ML2_s2[] = {
+    { "main", "a[0]", "int", "1000", "3", 0 },
+    { "main", "a[1]", "int", "1004", "8", 0 },
+    { "main", "a[2]", "int", "1008", "1", 0 },
+    { "main", "a[3]", "int", "1012", "6", 0 },
+    { "main", "max", "int", "1016", "8", 1 },
+    { "main", "i", "int", "1020", "1", 1 },
+};
+
+static const MCell ML2_s3[] = {
+    { "main", "a[0]", "int", "1000", "3", 0 },
+    { "main", "a[1]", "int", "1004", "8", 0 },
+    { "main", "a[2]", "int", "1008", "1", 0 },
+    { "main", "a[3]", "int", "1012", "6", 0 },
+    { "main", "max", "int", "1016", "8", 0 },
+    { "main", "i", "int", "1020", "2", 1 },
+};
+
+static const MCell ML2_s4[] = {
+    { "main", "a[0]", "int", "1000", "3", 0 },
+    { "main", "a[1]", "int", "1004", "8", 0 },
+    { "main", "a[2]", "int", "1008", "1", 0 },
+    { "main", "a[3]", "int", "1012", "6", 0 },
+    { "main", "max", "int", "1016", "8", 0 },
+    { "main", "i", "int", "1020", "3", 1 },
+};
+
+static const MCell ML2_s5[] = {
+    { "main", "a[0]", "int", "1000", "3", 0 },
+    { "main", "a[1]", "int", "1004", "8", 0 },
+    { "main", "a[2]", "int", "1008", "1", 0 },
+    { "main", "a[3]", "int", "1012", "6", 0 },
+    { "main", "max", "int", "1016", "8", 0 },
+    { "main", "g[0][0]", "int", "1024", "1", 1 },
+    { "main", "g[0][1]", "int", "1028", "2", 1 },
+    { "main", "g[1][0]", "int", "1032", "3", 1 },
+    { "main", "g[1][1]", "int", "1036", "4", 1 },
+};
+
+static const MStep ML2_steps[] = {
+    { 1, "Four ints, 4 bytes apart. a[2] is at 1000 + 2 x 4 = 1008. There's no a[4]: the last element is a[3].", 4, ML2_s0 },
+    { 2, "Start by guessing the first element is the biggest.", 5, ML2_s1 },
+    { 4, "i is 1: a[1] is 8, bigger than 3, so max becomes 8.", 6, ML2_s2 },
+    { 4, "i is 2: a[2] is 1, not bigger than 8, so max stays.", 6, ML2_s3 },
+    { 4, "i is 3: a[3] is 6, not bigger. Then i++ makes 4, i < 4 is false, and the loop ends. max is 8.", 6, ML2_s4 },
+    { 5, "A 2D array is still one row after another in memory: g[1][0] comes straight after g[0][1].", 9, ML2_s5 },
+};
+
+static const char* const ML3_code[] = {
+    "char s[6] = \"Cat\";",
+    "s[0] = 'B';",
+    "s[3] = 's';",
+    "int n = 0;",
+    "while (s[n] != '\\0') n++;",
+    "s[1] = '\\0';",
+    "printf(\"%s %d\\n\", s, n);",
+};
+
+static const MCell ML3_s0[] = {
+    { "main", "s[0]", "char", "1000", "'C'", 1 },
+    { "main", "s[1]", "char", "1001", "'a'", 1 },
+    { "main", "s[2]", "char", "1002", "'t'", 1 },
+    { "main", "s[3]", "char", "1003", "'\\0'", 1 },
+    { "main", "s[4]", "char", "1004", "'\\0'", 1 },
+    { "main", "s[5]", "char", "1005", "'\\0'", 1 },
+};
+
+static const MCell ML3_s1[] = {
+    { "main", "s[0]", "char", "1000", "'B'", 1 },
+    { "main", "s[1]", "char", "1001", "'a'", 0 },
+    { "main", "s[2]", "char", "1002", "'t'", 0 },
+    { "main", "s[3]", "char", "1003", "'\\0'", 0 },
+    { "main", "s[4]", "char", "1004", "'\\0'", 0 },
+    { "main", "s[5]", "char", "1005", "'\\0'", 0 },
+};
+
+static const MCell ML3_s2[] = {
+    { "main", "s[0]", "char", "1000", "'B'", 0 },
+    { "main", "s[1]", "char", "1001", "'a'", 0 },
+    { "main", "s[2]", "char", "1002", "'t'", 0 },
+    { "main", "s[3]", "char", "1003", "'s'", 1 },
+    { "main", "s[4]", "char", "1004", "'\\0'", 0 },
+    { "main", "s[5]", "char", "1005", "'\\0'", 0 },
+};
+
+static const MCell ML3_s3[] = {
+    { "main", "s[0]", "char", "1000", "'B'", 0 },
+    { "main", "s[1]", "char", "1001", "'a'", 0 },
+    { "main", "s[2]", "char", "1002", "'t'", 0 },
+    { "main", "s[3]", "char", "1003", "'s'", 0 },
+    { "main", "s[4]", "char", "1004", "'\\0'", 0 },
+    { "main", "s[5]", "char", "1005", "'\\0'", 0 },
+    { "main", "n", "int", "1008", "4", 1 },
+};
+
+static const MCell ML3_s4[] = {
+    { "main", "s[0]", "char", "1000", "'B'", 0 },
+    { "main", "s[1]", "char", "1001", "'\\0'", 1 },
+    { "main", "s[2]", "char", "1002", "'t'", 0 },
+    { "main", "s[3]", "char", "1003", "'s'", 0 },
+    { "main", "s[4]", "char", "1004", "'\\0'", 0 },
+    { "main", "s[5]", "char", "1005", "'\\0'", 0 },
+    { "main", "n", "int", "1008", "4", 0 },
+};
+
+static const MCell ML3_s5[] = {
+    { "main", "s[0]", "char", "1000", "'B'", 0 },
+    { "main", "s[1]", "char", "1001", "'\\0'", 0 },
+    { "main", "s[2]", "char", "1002", "'t'", 0 },
+    { "main", "s[3]", "char", "1003", "'s'", 0 },
+    { "main", "s[4]", "char", "1004", "'\\0'", 0 },
+    { "main", "s[5]", "char", "1005", "'\\0'", 0 },
+    { "main", "n", "int", "1008", "4", 0 },
+};
+
+static const MStep ML3_steps[] = {
+    { 1, "\"Cat\" fills s[0] to s[2], then '\\0' marks the end. Chars are 1 byte, so the addresses go up by 1. The rest of s is filled with '\\0' too.", 6, ML3_s0 },
+    { 2, "A string is just an array, so you can change one letter. s is now \"Bat\".", 6, ML3_s1 },
+    { 3, "This overwrites the old end marker. s is now \"Bats\": the next '\\0' is s[4]. Always leave room for it, or printf runs off the end.", 6, ML3_s2 },
+    { 5, "The loop moves n along until s[n] is '\\0'. It stops at 4, the length of \"Bats\". That's all strlen does.", 7, ML3_s3 },
+    { 6, "Putting '\\0' at s[1] ends the string early. 't' and 's' are still in memory, but nothing reads past the first '\\0'.", 7, ML3_s4 },
+    { 7, "Prints: B 4. n was counted before the cut, so it doesn't change.", 7, ML3_s5 },
+};
+
+static const char* const ML4_code[] = {
+    "void addTen(int n) {",
+    "    n = n + 10;",
+    "}",
+    "int main() {",
+    "    int x = 5;",
+    "    addTen(x);",
+    "    printf(\"%d\\n\", x);",
+    "}",
+};
+
+static const MCell ML4_s0[] = {
+    { "main", "x", "int", "2000", "5", 1 },
+};
+
+static const MCell ML4_s1[] = {
+    { "main", "x", "int", "2000", "5", 0 },
+    { "addTen", "n", "int", "1980", "5", 1 },
+};
+
+static const MCell ML4_s2[] = {
+    { "main", "x", "int", "2000", "5", 0 },
+    { "addTen", "n", "int", "1980", "15", 1 },
+};
+
+static const MCell ML4_s3[] = {
+    { "main", "x", "int", "2000", "5", 0 },
+};
+
+static const MCell ML4_s4[] = {
+    { "main", "x", "int", "2000", "5", 0 },
+};
+
+static const MStep ML4_steps[] = {
+    { 5, "x is made in main's stack frame.", 1, ML4_s0 },
+    { 1, "addTen(x) makes a new frame on top of main's. n is a new variable, and x's value, 5, is copied into it.", 2, ML4_s1 },
+    { 2, "n becomes 15. Only the copy changes: x, at a different address, is still 5.", 2, ML4_s2 },
+    { 3, "addTen returns and its whole frame is thrown away, n and all. The 15 is lost.", 1, ML4_s3 },
+    { 7, "Prints 5. To change x, pass its address instead (void addTen(int *n)), or return the new value.", 1, ML4_s4 },
+};
+
+static const char* const ML5_code[] = {
+    "int i = 5, j = 10;",
+    "int *ptr;",
+    "ptr = &i;",
+    "*ptr = 3;",
+    "ptr = &j;",
+    "*ptr = -2;",
+};
+
+static const MCell ML5_s0[] = {
+    { "main", "i", "int", "1000", "5", 1 },
+    { "main", "j", "int", "1004", "10", 1 },
+};
+
+static const MCell ML5_s1[] = {
+    { "main", "i", "int", "1000", "5", 0 },
+    { "main", "j", "int", "1004", "10", 0 },
+    { "main", "ptr", "int*", "1008", "?", 1 },
+};
+
+static const MCell ML5_s2[] = {
+    { "main", "i", "int", "1000", "5", 0 },
+    { "main", "j", "int", "1004", "10", 0 },
+    { "main", "ptr", "int*", "1008", "->i", 1 },
+};
+
+static const MCell ML5_s3[] = {
+    { "main", "i", "int", "1000", "3", 1 },
+    { "main", "j", "int", "1004", "10", 0 },
+    { "main", "ptr", "int*", "1008", "->i", 0 },
+};
+
+static const MCell ML5_s4[] = {
+    { "main", "i", "int", "1000", "3", 0 },
+    { "main", "j", "int", "1004", "10", 0 },
+    { "main", "ptr", "int*", "1008", "->j", 1 },
+};
+
+static const MCell ML5_s5[] = {
+    { "main", "i", "int", "1000", "3", 0 },
+    { "main", "j", "int", "1004", "-2", 1 },
+    { "main", "ptr", "int*", "1008", "->j", 0 },
+};
+
+static const MStep ML5_steps[] = {
+    { 1, "i and j are made on the stack, each with its own address.", 2, ML5_s0 },
+    { 2, "ptr is declared but not set. Until it is, it holds whatever was already in that memory.", 3, ML5_s1 },
+    { 3, "&i is the address of i (1000). ptr now holds 1000, so it points at i.", 3, ML5_s2 },
+    { 4, "*ptr follows the arrow to i, so this changes i to 3. ptr itself doesn't change.", 3, ML5_s3 },
+    { 5, "ptr now holds the address of j instead. i keeps its value.", 3, ML5_s4 },
+    { 6, "The same *ptr as before, but now it reaches j. j becomes -2.", 3, ML5_s5 },
+};
+
+static const char* const ML6_code[] = {
+    "int a[3] = {10, 20, 30};",
+    "int *p = a;",
+    "p++;",
+    "*p = 25;",
+    "int *q = p + 1;",
+    "printf(\"%d %ld\\n\", *q, q - a);",
+};
+
+static const MCell ML6_s0[] = {
+    { "main", "a[0]", "int", "1000", "10", 1 },
+    { "main", "a[1]", "int", "1004", "20", 1 },
+    { "main", "a[2]", "int", "1008", "30", 1 },
+};
+
+static const MCell ML6_s1[] = {
+    { "main", "a[0]", "int", "1000", "10", 0 },
+    { "main", "a[1]", "int", "1004", "20", 0 },
+    { "main", "a[2]", "int", "1008", "30", 0 },
+    { "main", "p", "int*", "1016", "->a[0]", 1 },
+};
+
+static const MCell ML6_s2[] = {
+    { "main", "a[0]", "int", "1000", "10", 0 },
+    { "main", "a[1]", "int", "1004", "20", 0 },
+    { "main", "a[2]", "int", "1008", "30", 0 },
+    { "main", "p", "int*", "1016", "->a[1]", 1 },
+};
+
+static const MCell ML6_s3[] = {
+    { "main", "a[0]", "int", "1000", "10", 0 },
+    { "main", "a[1]", "int", "1004", "25", 1 },
+    { "main", "a[2]", "int", "1008", "30", 0 },
+    { "main", "p", "int*", "1016", "->a[1]", 0 },
+};
+
+static const MCell ML6_s4[] = {
+    { "main", "a[0]", "int", "1000", "10", 0 },
+    { "main", "a[1]", "int", "1004", "25", 0 },
+    { "main", "a[2]", "int", "1008", "30", 0 },
+    { "main", "p", "int*", "1016", "->a[1]", 0 },
+    { "main", "q", "int*", "1024", "->a[2]", 1 },
+};
+
+static const MCell ML6_s5[] = {
+    { "main", "a[0]", "int", "1000", "10", 0 },
+    { "main", "a[1]", "int", "1004", "25", 0 },
+    { "main", "a[2]", "int", "1008", "30", 0 },
+    { "main", "p", "int*", "1016", "->a[1]", 0 },
+    { "main", "q", "int*", "1024", "->a[2]", 0 },
+};
+
+static const MStep ML6_steps[] = {
+    { 1, "Three ints in a row, 4 bytes apart.", 3, ML6_s0 },
+    { 2, "An array's name is the address of its first element, so p = a points p at a[0].", 4, ML6_s1 },
+    { 3, "p++ moves on one int: 1000 + 4 = 1004, which is a[1].", 4, ML6_s2 },
+    { 4, "*p is whatever p points at, a[1], so a[1] becomes 25. p[0] = 25 would do the same.", 4, ML6_s3 },
+    { 5, "p + 1 is one more int along: 1008, a[2]. p itself doesn't move.", 5, ML6_s4 },
+    { 6, "Prints 30 2. *q is a[2]. q - a counts elements, not bytes: (1008 - 1000) / 4 = 2.", 5, ML6_s5 },
+};
+
+static const char* const ML7_code[] = {
+    "void swap_ints(int *a, int *b) {",
+    "    int temp = *a;",
+    "    *a = *b;",
+    "    *b = temp;",
+    "}",
+    "",
+    "int main() {",
+    "    int x = 5, y = 10;",
+    "    swap_ints(&x, &y);",
+    "}",
+};
+
+static const MCell ML7_s0[] = {
+    { "main", "x", "int", "2000", "5", 1 },
+    { "main", "y", "int", "2004", "10", 1 },
+};
+
+static const MCell ML7_s1[] = {
+    { "main", "x", "int", "2000", "5", 0 },
+    { "main", "y", "int", "2004", "10", 0 },
+    { "swap_ints", "a", "int*", "1980", "->x", 1 },
+    { "swap_ints", "b", "int*", "1988", "->y", 1 },
+};
+
+static const MCell ML7_s2[] = {
+    { "main", "x", "int", "2000", "5", 0 },
+    { "main", "y", "int", "2004", "10", 0 },
+    { "swap_ints", "a", "int*", "1980", "->x", 0 },
+    { "swap_ints", "b", "int*", "1988", "->y", 0 },
+    { "swap_ints", "temp", "int", "1996", "5", 1 },
+};
+
+static const MCell ML7_s3[] = {
+    { "main", "x", "int", "2000", "10", 1 },
+    { "main", "y", "int", "2004", "10", 0 },
+    { "swap_ints", "a", "int*", "1980", "->x", 0 },
+    { "swap_ints", "b", "int*", "1988", "->y", 0 },
+    { "swap_ints", "temp", "int", "1996", "5", 0 },
+};
+
+static const MCell ML7_s4[] = {
+    { "main", "x", "int", "2000", "10", 0 },
+    { "main", "y", "int", "2004", "5", 1 },
+    { "swap_ints", "a", "int*", "1980", "->x", 0 },
+    { "swap_ints", "b", "int*", "1988", "->y", 0 },
+    { "swap_ints", "temp", "int", "1996", "5", 0 },
+};
+
+static const MCell ML7_s5[] = {
+    { "main", "x", "int", "2000", "10", 0 },
+    { "main", "y", "int", "2004", "5", 0 },
+};
+
+static const MStep ML7_steps[] = {
+    { 8, "main makes x and y.", 2, ML7_s0 },
+    { 1, "Calling swap_ints makes a new frame. a and b are copies of the addresses &x and &y.", 4, ML7_s1 },
+    { 2, "*a follows the arrow to x and copies 5 into temp.", 5, ML7_s2 },
+    { 3, "*a = *b copies y's value into x. This is a change to main's x, not to a copy.", 5, ML7_s3 },
+    { 4, "*b = temp puts the old x into y. The swap is done.", 5, ML7_s4 },
+    { 9, "swap_ints returns and its frame is gone. x and y stay swapped: x = 10, y = 5.", 2, ML7_s5 },
+};
+
+static const char* const ML8_code[] = {
+    "int x = 5, y = 1;",
+    "int *p = &x;",
+    "int **pp = &p;",
+    "**pp = 9;",
+    "*pp = &y;",
+    "**pp = 7;",
+};
+
+static const MCell ML8_s0[] = {
+    { "main", "x", "int", "1000", "5", 1 },
+    { "main", "y", "int", "1004", "1", 1 },
+};
+
+static const MCell ML8_s1[] = {
+    { "main", "x", "int", "1000", "5", 0 },
+    { "main", "y", "int", "1004", "1", 0 },
+    { "main", "p", "int*", "1008", "->x", 1 },
+};
+
+static const MCell ML8_s2[] = {
+    { "main", "x", "int", "1000", "5", 0 },
+    { "main", "y", "int", "1004", "1", 0 },
+    { "main", "p", "int*", "1008", "->x", 0 },
+    { "main", "pp", "int**", "1016", "->p", 1 },
+};
+
+static const MCell ML8_s3[] = {
+    { "main", "x", "int", "1000", "9", 1 },
+    { "main", "y", "int", "1004", "1", 0 },
+    { "main", "p", "int*", "1008", "->x", 0 },
+    { "main", "pp", "int**", "1016", "->p", 0 },
+};
+
+static const MCell ML8_s4[] = {
+    { "main", "x", "int", "1000", "9", 0 },
+    { "main", "y", "int", "1004", "1", 0 },
+    { "main", "p", "int*", "1008", "->y", 1 },
+    { "main", "pp", "int**", "1016", "->p", 0 },
+};
+
+static const MCell ML8_s5[] = {
+    { "main", "x", "int", "1000", "9", 0 },
+    { "main", "y", "int", "1004", "7", 1 },
+    { "main", "p", "int*", "1008", "->y", 0 },
+    { "main", "pp", "int**", "1016", "->p", 0 },
+};
+
+static const MStep ML8_steps[] = {
+    { 1, "Two ints on the stack.", 2, ML8_s0 },
+    { 2, "p holds the address of x.", 3, ML8_s1 },
+    { 3, "pp holds the address of p. Its type is int**: a pointer to an int*.", 4, ML8_s2 },
+    { 4, "**pp follows both arrows: pp to p, then p to x. So x becomes 9.", 4, ML8_s3 },
+    { 5, "*pp is p itself, so this changes p: it now points at y. This is how a function given Node **head can change the caller's head.", 4, ML8_s4 },
+    { 6, "The same **pp as before now reaches y, because p moved. y becomes 7.", 4, ML8_s5 },
+};
+
+static const char* const ML9_code[] = {
+    "int *getPtrToFive() {",
+    "    int *x = new int;",
+    "    *x = 5;",
+    "    return x;",
+    "}",
+    "",
+    "int main() {",
+    "    int *p;",
+    "    for (int i = 0; i < 3; ++i) {",
+    "        p = getPtrToFive();",
+    "        cout << *p << endl;",
+    "    }",
+    "}",
+};
+
+static const MCell ML9_s0[] = {
+    { "main", "p", "int*", "3000", "?", 1 },
+};
+
+static const MCell ML9_s1[] = {
+    { "main", "p", "int*", "3000", "->block1", 1 },
+    { "heap", "block1", "int", "9000", "5", 1 },
+};
+
+static const MCell ML9_s2[] = {
+    { "main", "p", "int*", "3000", "->block2", 1 },
+    { "heap", "block1", "int", "9000", "5", 0 },
+    { "heap", "block2", "int", "9016", "5", 1 },
+};
+
+static const MCell ML9_s3[] = {
+    { "main", "p", "int*", "3000", "->block3", 1 },
+    { "heap", "block1", "int", "9000", "5", 0 },
+    { "heap", "block2", "int", "9016", "5", 0 },
+    { "heap", "block3", "int", "9032", "5", 1 },
+};
+
+static const MCell ML9_s4[] = {
+    { "main", "p", "int*", "3000", "->block3", 0 },
+    { "heap", "block1", "int", "9000", "5", 0 },
+    { "heap", "block2", "int", "9016", "5", 0 },
+    { "heap", "block3", "int", "9032", "5", 0 },
+};
+
+static const MStep ML9_steps[] = {
+    { 8, "p is declared on main's stack. It doesn't point anywhere yet.", 1, ML9_s0 },
+    { 10, "First time round: getPtrToFive makes an int on the heap holding 5 and returns its address. p points at it.", 2, ML9_s1 },
+    { 10, "Second time round: a new block, and p moves to it. Nothing points at block1 any more, so it can never be deleted. That's a memory leak.", 3, ML9_s2 },
+    { 10, "Third time round: another block, another leak. Two blocks are lost.", 4, ML9_s3 },
+    { 13, "Adding delete p; after the loop only frees block3. The fix is delete p; inside the loop, after the cout.", 4, ML9_s4 },
+};
+
+static const char* const ML10_code[] = {
+    "int *bad() {",
+    "    int local = 42;",
+    "    return &local;",
+    "}",
+    "int main() {",
+    "    int *p = bad();",
+    "    int *h = new int(5);",
+    "    delete h;",
+    "    *h = 6;",
+    "}",
+};
+
+static const MCell ML10_s0[] = {
+    { "main", "p", "int*", "3000", "?", 1 },
+    { "bad", "local", "int", "2980", "42", 1 },
+};
+
+static const MCell ML10_s1[] = {
+    { "main", "p", "int*", "3000", "?", 0 },
+    { "bad", "local", "int", "2980", "42", 0 },
+};
+
+static const MCell ML10_s2[] = {
+    { "main", "p", "int*", "3000", "2980", 1 },
+};
+
+static const MCell ML10_s3[] = {
+    { "main", "p", "int*", "3000", "2980", 0 },
+    { "main", "h", "int*", "3008", "->block", 1 },
+    { "heap", "block", "int", "9000", "5", 1 },
+};
+
+static const MCell ML10_s4[] = {
+    { "main", "p", "int*", "3000", "2980", 0 },
+    { "main", "h", "int*", "3008", "9000", 1 },
+};
+
+static const MCell ML10_s5[] = {
+    { "main", "p", "int*", "3000", "2980", 0 },
+    { "main", "h", "int*", "3008", "9000", 0 },
+};
+
+static const MStep ML10_steps[] = {
+    { 2, "main calls bad(). local lives in bad's stack frame.", 2, ML10_s0 },
+    { 3, "return &local hands back the address of local: 2980.", 2, ML10_s1 },
+    { 6, "bad's frame is gone, but p still holds 2980, where local used to be. p is dangling: *p is undefined behaviour. Never return the address of a local.", 1, ML10_s2 },
+    { 7, "new int(5) makes an int on the heap, and h points at it.", 3, ML10_s3 },
+    { 8, "delete frees the block, but h still holds 9000. Set h = nullptr after a delete so it can't be used by mistake.", 2, ML10_s4 },
+    { 9, "Use after delete: this writes into memory that may now belong to something else. Deleting h a second time (a double delete) is just as bad.", 2, ML10_s5 },
+};
+
+static const char* const ML11_code[] = {
+    "int square(int n) { return n * n; }",
+    "int twice(int n) { return n * 2; }",
+    "int main() {",
+    "    int (*f)(int) = square;",
+    "    int a = f(4);",
+    "    f = twice;",
+    "    int b = f(4);",
+    "}",
+};
+
+static const MCell ML11_s0[] = {
+    { "main", "f", "int(*)(int)", "3000", "&square", 1 },
+};
+
+static const MCell ML11_s1[] = {
+    { "main", "f", "int(*)(int)", "3000", "&square", 0 },
+    { "main", "a", "int", "3008", "?", 0 },
+    { "square", "n", "int", "2980", "4", 1 },
+};
+
+static const MCell ML11_s2[] = {
+    { "main", "f", "int(*)(int)", "3000", "&square", 0 },
+    { "main", "a", "int", "3008", "16", 1 },
+};
+
+static const MCell ML11_s3[] = {
+    { "main", "f", "int(*)(int)", "3000", "&twice", 1 },
+    { "main", "a", "int", "3008", "16", 0 },
+};
+
+static const MCell ML11_s4[] = {
+    { "main", "f", "int(*)(int)", "3000", "&twice", 0 },
+    { "main", "a", "int", "3008", "16", 0 },
+    { "main", "b", "int", "3012", "8", 1 },
+};
+
+static const MStep ML11_steps[] = {
+    { 4, "f holds the address of square's code. The code isn't on the stack, so there's no arrow, just its name.", 1, ML11_s0 },
+    { 1, "f(4) calls whatever f points at: square, with n = 4.", 3, ML11_s1 },
+    { 5, "square returns 16 into a.", 2, ML11_s2 },
+    { 6, "Now f points at twice instead. Same type, so it's allowed.", 2, ML11_s3 },
+    { 7, "The same call, f(4), now runs twice: b is 8. This is how one function can be handed different behaviour, like qsort's compare.", 3, ML11_s4 },
+};
+
+static const char* const ML12_code[] = {
+    "struct Node { int data; Node *next; };",
+    "Node *head = new Node{1, nullptr};",
+    "head->next = new Node{2, nullptr};",
+    "head->next->next = new Node{3, nullptr};",
+    "Node *cur = head;",
+    "while (cur != nullptr)",
+    "    cur = cur->next;",
+};
+
+static const MCell ML12_s0[] = {
+    { "main", "head", "Node*", "3000", "->n1.data", 1 },
+    { "heap", "n1.data", "int", "9000", "1", 1 },
+    { "heap", "n1.next", "Node*", "9008", "nullptr", 1 },
+};
+
+static const MCell ML12_s1[] = {
+    { "main", "head", "Node*", "3000", "->n1.data", 0 },
+    { "heap", "n1.data", "int", "9000", "1", 0 },
+    { "heap", "n1.next", "Node*", "9008", "->n2.data", 1 },
+    { "heap", "n2.data", "int", "9016", "2", 1 },
+    { "heap", "n2.next", "Node*", "9024", "nullptr", 1 },
+};
+
+static const MCell ML12_s2[] = {
+    { "main", "head", "Node*", "3000", "->n1.data", 0 },
+    { "heap", "n1.data", "int", "9000", "1", 0 },
+    { "heap", "n1.next", "Node*", "9008", "->n2.data", 0 },
+    { "heap", "n2.data", "int", "9016", "2", 0 },
+    { "heap", "n2.next", "Node*", "9024", "->n3.data", 1 },
+    { "heap", "n3.data", "int", "9032", "3", 1 },
+    { "heap", "n3.next", "Node*", "9040", "nullptr", 1 },
+};
+
+static const MCell ML12_s3[] = {
+    { "main", "head", "Node*", "3000", "->n1.data", 0 },
+    { "main", "cur", "Node*", "3008", "->n1.data", 1 },
+    { "heap", "n1.data", "int", "9000", "1", 0 },
+    { "heap", "n1.next", "Node*", "9008", "->n2.data", 0 },
+    { "heap", "n2.data", "int", "9016", "2", 0 },
+    { "heap", "n2.next", "Node*", "9024", "->n3.data", 0 },
+    { "heap", "n3.data", "int", "9032", "3", 0 },
+    { "heap", "n3.next", "Node*", "9040", "nullptr", 0 },
+};
+
+static const MCell ML12_s4[] = {
+    { "main", "head", "Node*", "3000", "->n1.data", 0 },
+    { "main", "cur", "Node*", "3008", "->n2.data", 1 },
+    { "heap", "n1.data", "int", "9000", "1", 0 },
+    { "heap", "n1.next", "Node*", "9008", "->n2.data", 0 },
+    { "heap", "n2.data", "int", "9016", "2", 0 },
+    { "heap", "n2.next", "Node*", "9024", "->n3.data", 0 },
+    { "heap", "n3.data", "int", "9032", "3", 0 },
+    { "heap", "n3.next", "Node*", "9040", "nullptr", 0 },
+};
+
+static const MCell ML12_s5[] = {
+    { "main", "head", "Node*", "3000", "->n1.data", 0 },
+    { "main", "cur", "Node*", "3008", "->n3.data", 1 },
+    { "heap", "n1.data", "int", "9000", "1", 0 },
+    { "heap", "n1.next", "Node*", "9008", "->n2.data", 0 },
+    { "heap", "n2.data", "int", "9016", "2", 0 },
+    { "heap", "n2.next", "Node*", "9024", "->n3.data", 0 },
+    { "heap", "n3.data", "int", "9032", "3", 0 },
+    { "heap", "n3.next", "Node*", "9040", "nullptr", 0 },
+};
+
+static const MCell ML12_s6[] = {
+    { "main", "head", "Node*", "3000", "->n1.data", 0 },
+    { "main", "cur", "Node*", "3008", "nullptr", 1 },
+    { "heap", "n1.data", "int", "9000", "1", 0 },
+    { "heap", "n1.next", "Node*", "9008", "->n2.data", 0 },
+    { "heap", "n2.data", "int", "9016", "2", 0 },
+    { "heap", "n2.next", "Node*", "9024", "->n3.data", 0 },
+    { "heap", "n3.data", "int", "9032", "3", 0 },
+    { "heap", "n3.next", "Node*", "9040", "nullptr", 0 },
+};
+
+static const MStep ML12_steps[] = {
+    { 2, "The first node is made on the heap. head points at it, and its next is nullptr: the list ends here.", 3, ML12_s0 },
+    { 3, "A second node, linked from the first one's next.", 5, ML12_s1 },
+    { 4, "And a third. Nodes don't have to be next to each other: only the arrows link them.", 7, ML12_s2 },
+    { 5, "cur starts at the first node. Use a separate cur: moving head would lose the start of the list.", 8, ML12_s3 },
+    { 7, "cur = cur->next follows the arrow out of the node cur is on, to the second node.", 8, ML12_s4 },
+    { 7, "And on to the third.", 8, ML12_s5 },
+    { 7, "The third node's next is nullptr, so cur becomes nullptr and the loop stops. Every node was visited once.", 8, ML12_s6 },
+};
+
+static const char* const ML13_code[] = {
+    "struct Node { int data; Node *prev, *next; };",
+    "Node *head = new Node{2, nullptr, nullptr};",
+    "Node *n = new Node{1, nullptr, nullptr};",
+    "n->next = head;",
+    "head->prev = n;",
+    "head = n;",
+};
+
+static const MCell ML13_s0[] = {
+    { "main", "head", "Node*", "3000", "->old.data", 1 },
+    { "heap", "old.data", "int", "9000", "2", 1 },
+    { "heap", "old.prev", "Node*", "9008", "nullptr", 1 },
+    { "heap", "old.next", "Node*", "9016", "nullptr", 1 },
+};
+
+static const MCell ML13_s1[] = {
+    { "main", "head", "Node*", "3000", "->old.data", 0 },
+    { "main", "n", "Node*", "3008", "->nw.data", 1 },
+    { "heap", "old.data", "int", "9000", "2", 0 },
+    { "heap", "old.prev", "Node*", "9008", "nullptr", 0 },
+    { "heap", "old.next", "Node*", "9016", "nullptr", 0 },
+    { "heap", "nw.data", "int", "9032", "1", 1 },
+    { "heap", "nw.prev", "Node*", "9040", "nullptr", 1 },
+    { "heap", "nw.next", "Node*", "9048", "nullptr", 1 },
+};
+
+static const MCell ML13_s2[] = {
+    { "main", "head", "Node*", "3000", "->old.data", 0 },
+    { "main", "n", "Node*", "3008", "->nw.data", 0 },
+    { "heap", "old.data", "int", "9000", "2", 0 },
+    { "heap", "old.prev", "Node*", "9008", "nullptr", 0 },
+    { "heap", "old.next", "Node*", "9016", "nullptr", 0 },
+    { "heap", "nw.data", "int", "9032", "1", 0 },
+    { "heap", "nw.prev", "Node*", "9040", "nullptr", 0 },
+    { "heap", "nw.next", "Node*", "9048", "->old.data", 1 },
+};
+
+static const MCell ML13_s3[] = {
+    { "main", "head", "Node*", "3000", "->old.data", 0 },
+    { "main", "n", "Node*", "3008", "->nw.data", 0 },
+    { "heap", "old.data", "int", "9000", "2", 0 },
+    { "heap", "old.prev", "Node*", "9008", "->nw.data", 1 },
+    { "heap", "old.next", "Node*", "9016", "nullptr", 0 },
+    { "heap", "nw.data", "int", "9032", "1", 0 },
+    { "heap", "nw.prev", "Node*", "9040", "nullptr", 0 },
+    { "heap", "nw.next", "Node*", "9048", "->old.data", 0 },
+};
+
+static const MCell ML13_s4[] = {
+    { "main", "head", "Node*", "3000", "->nw.data", 1 },
+    { "main", "n", "Node*", "3008", "->nw.data", 0 },
+    { "heap", "old.data", "int", "9000", "2", 0 },
+    { "heap", "old.prev", "Node*", "9008", "->nw.data", 0 },
+    { "heap", "old.next", "Node*", "9016", "nullptr", 0 },
+    { "heap", "nw.data", "int", "9032", "1", 0 },
+    { "heap", "nw.prev", "Node*", "9040", "nullptr", 0 },
+    { "heap", "nw.next", "Node*", "9048", "->old.data", 0 },
+};
+
+static const MStep ML13_steps[] = {
+    { 2, "A list with one node. Its prev and next are both nullptr.", 4, ML13_s0 },
+    { 3, "The new node is made, but it isn't in the list yet: nothing in the list points at it.", 8, ML13_s1 },
+    { 4, "1: the new node's next points at the old first node.", 8, ML13_s2 },
+    { 5, "2: the old first node's prev points back at the new one. Do this before moving head, while head still points at the old node. (If the list was empty, skip it.)", 8, ML13_s3 },
+    { 6, "3: head moves to the new node. Its prev stays nullptr, since nothing comes before it. The list is 1 <-> 2.", 8, ML13_s4 },
+};
+
+static const char* const ML14_code[] = {
+    "class Point {",
+    "public:",
+    "    int x, y;",
+    "    void move(int dx) { x += dx; }",
+    "};",
+    "int main() {",
+    "    Point p;",
+    "    p.x = 1; p.y = 2;",
+    "    p.move(5);",
+    "}",
+};
+
+static const MCell ML14_s0[] = {
+    { "main", "p.x", "int", "3000", "?", 1 },
+    { "main", "p.y", "int", "3004", "?", 1 },
+};
+
+static const MCell ML14_s1[] = {
+    { "main", "p.x", "int", "3000", "1", 1 },
+    { "main", "p.y", "int", "3004", "2", 1 },
+};
+
+static const MCell ML14_s2[] = {
+    { "main", "p.x", "int", "3000", "1", 0 },
+    { "main", "p.y", "int", "3004", "2", 0 },
+    { "Point::move", "this", "Point*", "2980", "->p.x", 1 },
+    { "Point::move", "dx", "int", "2988", "5", 1 },
+};
+
+static const MCell ML14_s3[] = {
+    { "main", "p.x", "int", "3000", "6", 1 },
+    { "main", "p.y", "int", "3004", "2", 0 },
+    { "Point::move", "this", "Point*", "2980", "->p.x", 0 },
+    { "Point::move", "dx", "int", "2988", "5", 0 },
+};
+
+static const MCell ML14_s4[] = {
+    { "main", "p.x", "int", "3000", "6", 0 },
+    { "main", "p.y", "int", "3004", "2", 0 },
+};
+
+static const MStep ML14_steps[] = {
+    { 7, "p is made on the stack. Its members haven't been set yet, so they hold rubbish.", 2, ML14_s0 },
+    { 8, "The dot reaches a member of an object.", 2, ML14_s1 },
+    { 4, "p.move(5) makes a frame for move. this holds p's address, and dx is 5.", 4, ML14_s2 },
+    { 4, "x inside a method means this->x: p's x. It becomes 6.", 4, ML14_s3 },
+    { 9, "move returns and its frame is gone, but the change stays: it was made to p itself, through this.", 2, ML14_s4 },
+};
+
+static const char* const ML15_code[] = {
+    "class Point {",
+    "    int x, y;",
+    "public:",
+    "    Point() : x(0), y(0) {}",
+    "    Point(int a, int b) : x(a), y(b) {}",
+    "};",
+    "int main() {",
+    "    Point o;",
+    "    Point p(3, 4);",
+    "}",
+};
+
+static const MCell ML15_s0[] = {
+    { "main", "o.x", "int", "3000", "0", 1 },
+    { "main", "o.y", "int", "3004", "0", 1 },
+    { "Point()", "this", "Point*", "2980", "->o.x", 1 },
+};
+
+static const MCell ML15_s1[] = {
+    { "main", "o.x", "int", "3000", "0", 0 },
+    { "main", "o.y", "int", "3004", "0", 0 },
+};
+
+static const MCell ML15_s2[] = {
+    { "main", "o.x", "int", "3000", "0", 0 },
+    { "main", "o.y", "int", "3004", "0", 0 },
+    { "main", "p.x", "int", "3008", "3", 1 },
+    { "main", "p.y", "int", "3012", "4", 1 },
+    { "Point(int, int)", "this", "Point*", "2980", "->p.x", 1 },
+    { "Point(int, int)", "a", "int", "2988", "3", 1 },
+    { "Point(int, int)", "b", "int", "2992", "4", 1 },
+};
+
+static const MCell ML15_s3[] = {
+    { "main", "o.x", "int", "3000", "0", 0 },
+    { "main", "o.y", "int", "3004", "0", 0 },
+    { "main", "p.x", "int", "3008", "3", 0 },
+    { "main", "p.y", "int", "3012", "4", 0 },
+};
+
+static const MStep ML15_steps[] = {
+    { 4, "Point o; with no arguments runs the default constructor. this points at o, and the initialiser list sets x and y to 0.", 3, ML15_s0 },
+    { 8, "o is ready.", 2, ML15_s1 },
+    { 5, "Point p(3, 4) has two ints, so the other constructor runs: x(a) and y(b) copy them in.", 7, ML15_s2 },
+    { 9, "Both objects are set up. Which constructor runs depends on the arguments, the same as overloaded functions.", 4, ML15_s3 },
+};
+
+static const char* const ML16_code[] = {
+    "class Person {",
+    "public:",
+    "    char *name;",
+    "    Person(const char *n) {",
+    "        name = new char[4];",
+    "        strcpy(name, n);",
+    "    }",
+    "};",
+    "int main() {",
+    "    Person a(\"Ann\");",
+    "    Person b = a;",
+    "    b.name[0] = 'D';",
+    "}",
+};
+
+static const MCell ML16_s0[] = {
+    { "main", "a.name", "char*", "3000", "->buf", 1 },
+    { "heap", "buf", "char[4]", "9000", "\"Ann\"", 1 },
+};
+
+static const MCell ML16_s1[] = {
+    { "main", "a.name", "char*", "3000", "->buf", 0 },
+    { "main", "b.name", "char*", "3008", "->buf", 1 },
+    { "heap", "buf", "char[4]", "9000", "\"Ann\"", 0 },
+};
+
+static const MCell ML16_s2[] = {
+    { "main", "a.name", "char*", "3000", "->buf", 0 },
+    { "main", "b.name", "char*", "3008", "->buf", 0 },
+    { "heap", "buf", "char[4]", "9000", "\"Dnn\"", 1 },
+};
+
+static const MCell ML16_s3[] = {
+    { "main", "a.name", "char*", "3000", "->buf", 0 },
+    { "main", "b.name", "char*", "3008", "->buf2", 1 },
+    { "heap", "buf", "char[4]", "9000", "\"Ann\"", 0 },
+    { "heap", "buf2", "char[4]", "9016", "\"Ann\"", 1 },
+};
+
+static const MStep ML16_steps[] = {
+    { 10, "a's constructor makes a char array on the heap and copies \"Ann\" into it. a.name points at it.", 2, ML16_s0 },
+    { 11, "Person b = a uses the default copy constructor. b.name gets the same address as a.name, so both point at one string. That's a shallow copy.", 3, ML16_s1 },
+    { 12, "Changing b's name changes a's too. And if Person had a destructor that deletes name, the same block would be deleted twice.", 3, ML16_s2 },
+    { 11, "The fix: a copy constructor that makes a deep copy, with its own new char[4] and strcpy. Then each object has its own string.", 4, ML16_s3 },
+};
+
+static const char* const ML17_code[] = {
+    "class Counter {",
+    "    int id;",
+    "public:",
+    "    static int count;",
+    "    Counter() { count++; id = count; }",
+    "};",
+    "int Counter::count = 0;",
+    "int main() {",
+    "    Counter a;",
+    "    Counter b;",
+    "}",
+};
+
+static const MCell ML17_s0[] = {
+    { "static data", "count", "int", "500", "0", 1 },
+};
+
+static const MCell ML17_s1[] = {
+    { "static data", "count", "int", "500", "1", 1 },
+    { "main", "a.id", "int", "3000", "1", 1 },
+};
+
+static const MCell ML17_s2[] = {
+    { "static data", "count", "int", "500", "2", 1 },
+    { "main", "a.id", "int", "3000", "1", 0 },
+    { "main", "b.id", "int", "3004", "2", 1 },
+};
+
+static const MCell ML17_s3[] = {
+    { "static data", "count", "int", "500", "2", 0 },
+    { "main", "a.id", "int", "3000", "1", 0 },
+    { "main", "b.id", "int", "3004", "2", 0 },
+};
+
+static const MStep ML17_steps[] = {
+    { 7, "count is static, so it lives outside every object, and exists before any object is made.", 1, ML17_s0 },
+    { 9, "Making a runs the constructor: count goes up to 1, and a's own id is set to 1.", 2, ML17_s1 },
+    { 10, "b gets its own id, 2, but there's still only one count, which both objects share.", 3, ML17_s2 },
+    { 11, "id is private: a.id in main wouldn't compile. count is public, so main can read it as Counter::count. A static method can't use id, since it isn't called on any object.", 3, ML17_s3 },
+};
+
+static const char* const ML18_code[] = {
+    "class Buffer {",
+    "    int *data;",
+    "public:",
+    "    Buffer() { data = new int[3]; }",
+    "    ~Buffer() { delete[] data; }",
+    "};",
+    "int main() {",
+    "    {",
+    "        Buffer b;",
+    "    }",
+    "}",
+};
+
+static const MCell ML18_s0[] = {
+    { "main", "b.data", "int*", "3000", "->arr", 1 },
+    { "Buffer", "this", "Buffer*", "2980", "->b.data", 1 },
+    { "heap", "arr", "int[3]", "9000", "? ? ?", 1 },
+};
+
+static const MCell ML18_s1[] = {
+    { "main", "b.data", "int*", "3000", "->arr", 0 },
+    { "heap", "arr", "int[3]", "9000", "? ? ?", 0 },
+};
+
+static const MCell ML18_s2[] = {
+    { "main", "b.data", "int*", "3000", "9000", 1 },
+    { "~Buffer", "this", "Buffer*", "2980", "->b.data", 1 },
+};
+
+static const MCell ML18_s3[] = {
+    { 0 }
+};
+
+static const MStep ML18_steps[] = {
+    { 4, "Buffer b; runs the constructor, which makes an array of 3 ints on the heap.", 3, ML18_s0 },
+    { 9, "b is ready, and owns the array.", 2, ML18_s1 },
+    { 5, "At the closing brace on line 10, b goes out of scope and ~Buffer runs by itself. delete[] (not delete, since it was new int[3]) frees the array.", 2, ML18_s2 },
+    { 11, "b and its array are both gone, so nothing leaked. Without the destructor, every Buffer made would leak its array.", 0, ML18_s3 },
+};
+
+static const char* const ML19_code[] = {
+    "class Point {",
+    "public:",
+    "    int x, y;",
+    "    Point() : x(0), y(0) {}",
+    "};",
+    "int main() {",
+    "    Point a[2];",
+    "    a[1].x = 5;",
+    "    Point *p = new Point[2];",
+    "    p[0].y = 7;",
+    "    delete[] p;",
+    "}",
+};
+
+static const MCell ML19_s0[] = {
+    { "main", "a[0].x", "int", "3000", "0", 1 },
+    { "main", "a[0].y", "int", "3004", "0", 1 },
+    { "main", "a[1].x", "int", "3008", "0", 1 },
+    { "main", "a[1].y", "int", "3012", "0", 1 },
+};
+
+static const MCell ML19_s1[] = {
+    { "main", "a[0].x", "int", "3000", "0", 0 },
+    { "main", "a[0].y", "int", "3004", "0", 0 },
+    { "main", "a[1].x", "int", "3008", "5", 1 },
+    { "main", "a[1].y", "int", "3012", "0", 0 },
+};
+
+static const MCell ML19_s2[] = {
+    { "main", "a[0].x", "int", "3000", "0", 0 },
+    { "main", "a[0].y", "int", "3004", "0", 0 },
+    { "main", "a[1].x", "int", "3008", "5", 0 },
+    { "main", "a[1].y", "int", "3012", "0", 0 },
+    { "main", "p", "Point*", "3016", "->hp[0].x", 1 },
+    { "heap", "hp[0].x", "int", "9000", "0", 1 },
+    { "heap", "hp[0].y", "int", "9004", "0", 1 },
+    { "heap", "hp[1].x", "int", "9008", "0", 1 },
+    { "heap", "hp[1].y", "int", "9012", "0", 1 },
+};
+
+static const MCell ML19_s3[] = {
+    { "main", "a[0].x", "int", "3000", "0", 0 },
+    { "main", "a[0].y", "int", "3004", "0", 0 },
+    { "main", "a[1].x", "int", "3008", "5", 0 },
+    { "main", "a[1].y", "int", "3012", "0", 0 },
+    { "main", "p", "Point*", "3016", "->hp[0].x", 0 },
+    { "heap", "hp[0].x", "int", "9000", "0", 0 },
+    { "heap", "hp[0].y", "int", "9004", "7", 1 },
+    { "heap", "hp[1].x", "int", "9008", "0", 0 },
+    { "heap", "hp[1].y", "int", "9012", "0", 0 },
+};
+
+static const MCell ML19_s4[] = {
+    { "main", "a[0].x", "int", "3000", "0", 0 },
+    { "main", "a[0].y", "int", "3004", "0", 0 },
+    { "main", "a[1].x", "int", "3008", "5", 0 },
+    { "main", "a[1].y", "int", "3012", "0", 0 },
+    { "main", "p", "Point*", "3016", "9000", 1 },
+};
+
+static const MStep ML19_steps[] = {
+    { 7, "Two Points side by side. The default constructor ran for each, so every x and y is 0.", 4, ML19_s0 },
+    { 8, "a[1] is the second Point, and .x is its x.", 4, ML19_s1 },
+    { 9, "new Point[2] makes the array on the heap, running the constructor for each. p points at the first one.", 9, ML19_s2 },
+    { 10, "p[0] is the first Point on the heap, the same as (*p). p[1] would be the next one along.", 9, ML19_s3 },
+    { 11, "delete[] frees the whole heap array. Plain delete p would be a bug here, because the array was made with new[]. a on the stack is freed by itself at the end of main.", 5, ML19_s4 },
+};
+
+static const MLesson MLESSONS[] = {
+    { "C basics", "I/O & types", "Types, casting and integer division", "Every variable has a type, and the type decides how much memory it takes and what an operation does with it. Watch int division throw away the remainder, and how a cast fixes it.", 6, ML0_code, 6, ML0_steps },
+    { "C basics", "Control flow", "Loops and ifs, one pass at a time", "A for loop runs its body while the condition is true, and does the i++ at the end of each pass. Watch i change each time round, and when the if lets sum change.", 6, ML1_code, 9, ML1_steps },
+    { "C basics", "Arrays & 2D arrays", "Arrays: elements side by side", "An array is a row of variables of the same type, one straight after another in memory. a[i] is the element i places from the start: its address is the start plus i times the element size.", 5, ML2_code, 6, ML2_steps },
+    { "C basics", "Strings & \\0", "Strings end with '\\0'", "A C string is an array of chars with a '\\0' after the last letter. Nothing stores its length. printf, strlen and strcpy all just walk along until they hit the '\\0'.", 7, ML3_code, 6, ML3_steps },
+    { "C basics", "Functions & pass by value", "Pass by value: the function gets a copy", "Calling a function makes a new stack frame for its parameters and local variables. Passing by value copies the argument into that frame. Changing the copy doesn't change the original.", 8, ML4_code, 5, ML4_steps },
+    { "Pointers & memory", "Pointers & addresses", "The twin operators: & and *", "Every variable lives at an address in memory. A pointer is a variable that stores one of those addresses. & gives you the address of a variable. * follows a pointer to the variable it points at.", 6, ML5_code, 6, ML5_steps },
+    { "Pointers & memory", "Pointer arithmetic", "Pointer arithmetic: moving along an array", "Adding 1 to a pointer moves it on one element, not one byte. For an int*, that's 4 bytes. This is how the Exam 2 lab functions walk an array without using [].", 6, ML6_code, 6, ML6_steps },
+    { "Pointers & memory", "Pass by pointer", "swap_ints: changing the caller's variables", "C copies every argument into the function. To let a function change your variables, pass their addresses. Inside the function, * follows each address back into main's frame.", 10, ML7_code, 6, ML7_steps },
+    { "Pointers & memory", "Double pointers", "Double pointers: a pointer to a pointer", "A pointer is a variable too, so it has an address, and another pointer can point at it. **pp follows two arrows. *pp is the pointer in the middle, so changing *pp changes where it points.", 6, ML8_code, 6, ML8_steps },
+    { "Pointers & memory", "Dynamic memory", "new, delete and the leak in a loop", "new makes memory on the heap that stays until you delete it, even after the function that made it returns. Watch what happens to each block when p is pointed somewhere else.", 13, ML9_code, 5, ML9_steps },
+    { "Pointers & memory", "Memory bugs", "Dangling pointers and use after delete", "A dangling pointer still holds an address, but the memory there isn't yours any more. Using it might seem to work, print rubbish or crash later. The compiler won't always warn you.", 10, ML10_code, 6, ML10_steps },
+    { "Pointers & memory", "Function pointers", "Function pointers: choosing what to call", "A function's code has an address too. A function pointer holds one, so calling through it runs that function. The type says what the function takes and returns: int (*f)(int) takes an int and returns an int.", 8, ML11_code, 5, ML11_steps },
+    { "Linked lists", "Singly linked list", "A singly linked list, node by node", "Each node holds a value and a pointer to the next node. The last one's next is nullptr. head points at the first node. Walk the list by following next until you reach nullptr.", 7, ML12_code, 7, ML12_steps },
+    { "Linked lists", "Doubly linked list", "Doubly linked list: insert at the beginning", "In a doubly linked list each node points both ways: next to the node after it, prev to the node before. Inserting at the front changes three pointers, in both directions. Do them in the right order, or part of the list is lost.", 6, ML13_code, 5, ML13_steps },
+    { "C++ classes", "Classes & methods", "Objects, methods and this", "An object is its member variables side by side, like a struct. Each object has its own copy of them. A method is called on one object, and gets a hidden pointer to it called this.", 10, ML14_code, 5, ML14_steps },
+    { "C++ classes", "Constructors", "Constructors set an object up", "A constructor runs by itself whenever an object is made, so the object never starts with rubbish in it. The initialiser list (after the :) sets the members before the constructor's body runs.", 10, ML15_code, 4, ML15_steps },
+    { "C++ classes", "Copy constructors", "Shallow copies: two objects, one string", "Copying an object with no copy constructor of your own copies each member exactly. For a pointer, that copies the address, not what it points at. Watch two objects end up sharing one string.", 13, ML16_code, 4, ML16_steps },
+    { "C++ classes", "Access & static", "Private members and static counts", "private members can only be used by the class's own methods. public ones can be used from anywhere. A static member belongs to the class, not to any one object: there's only ever one of it.", 11, ML17_code, 4, ML17_steps },
+    { "C++ classes", "Destructors", "Destructors clean up for you", "A destructor (~ and the class name) runs by itself when an object goes away: at the end of its scope, or on delete. If the object made something with new, its destructor is where to delete it.", 11, ML18_code, 4, ML18_steps },
+    { "C++ classes", "Arrays of objects", "Arrays of objects", "In an array of objects, every element is a whole object, and each one is made by the default constructor. An array made with new[] must be freed with delete[], which runs each object's destructor.", 12, ML19_code, 5, ML19_steps },
+};
+#define NMLESSONS 20
+
+static int memLesson = -1;      /* -1 = the lesson list, otherwise the open lesson */
+static int memStep = 0;         /* 0 = nothing has run yet, k = after step k */
+static float memListScroll = 0;
+static bool memLeakNow = false;       /* does the step on screen have a leaked block? */
+
+static void StartMem(void) { screen = SCR_MEM; memLesson = -1; memStep = 0; memListScroll = 0; }
+
+/* the part of a cell's name before any '.' or '[': "n1.next" belongs to block "n1" */
+static void MemBlockOf(const char* name, char* out, int cap)
+{
+    int i = 0;
+    while (name[i] && name[i] != '.' && name[i] != '[' && i < cap - 1) { out[i] = name[i]; i++; }
+    out[i] = 0;
+}
+
+/* a rounded box with a 1.5px edge (drawn as two filled boxes, so it works on any raylib version) */
+static void MemBox(Rectangle r, float rd, Color fill, Color edge)
+{
+    DrawRectangleRounded(r, rd, 8, edge);
+    DrawRectangleRounded((Rectangle) { r.x + 1.5f, r.y + 1.5f, r.width - 3, r.height - 3 }, rd, 8, fill);
+}
+
+static bool MemIsPtr(const MCell* c) { return c->val[0] == '-' && c->val[1] == '>' && c->val[2]; }
+
+typedef struct { Rectangle box; bool placed; } MPlaced;
+
+static void MemArrow(Vector2* pts, int n, Color col)
+{
+    for (int i = 0; i + 1 < n; i++) DrawLineEx(pts[i], pts[i + 1], 2.2f, col);
+    Vector2 tip = pts[n - 1], from = pts[n - 2];
+    float d = tip.x < from.x ? 1.0f : -1.0f;
+    DrawTriangle(tip, (Vector2) { tip.x + d * 10, tip.y + 6 }, (Vector2) { tip.x + d * 10, tip.y - 6 }, col);
+    DrawTriangle(tip, (Vector2) { tip.x + d * 10, tip.y - 6 }, (Vector2) { tip.x + d * 10, tip.y + 6 }, col);
+}
+
+static void DrawMemView(const MStep* st, Rectangle area, bool started)
+{
+    Panel(area, 0.03f, SURF, BORDER);
+    float pad = 16, heapW = 176, gutter = 64;
+    float stackX = area.x + pad, stackW = area.width - 2 * pad - heapW - gutter;
+    float heapX = stackX + stackW + gutter;
+    Txt(fCode, "STACK  (newest on top)", stackX, area.y + 12, 13, DIM);
+    Txt(fCode, "HEAP", heapX, area.y + 12, 13, DIM);
+    if (!started || !st) {
+        CenterTxt(fReg, "Nothing has run yet.", area.x + area.width / 2, area.y + area.height / 2 - 24, 20, DIM);
+        CenterTxt(fReg, "Press Next (or the Right arrow) to run the first line.", area.x + area.width / 2, area.y + area.height / 2 + 6, 15, DIM);
+        return;
+    }
+    const MCell* cells = st->cells;
+    int n = st->n;
+    MPlaced pl[32];
+    memset(pl, 0, sizeof pl);
+    if (n > 32) n = 32;
+
+    /* frames in the order they first appear; drawn newest first */
+    const char* frames[8];
+    int nf = 0;
+    for (int i = 0; i < n; i++) {
+        if (!strcmp(cells[i].area, "heap")) continue;
+        int k; for (k = 0; k < nf; k++) if (!strcmp(frames[k], cells[i].area)) break;
+        if (k == nf && nf < 8) frames[nf++] = cells[i].area;
+    }
+    int rows = 0;
+    for (int i = 0; i < n; i++) if (strcmp(cells[i].area, "heap")) rows++;
+    float rowH = 42, headH = 28, fgap = 12;
+    float need = rows * rowH + nf * (headH + fgap);
+    float availH = area.height - 56;
+    if (need > availH) rowH *= availH / need;
+    float y = area.y + 40;
+    for (int fi = nf - 1; fi >= 0; fi--) {
+        int cnt = 0;
+        for (int i = 0; i < n; i++) if (!strcmp(cells[i].area, frames[fi])) cnt++;
+        Rectangle fr = { stackX, y, stackW, headH + cnt * rowH + 6 };
+        MemBox(fr, 0.06f, (Color) { 26, 31, 46, 255 }, Fade(ACCENTS[lang], 0.55f));
+        char lab[96];
+        snprintf(lab, sizeof lab, strpbrk(frames[fi], "( ") ? "%s" : "%s()", frames[fi]);
+        Txt(fBold, lab, fr.x + 12, y + 4, 16, TXT);
+        float ry = y + headH;
+        for (int i = 0; i < n; i++) {
+            if (strcmp(cells[i].area, frames[fi])) continue;
+            const MCell* c = &cells[i];
+            Txt(fBold, c->name, fr.x + 14, ry + 2, 15, TXT);
+            char meta[96]; snprintf(meta, sizeof meta, "%s  @%s", c->type, c->addr);
+            TxtFit(fCode, meta, fr.x + 14, ry + 20, 11, stackW - 150, DIM);
+            Rectangle vb = { fr.x + fr.width - 118, ry + 3, 104, rowH - 8 };
+            MemBox(vb, 0.25f, c->changed ? (Color) { 70, 52, 30, 255 } : SURF2, c->changed ? COL_AMBER_M : BORDER);
+            if (MemIsPtr(c)) CenterTxt(fCode, "pointer", vb.x + vb.width / 2, vb.y + vb.height / 2 - 8, 14, DIM);
+            else CenterFit(fCode, c->val, vb.x + vb.width / 2, vb.y + vb.height / 2 - 8, 15, vb.width - 10, TXT);
+            pl[i].box = vb; pl[i].placed = true;
+            ry += rowH;
+        }
+        y += fr.height + fgap;
+    }
+
+    /* heap blocks */
+    float hy = area.y + 40;
+    float hrow = 66;
+    int nh = 0; for (int i = 0; i < n; i++) if (!strcmp(cells[i].area, "heap")) nh++;
+    if (nh * hrow > availH) hrow *= availH / (nh * hrow);
+    bool leaked[32] = { false };
+    memLeakNow = false;
+    for (int i = 0; i < n; i++) {
+        if (strcmp(cells[i].area, "heap")) continue;
+        char bn[64]; MemBlockOf(cells[i].name, bn, sizeof bn);
+        bool hit = false;
+        for (int j = 0; j < n && !hit; j++) {
+            if (!MemIsPtr(&cells[j])) continue;
+            char tn[64]; MemBlockOf(cells[j].val + 2, tn, sizeof tn);
+            if (!strcmp(tn, bn)) hit = true;
+        }
+        leaked[i] = !hit;
+        if (!hit) memLeakNow = true;
+    }
+    for (int i = 0; i < n; i++) {
+        if (strcmp(cells[i].area, "heap")) continue;
+        const MCell* c = &cells[i];
+        char meta[96]; snprintf(meta, sizeof meta, "%s  %s  @%s", c->name, c->type, c->addr);
+        TxtFit(fCode, meta, heapX, hy, 11, heapW, leaked[i] ? BAD : DIM);
+        Rectangle b = { heapX, hy + 17, heapW, hrow - 26 };
+        Color edge = leaked[i] ? BAD : (c->changed ? COL_AMBER_M : BORDER);
+        MemBox(b, 0.25f, leaked[i] ? (Color) { 62, 28, 36, 255 } : (c->changed ? (Color) { 70, 52, 30, 255 } : SURF2), edge);
+        CenterFit(fCode, c->val, b.x + b.width / 2 - (leaked[i] ? 22 : 0), b.y + b.height / 2 - 8, 15, b.width - (leaked[i] ? 66 : 14), TXT);
+        if (leaked[i]) Txt(fBold, "LEAKED", b.x + b.width - 62, b.y + b.height / 2 - 7, 12, BAD);
+        pl[i].box = b; pl[i].placed = true;
+        hy += hrow;
+    }
+
+    /* arrows: one colour per pointer */
+    static const Color AC[4] = { { 52, 199, 120, 255 }, { 100, 170, 255, 255 }, { 190, 140, 255, 255 }, { 255, 180, 84, 255 } };
+    int ai = 0, lane = 0;
+    for (int i = 0; i < n; i++) {
+        if (!MemIsPtr(&cells[i]) || !pl[i].placed) continue;
+        int t = -1;
+        for (int j = 0; j < n && t < 0; j++) if (j != i && !strcmp(cells[j].name, cells[i].val + 2)) t = j;
+        if (t < 0) {
+            char tn[64]; MemBlockOf(cells[i].val + 2, tn, sizeof tn);
+            for (int j = 0; j < n && t < 0; j++) { char bn[64]; MemBlockOf(cells[j].name, bn, sizeof bn); if (j != i && !strcmp(bn, tn)) t = j; }
+        }
+        Color col = AC[ai++ % 4];
+        if (t < 0 || !pl[t].placed) {       /* null, or points at something not on screen */
+            Vector2 a = { pl[i].box.x + pl[i].box.width, pl[i].box.y + pl[i].box.height / 2 };
+            Txt(fCode, strcmp(cells[i].val + 2, "null") && strcmp(cells[i].val + 2, "NULL") ? "?" : "NULL", a.x - 86, a.y - 8, 13, Fade(col, 0.9f));
+            continue;
+        }
+        Vector2 a = { pl[i].box.x + pl[i].box.width, pl[i].box.y + pl[i].box.height / 2 };
+        bool toHeap = !strcmp(cells[t].area, "heap");
+        if (toHeap) {
+            Vector2 b = { pl[t].box.x, pl[t].box.y + pl[t].box.height / 2 };
+            float mx = stackX + stackW + 12 + (lane++ % 3) * 12;
+            Vector2 pts[4] = { a, { mx, a.y }, { mx, b.y }, b };
+            MemArrow(pts, 4, col);
+        }
+        else {                            /* pointing at another stack cell: loop round the right edge */
+            Vector2 b = { pl[t].box.x + pl[t].box.width, pl[t].box.y + pl[t].box.height / 2 };
+            float mx = a.x + 8 + (lane++ % 3) * 9;
+            Vector2 pts[4] = { a, { mx, a.y }, { mx, b.y }, b };
+            if (fabsf(a.y - b.y) < 2) { pts[1] = (Vector2){ a.x, a.y }; { Vector2 lp[4] = { { a.x + 14, a.y + 14 }, { mx, a.y + 14 }, { mx, b.y }, b }; MemArrow(lp, 4, col); } }
+            else MemArrow(pts, 4, col);
+        }
+    }
+}
+
+static void DrawMemList(void)
+{
+    TopBar();
+    Txt(fBold, "Memory Lab", 40, 14, 32, TXT);
+    Txt(fReg, "Watch the stack, the heap and every pointer change, one line of code at a time.", 40, 46, 15, DIM);
+    if (Button((Rectangle) { W - 140, 16, 110, 40 }, "Menu", SURF2, 17)) GoMenu();
+    float wheel = GetMouseWheelMove();
+    memListScroll -= wheel * 50;
+    int cols = 2;
+    float cw = (W - 80 - 20) / (float)cols, chh = 78, top = 92;
+    int rowsN = (NMLESSONS + cols - 1) / cols;
+    float maxScroll = top + rowsN * (chh + 12) - H + 30;
+    if (maxScroll < 0) maxScroll = 0;
+    if (memListScroll > maxScroll) memListScroll = maxScroll;
+    if (memListScroll < 0) memListScroll = 0;
+    ScissorT(0, 73, W, H - 73);
+    const char* lastTrack = "";
+    float y = top - memListScroll;
+    for (int i = 0; i < NMLESSONS; ) {
+        if (strcmp(lastTrack, MLESSONS[i].track)) {
+            lastTrack = MLESSONS[i].track;
+            Txt(fBold, MLESSONS[i].track, 40, y, 14, ACCENTS[lang]);
+            y += 26;
+        }
+        int j = i, c = 0;
+        while (j < NMLESSONS && !strcmp(MLESSONS[j].track, lastTrack)) {
+            Rectangle r = { 40 + c * (cw + 20), y, cw, chh };
+            bool hov = CheckCollisionPointRec(GetMousePosition(), r) && r.y + r.height > 73;
+            if (hov) hand = true;
+            Panel(r, 0.12f, hov ? SURF2 : SURF, hov ? ACCENTS[lang] : BORDER);
+            TxtFit(fBold, MLESSONS[j].topic, r.x + 18, r.y + 12, 19, cw - 36, TXT);
+            TxtFit(fReg, MLESSONS[j].title, r.x + 18, r.y + 40, 14, cw - 120, DIM);
+            char info[48]; snprintf(info, sizeof info, "%d steps", MLESSONS[j].ns);
+            Txt(fCode, info, r.x + r.width - 18 - TxtW(fCode, info, 12), r.y + 44, 12, DIM);
+            if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { memLesson = j; memStep = 0; }
+            c++;
+            if (c == cols) { c = 0; y += chh + 12; }
+            j++;
+        }
+        if (c) y += chh + 12;
+        y += 10;
+        i = j;
+    }
+    EndScissorMode();
+}
+
+static void DrawMem(void)
+{
+    if (memLesson < 0) { DrawMemList(); return; }
+    const MLesson* L = &MLESSONS[memLesson];
+    TopBar();
+    if (Button((Rectangle) { 24, 16, 110, 40 }, "< Lessons", SURF2, 16)) { memLesson = -1; return; }
+    TxtFit(fBold, L->topic, 152, 12, 26, 600, TXT);
+    TxtFit(fReg, L->title, 152, 44, 14, 700, DIM);
+    char sc[48]; snprintf(sc, sizeof sc, "Step %d / %d", memStep, L->ns);
+    Txt(fBold, sc, W - 24 - TxtW(fBold, sc, 20), 22, 20, ACCENTS[lang]);
+
+    /* code panel */
+    float fs = 15, cwid = MeasureTextEx(fCode, "M", fs, 0).x, lh = 24;
+    Rectangle cp = { 24, 88, 520, 28 + L->nlines * lh };
+    if (cp.height < 200) cp.height = 200;
+    Panel(cp, 0.03f, CODEBG, BORDER);
+    int hl = memStep > 0 ? L->steps[memStep - 1].line : 0;
+    for (int i = 0; i < L->nlines; i++) {
+        float ly = cp.y + 14 + i * lh;
+        if (i + 1 == hl) {
+            DrawRectangle((int)cp.x + 4, (int)ly - 2, (int)cp.width - 8, (int)lh, Fade(ACCENTS[lang], 0.22f));
+            DrawRectangle((int)cp.x + 4, (int)ly - 2, 3, (int)lh, ACCENTS[lang]);
+        }
+        char num[8]; snprintf(num, sizeof num, "%2d", i + 1);
+        DrawTextEx(fCode, num, (Vector2) { cp.x + 14, ly + 1 }, fs - 2, 0, (Color) { 90, 98, 122, 255 });
+        HighlightLine(L->code[i], cp.x + 46, ly, fs, cwid);
+    }
+
+    /* what just happened */
+    float ey = cp.y + cp.height + 14;
+    Rectangle ep = { 24, ey, 520, H - ey - 84 };
+    Panel(ep, 0.05f, SURF, BORDER);
+    Txt(fBold, memStep ? "What just happened" : "About this lesson", ep.x + 18, ep.y + 12, 14, ACCENTS[lang]);
+    const char* msg = memStep ? L->steps[memStep - 1].explain : L->text;
+    ScissorT((int)ep.x, (int)ep.y, (int)ep.width, (int)ep.height);
+    Wrapped(fReg, msg, ep.x + 18, ep.y + 38, ep.width - 36, 15, TXT);
+    EndScissorMode();
+
+    /* memory */
+    DrawMemView(memStep ? &L->steps[memStep - 1] : NULL, (Rectangle) { 560, 88, W - 560 - 24, H - 88 - 84 }, memStep > 0);
+
+    /* controls */
+    float by = H - 66;
+    bool prev = memStep > 0, next = memStep < L->ns;
+    if (Button((Rectangle) { 24, by, 120, 46 }, "Restart", SURF2, 17)) memStep = 0;
+    if (Button((Rectangle) { 160, by, 120, 46 }, "< Prev", prev ? (Color) { 60, 70, 100, 255 } : (Color) { 36, 40, 56, 255 }, 18) && prev) memStep--;
+    if (Button((Rectangle) { 296, by, 150, 46 }, next ? "Next >" : "Done", next ? ACCENTS[lang] : GOOD, 18)) { if (next) memStep++; else memLesson = -1; }
+    if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_SPACE)) { if (next) memStep++; }
+    if (IsKeyPressed(KEY_LEFT) && prev) memStep--;
+    if (IsKeyPressed(KEY_HOME)) memStep = 0;
+    Txt(fReg, "Left / Right arrow keys step through the code.   Amber = changed this step.   Red = leaked.", 470, by + 14, 13, DIM);
+    DrawCompanion(1146, H - 16, 1.1f, memStep == 0 ? MOOD_IDLE : (memLeakNow ? MOOD_SAD : (memStep == L->ns ? MOOD_CHEER : MOOD_THINK)), false);
+}
+
+
+/* ======================================================================
+   YOUR CHARACTER AS A COMPANION, THE LOADING SCREEN, AND SCREEN TRANSITIONS
+   ====================================================================== */
+
+   /* ---- the companion: your equipped character, standing on the screen ----
+      It looks at your mouse, breathes, hops when you get something right, droops
+      a little when you get it wrong, and says something when you click it. */
+typedef struct { float x, y, vx, vy, life; Color c; } CompBit;
+static CompBit compBits[48];
+static char compSay[160];
+static float compSayT = 0, compHop = 0, compCheerT = 0;
+static int compPrevMood = -1, compTipIdx = 0;
+static double compLastDraw = -10;
+
+static const char* COMP_TIPS[] = {
+    "Arrays start at 0, so the last item is n - 1.",
+    "A pointer is just a variable that holds an address.",
+    "Every malloc needs exactly one free.",
+    "Read the code one line at a time, like the computer does.",
+    "= assigns, == compares. Mixing them up is a classic bug.",
+    "Strings in C end with a hidden \\0.",
+    "Stuck? Try the Memory Lab and watch it happen.",
+    "Compile often. Small steps find bugs fast.",
+    "Name things so you can read them next week.",
+    "A function gets a copy of its arguments, unless you pass a pointer.",
+};
+static const char* COMP_CHEER[] = { "Nailed it!", "Yes! That's the one.", "You're on fire!", "Easy for you." };
+static const char* COMP_SAD[] = { "Oof. The explanation below helps.", "So close. Mistakes are how it sticks.", "Shake it off, next one." };
+
+static void CompSay(const char* s, float secs) { snprintf(compSay, sizeof compSay, "%s", s); compSayT = secs; }
+
+static void CompBurst(float x, float y, int n)
+{
+    static const Color pal[5] = { { 255, 214, 90, 255 }, { 120, 220, 255, 255 }, { 190, 140, 255, 255 }, { 120, 235, 150, 255 }, { 255, 130, 150, 255 } };
+    for (int i = 0, made = 0; i < 48 && made < n; i++) {
+        if (compBits[i].life > 0) continue;
+        float a = -PI / 2 + ((float)GetRandomValue(-100, 100) / 100.0f) * 1.1f, sp = 90 + GetRandomValue(0, 150);
+        compBits[i] = (CompBit){ x, y, cosf(a) * sp, sinf(a) * sp, 0.8f + GetRandomValue(0, 50) / 100.0f, pal[GetRandomValue(0, 4)] };
+        made++;
+    }
+}
+
+/* mood: MOOD_IDLE, MOOD_THINK, MOOD_CHEER or MOOD_SAD. `below` puts the speech bubble under the
+   character instead of above (for characters near the top of the screen). */
+static void DrawCompanion(float cx, float footY, float sc, int mood, bool below)
+{
+    double now = GetTime();
+    float dt = GetFrameTime();
+    if (dt > 0.05f) dt = 0.05f;
+    if (now - compLastDraw > 0.3) { compPrevMood = -1; compSayT = 0; compHop = 0; }   /* just appeared */
+    compLastDraw = now;
+
+    if (mood != compPrevMood) {                     /* the mood just changed: react */
+        if (mood == MOOD_CHEER) { compCheerT = 2.2f; CompBurst(cx, footY - 40 * sc, 26); CompSay(COMP_CHEER[GetRandomValue(0, 3)], 2.4f); }
+        else if (mood == MOOD_SAD) CompSay(COMP_SAD[GetRandomValue(0, 2)], 3.0f);
+        compPrevMood = mood;
+    }
+    if (compCheerT > 0) compCheerT -= dt;
+    if (compHop > 0) compHop -= dt * 1.7f;
+    if (compSayT > 0) compSayT -= dt;
+
+    /* where is the mouse? the character turns to look at it */
+    Vector2 m = GetMousePosition();
+    int dir = 0;
+    if (m.x < cx - 90) dir = 1; else if (m.x > cx + 90) dir = 2;
+
+    float jump = 0;
+    if (compHop > 0) jump += sinf((1.0f - compHop) * PI) * 22.0f;
+    if (compCheerT > 0) jump += fabsf(sinf((float)now * 7.0f)) * 12.0f;
+    float breathe = sinf((float)now * 2.2f) * 1.4f, sag = mood == MOOD_SAD ? 3.0f : 0.0f;
+    float fy = footY - jump + breathe * 0.5f + sag;
+
+    DrawPlayer(cx, fy, dir, sc * (mood == MOOD_SAD ? 0.97f : 1.0f), 0);
+
+    float headY = fy - 50 * sc;
+    if (mood == MOOD_SAD) {                         /* a sweat drop */
+        float dy = fmodf((float)now * 14.0f, 14.0f);
+        float sx = cx + 12 * sc, sy = headY + 6 + dy;
+        DrawTriangle((Vector2) { sx, sy - 7 }, (Vector2) { sx - 4, sy }, (Vector2) { sx + 4, sy }, (Color) { 120, 190, 255, 230 });
+        DrawCircleV((Vector2) { sx, sy + 1.5f }, 4, (Color) { 120, 190, 255, 230 });
+    }
+    if (mood == MOOD_THINK && compSayT <= 0) {      /* a thought bubble with a question mark */
+        float bob = sinf((float)now * 2.5f) * 3;
+        DrawCircleV((Vector2) { cx + 14 * sc, headY - 2 + bob }, 3, Fade(WHITE, 0.7f));
+        DrawCircleV((Vector2) { cx + 20 * sc, headY - 12 + bob }, 5, Fade(WHITE, 0.8f));
+        DrawEllipse((int)(cx + 30 * sc), (int)(headY - 30 + bob), 17, 14, Fade(WHITE, 0.92f));
+        CenterTxt(fBold, "?", cx + 30 * sc, headY - 42 + bob, 20, (Color) { 40, 46, 70, 255 });
+    }
+
+    /* confetti */
+    for (int i = 0; i < 48; i++) {
+        CompBit* b = &compBits[i];
+        if (b->life <= 0) continue;
+        b->life -= dt; b->vy += 320 * dt; b->x += b->vx * dt; b->y += b->vy * dt;
+        DrawRectangle((int)b->x, (int)b->y, 5, 5, Fade(b->c, b->life > 0.4f ? 1.0f : b->life / 0.4f));
+    }
+
+    /* click it */
+    Rectangle hit = { cx - 24 * sc, fy - 62 * sc, 48 * sc, 66 * sc };
+    if (CheckCollisionPointRec(m, hit)) {
+        hand = true;
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            compHop = 1.0f;
+            CompBurst(cx, headY, 7);
+            CompSay(COMP_TIPS[compTipIdx++ % (int)(sizeof COMP_TIPS / sizeof * COMP_TIPS)], 4.0f);
+        }
+    }
+
+    /* speech bubble */
+    if (compSayT > 0) {
+        float a = compSayT < 0.4f ? compSayT / 0.4f : 1.0f;
+        float bw = 142, fs = 13;
+        int th = WrapH(fReg, compSay, bw - 22, fs);
+        float bh = th + 18;
+        float bx = cx - bw / 2;
+        if (bx < 8) bx = 8;
+        if (bx + bw > W - 8) bx = W - 8 - bw;
+        float by = below ? footY + 16 : headY - bh - 14;
+        if (by < 6) by = 6;
+        DrawRectangleRounded((Rectangle) { bx, by + 3, bw, bh }, 0.25f, 8, Fade(BLACK, 0.3f * a));
+        DrawRectangleRounded((Rectangle) { bx, by, bw, bh }, 0.25f, 8, Fade((Color) { 245, 247, 252, 255 }, a));
+        if (below) DrawTriangle((Vector2) { cx - 7, by + 1 }, (Vector2) { cx + 7, by + 1 }, (Vector2) { cx, by - 9 }, Fade((Color) { 245, 247, 252, 255 }, a));
+        else       DrawTriangle((Vector2) { cx - 7, by + bh - 1 }, (Vector2) { cx, by + bh + 9 }, (Vector2) { cx + 7, by + bh - 1 }, Fade((Color) { 245, 247, 252, 255 }, a));
+        Wrapped(fReg, compSay, bx + 11, by + 8, bw - 22, fs, Fade((Color) { 30, 34, 54, 255 }, a));
+    }
+}
+
+/* ---- loading screen ----
+   Your character runs along a progress bar and hops over the semicolons while the
+   app "compiles". Click or press any key to skip it. */
+static float bootT = 0;
+static float BootClamp(float x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
+static float BootEase(float x) { x = BootClamp(x); return x * x * (3 - 2 * x); }
+
+static void DrawBoot(void)
+{
+    float dt = GetFrameTime();
+    if (dt > 0.05f) dt = 0.05f;
+    const float TOTAL = 3.6f, RUN = 3.0f;
+    bootT += dt;
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)) bootT = TOTAL;
+    Color accent = ACCENTS[lang];
+    float t = bootT;
+
+    DrawRectangleGradientV(0, 0, W, H, (Color) { 9, 11, 24, 255 }, (Color) { 24, 17, 46, 255 });
+
+    /* falling code */
+    static const char GL[] = "01{}();<>#*&=+[]/\\|";
+    for (int i = 0; i < 40; i++) {
+        float x = i * 30.0f + 8, sp = 36 + (float)((i * 37) % 60), off = (float)((i * 211) % 760);
+        float y = fmodf(t * sp + off, H + 140) - 100;
+        for (int k = 0; k < 7; k++) {
+            char g[2] = { GL[(i * 7 + k * 5 + (int)(t * 2 + k)) % (int)(sizeof GL - 1)], 0 };
+            DrawTextEx(fCode, g, (Vector2) { x, y - k * 18 }, 16, 0, Fade(accent, 0.30f * (1.0f - k / 7.0f)));
+        }
+    }
+    DrawRectangleGradientV(0, 0, W, 130, Fade((Color) { 9, 11, 24, 255 }, 0.9f), Fade((Color) { 9, 11, 24, 255 }, 0));
+
+    /* logo: a badge, then the name popping in letter by letter */
+    const char* name = "CodeQuest";
+    float fs = 68, badge = 86, gap = 24;
+    float total = badge + gap + TxtW(fBold, name, fs);
+    float lx = (W - total) / 2, ly = 168;
+    float pulse = 1.0f + 0.035f * sinf(t * 3.0f);
+    Rectangle br = { lx + badge / 2 - badge * pulse / 2, ly + 8 + badge / 2 - badge * pulse / 2, badge * pulse, badge * pulse };
+    float bin = BootEase(t / 0.5f);
+    DrawRectangleRounded((Rectangle) { br.x - 10, br.y - 10, br.width + 20, br.height + 20 }, 0.3f, 10, Fade(accent, 0.12f * bin));
+    DrawRectangleRounded(br, 0.28f, 10, Fade(accent, bin));
+    CenterTxt(fCode, "</>", br.x + br.width / 2, br.y + br.height / 2 - 14, 28, Fade(WHITE, bin));
+    int nl = (int)strlen(name);
+    for (int i = 0; i < nl; i++) {
+        float loc = BootEase((t - 0.25f - i * 0.07f) / 0.35f);
+        char pre[16] = "", one[2] = { name[i], 0 };
+        memcpy(pre, name, (size_t)i); pre[i] = 0;
+        float x = lx + badge + gap + TxtW(fBold, pre, fs);
+        Txt(fBold, one, x, ly + (1.0f - loc) * 26, fs, Fade(i >= 4 ? accent : TXT, loc));
+    }
+    float sub = BootEase((t - 1.0f) / 0.5f);
+    CenterTxt(fReg, "C  &  C++  ACADEMY", W / 2.0f, 262, 17, Fade(DIM, sub));
+
+    /* the progress bar and the runner */
+    float p = BootClamp(t / RUN);
+    float prog = BootEase(p);
+    Rectangle bar = { W / 2.0f - 300, 458, 600, 18 };
+    DrawRectangleRounded((Rectangle) { bar.x - 3, bar.y - 3, bar.width + 6, bar.height + 6 }, 0.6f, 10, (Color) { 40, 46, 70, 255 });
+    DrawRectangleRounded(bar, 0.6f, 10, (Color) { 14, 17, 30, 255 });
+    float runX = bar.x + 12 + prog * (bar.width - 24);
+    if (prog > 0.01f) DrawRectangleRounded((Rectangle) { bar.x, bar.y, runX - bar.x + 6, bar.height }, 0.6f, 10, accent);
+    static const float semi[3] = { 0.22f, 0.50f, 0.76f };
+    float lift = 0;
+    for (int i = 0; i < 3; i++) {
+        float sx = bar.x + 12 + semi[i] * (bar.width - 24);
+        float dx = runX - sx;
+        if (dx < -46 || dx > 46) { if (dx < 0) CenterTxt(fCode, ";", sx, bar.y - 36, 30, (Color) { 255, 190, 90, 255 }); continue; }
+        if (dx < 0) CenterTxt(fCode, ";", sx, bar.y - 36, 30, (Color) { 255, 190, 90, 255 });
+        float u = (dx + 46) / 92.0f;
+        lift = fmaxf(lift, sinf(u * PI) * 30);
+    }
+    bool done = p >= 1.0f;
+    if (done) lift = fabsf(sinf((t - RUN) * 9.0f)) * 14;
+    {
+        Look L = LookFrom(gm.eq);
+        DrawPersonEx(runX, bar.y + 2 - lift, done ? 0 : 2, 1.7f, done ? 0.0f : t * 16.0f, &L);
+    }
+
+    /* what it's "doing" */
+    const char* status = prog < 0.33f ? "Compiling lessons" : prog < 0.66f ? "Building the campus" : !done ? "Waking up the professors" : "Ready!";
+    char line[64];
+    snprintf(line, sizeof line, "%s%.*s", status, done ? 0 : 1 + (int)(t * 3) % 3, "...");
+    Txt(fCode, line, bar.x, bar.y + 34, 17, done ? GOOD : TXT);
+    const char* pct = TextFormat("%d%%", (int)(prog * 100));
+    Txt(fCode, pct, bar.x + bar.width - TxtW(fCode, pct, 17), bar.y + 34, 17, accent);
+
+    CenterTxt(fReg, "Tip: click your character on any screen. It has advice.", W / 2.0f, H - 96, 15, Fade(DIM, BootEase((t - 0.8f) / 0.6f)));
+    CenterTxt(fReg, "Click or press any key to skip", W / 2.0f, H - 52, 13, Fade((Color) { 90, 98, 122, 255 }, 0.5f + 0.5f * sinf(t * 3)));
+
+    /* fade in from black at the start */
+    if (t < 0.45f) DrawRectangle(0, 0, W, H, Fade(BLACK, 1.0f - t / 0.45f));
+    if (t >= TOTAL) screen = SCR_WORLD;
+}
+
+/* ---- screen transitions ----
+   Whenever the screen changes, a row of shutters is shut for an instant and then
+   slides open to reveal the new screen. */
+static float trP = 1.0f;
+
+static void DrawTransition(float dt, Color accent)
+{
+    if (trP >= 1.0f) return;
+    trP += dt / 0.62f;
+    if (trP > 1.0f) trP = 1.0f;
+    const int N = 16;
+    float sw = (float)W / N;
+    for (int i = 0; i < N; i++) {
+        float loc = BootClamp(trP * 1.7f - (float)i / N * 0.7f);
+        float e = loc * loc * (3 - 2 * loc);
+        float ww = sw * (1.0f - e);
+        if (ww < 0.5f) continue;
+        float x = i * sw + (sw - ww) / 2;
+        DrawRectangle((int)x, 0, (int)ww + 1, H, (Color) { 10, 12, 26, 255 });
+        DrawRectangle((int)x, 0, 2, H, Fade(accent, 0.65f * (1.0f - e)));
+        DrawRectangle((int)(x + ww - 2), 0, 2, H, Fade(accent, 0.65f * (1.0f - e)));
+    }
+}
+
 int main(void)
 {
-    SetConfigFlags(FLAG_MSAA_4X_HINT);      /* smoother rounded corners */
+    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);      /* smoother rounded corners */
     InitWindow(W, H, "CodeQuest - Learn C & C++");
+    SetWindowMinSize(600, 380);
     SetExitKey(KEY_NULL);                   /* we handle ESC ourselves */
     SetTargetFPS(60);
 
@@ -6376,15 +9926,18 @@ int main(void)
     fMed = fBold;                          /* same bold face for buttons and labels */
     fCode = LoadF(FONT_MONO, FONT_MONO_LEN, 18);   /* code is always drawn at size 18 */
     LoadProgress();
+    LoadProfile();
     BuildMaps();
     LoadQuest();
     LoadGame();
     LoadFarm();
     WorldEnter();                           /* start in the campus sim */
+    screen = SCR_BOOT;                      /* ...after the loading screen */
 
     while (!quit && !WindowShouldClose()) {
         if (IsKeyPressed(KEY_ESCAPE)) {
-            if (screen == SCR_MENU) quit = true;
+            if (screen == SCR_BOOT) bootT = 99.0f;
+            else if (screen == SCR_MENU) quit = true;
             else if (screen == SCR_WORLD) {
                 if (dlg != DLG_NONE) dlg = DLG_NONE;
                 else { fromWorld = false; screen = SCR_MENU; }
@@ -6392,9 +9945,19 @@ int main(void)
             else GoMenu();
         }
 
+        if (IsKeyPressed(KEY_F11) || ((IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT)) && IsKeyPressed(KEY_ENTER))) ToggleFull();
+        {
+            float sw = (float)GetScreenWidth(), sh = (float)GetScreenHeight();
+            gScale = sw / W < sh / H ? sw / W : sh / H;
+            gOffX = floorf((sw - W * gScale) / 2); gOffY = floorf((sh - H * gScale) / 2);
+            SetMouseOffset((int)-gOffX, (int)-gOffY);
+            SetMouseScale(1.0f / gScale, 1.0f / gScale);
+        }
         hand = false; ibeam = false;
         Color accent = ACCENTS[lang];
         BeginDrawing();
+        ClearBackground(BLACK);
+        BeginMode2D((Camera2D) { { gOffX, gOffY }, { 0, 0 }, 0.0f, gScale });
         ClearBackground(BG);
         if (screen != SCR_WORLD) DrawRectangleGradientV(0, 0, W, H, (Color) { 22, 27, 44, 255 }, (Color) { 12, 14, 22, 255 });
         switch (screen) {
@@ -6408,13 +9971,28 @@ int main(void)
         case SCR_LAB:    DrawLab();          break;
         case SCR_SHOP:   DrawShop();         break;
         case SCR_FARM:   DrawFarm();         break;
+        case SCR_PROBLEM: DrawProblem(accent); break;
+        case SCR_MEM:    DrawMem();          break;
+        case SCR_BOOT:   DrawBoot();         break;
+        }
+        {
+            static int prevScreen = -1;
+            if ((int)screen != prevScreen) { if (prevScreen >= 0) trP = 0.0f; prevScreen = (int)screen; }
+            float tdt = GetFrameTime(); if (tdt > 0.05f) tdt = 0.05f;
+            DrawTransition(tdt, accent);
         }
         DrawNotices(GetFrameTime());
+        EndMode2D();
+        if (gOffX > 0 || gOffY > 0) {                         /* black letterbox bars hide anything drawn past the edges */
+            int sw = GetScreenWidth(), sh = GetScreenHeight(), ox = (int)gOffX, oy = (int)gOffY;
+            DrawRectangle(0, 0, ox, sh, BLACK); DrawRectangle(sw - ox, 0, ox, sh, BLACK);
+            DrawRectangle(0, 0, sw, oy, BLACK); DrawRectangle(0, sh - oy, sw, oy, BLACK);
+        }
         EndDrawing();
         SetMouseCursor(hand ? MOUSE_CURSOR_POINTING_HAND : (ibeam ? MOUSE_CURSOR_IBEAM : MOUSE_CURSOR_DEFAULT));
     }
 
-    SaveProgress();
+    SaveProgress(); SaveFarm(); SaveProbCode();
     UnloadFont(fReg); UnloadFont(fBold); UnloadFont(fCode);
     CloseWindow();
     return 0;

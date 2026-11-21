@@ -1511,7 +1511,7 @@ static const Color ACCENTS[2] = { { 64, 156, 255, 255 }, { 160, 112, 255, 255 } 
 #define SPC 0.2f          /* letter spacing for the UI font */
 #define UI_SCALE 1.14f    /* serif fonts look smaller than sans at the same size */
 
-typedef enum { SCR_MENU, SCR_LESSON, SCR_QUIZ, SCR_RESULT, SCR_WORLD, SCR_BATTLE, SCR_QUEST, SCR_LAB, SCR_SHOP, SCR_FARM, SCR_PROBLEM, SCR_MEM, SCR_BOOT } Screen;
+typedef enum { SCR_MENU, SCR_LESSON, SCR_QUIZ, SCR_RESULT, SCR_WORLD, SCR_BATTLE, SCR_QUEST, SCR_LAB, SCR_SHOP, SCR_FARM, SCR_PROBLEM, SCR_MEM, SCR_BOOT, SCR_STUDY, SCR_STUDYRUN, SCR_SPEED, SCR_NOTES, SCR_ANSREV } Screen;
 typedef enum { MOOD_IDLE, MOOD_THINK, MOOD_CHEER, MOOD_SAD } Mood;
 
 static Screen screen = SCR_MENU;
@@ -1530,6 +1530,14 @@ static void StartFarm(void);
 static void ToggleFull(void);
 static void StartShop(void);
 static void StartMem(void);
+static void StudyRecord(int id, bool ok, int mult);
+static void StartStudy(void);
+static void DrawLessonExtras(Color accent);
+static void DrawStudy(Color accent);
+static void DrawStudyRun(Color accent);
+static void DrawSpeed(Color accent);
+static void DrawNotes(Color accent);
+static void DrawAnswerReview(Color accent);
 static void DrawCompanion(float cx, float footY, float sc, int mood, bool below);
 static void DrawBoot(void);
 static void DrawTransition(float dt, Color accent);
@@ -2094,7 +2102,14 @@ static int DrawCode(const char* code, float x, float y, float w, float fs, const
 /*  Navigation helpers                                                 */
 /* ------------------------------------------------------------------ */
 static void GoMenu(void) { screen = fromWorld ? SCR_WORLD : SCR_MENU; scroll = 0; }
-static void StartQuiz(void) { screen = SCR_QUIZ; qi = 0; sel = -1; score = 0; tlen = 0; tbuf[0] = 0; }
+static int quizPick[3] = { -1, -1, -1 };      /* what was picked for each question of the quiz being taken */
+static char quizTypedTxt[3][64];
+static bool quizWasTyped[3];
+static void StartQuiz(void)
+{
+    screen = SCR_QUIZ; qi = 0; sel = -1; score = 0; tlen = 0; tbuf[0] = 0;
+    for (int i = 0; i < 3; i++) { quizPick[i] = -1; quizTypedTxt[i][0] = 0; quizWasTyped[i] = false; }
+}
 static void StartLesson(int idx) { lessonIdx = idx; page = 0; scroll = 0; screen = SCR_LESSON; }
 
 /* ------------------------------------------------------------------ */
@@ -2126,6 +2141,7 @@ static void NavIcon(int k, float cx, float cy, Color c)
     case 3: DrawTriangle((Vector2) { cx - 11, cy - 1 }, (Vector2) { cx + 11, cy - 1 }, (Vector2) { cx, cy - 11 }, c); DrawRectangle((int)cx - 8, (int)cy - 1, 16, 11, Fade(c, 0.8f)); break;
     case 4: DrawLineEx((Vector2) { cx, cy + 10 }, (Vector2) { cx, cy - 2 }, 2.5f, c); DrawEllipse((int)cx - 6, (int)cy - 4, 6, 3.5f, c); DrawEllipse((int)cx + 6, (int)cy - 7, 6, 3.5f, c); break;
     case 6: DrawRectangleRounded((Rectangle) { cx - 11, cy - 9, 12, 8 }, 0.3f, 4, c); DrawRectangleRounded((Rectangle) { cx - 1, cy + 1, 12, 8 }, 0.3f, 4, Fade(c, 0.7f)); DrawLineEx((Vector2) { cx - 5, cy - 1 }, (Vector2) { cx + 5, cy + 5 }, 2, c); break;
+    case 7: DrawRing((Vector2) { cx, cy }, 8, 11, 0, 360, 28, c); DrawLineEx((Vector2) { cx, cy }, (Vector2) { cx, cy - 7 }, 2, c); DrawLineEx((Vector2) { cx, cy }, (Vector2) { cx + 5, cy + 3 }, 2, c); break;
     default: DrawCircle((int)cx, (int)cy, 10, c); DrawCircle((int)cx, (int)cy, 6, Fade(BLACK, 0.25f)); break;
     }
 }
@@ -2139,8 +2155,8 @@ static void MenuSidebar(Color accent)
     Txt(fBold, "CodeQuest", 72, 14, 25, TXT);
     Txt(fReg, "C & C++ academy", 74, 44, 12, DIM);
 
-    static const char* nm[7] = { "Learn", "Practice", "Coding Lab", "Campus & Arena", "Mower Farm", "Shop", "Memory Lab" };
-    for (int i = 0; i < 7; i++) {
+    static const char* nm[8] = { "Learn", "Practice", "Coding Lab", "Campus & Arena", "Mower Farm", "Shop", "Memory Lab", "Study hub" };
+    for (int i = 0; i < 8; i++) {
         Rectangle r = { 12, 92.0f + i * 50 + (i >= 2 ? 22 : 0), 212, 44 };
         bool hov = CheckCollisionPointRec(GetMousePosition(), r), act = i < 2 && i == menuTab;
         if (hov) hand = true;
@@ -2154,7 +2170,8 @@ static void MenuSidebar(Color accent)
             else if (i == 3) WorldEnter();
             else if (i == 4) StartFarm();
             else if (i == 5) StartShop();
-            else StartMem();
+            else if (i == 6) StartMem();
+            else StartStudy();
         }
     }
     Txt(fBold, "SPACES", 24, 92.0f + 2 * 50 + 4, 11, (Color) { 90, 98, 122, 255 });
@@ -2203,36 +2220,91 @@ static const char* NextStepText(int lg, int les, int* action, int* prob)
     *action = 0; return "Review the lesson any time";
 }
 
+/* ---- the Learn page: hero, stats strip, and a lesson journey of expanding cards ---- */
+static float LearnEase(float x) { x = x < 0 ? 0 : (x > 1 ? 1 : x); return x * x * (3 - 2 * x); }
+static int learnOpen = -2;                    /* which lesson card is open (-2 = not chosen yet) */
+static float learnOpenAnim[NLESSONS];         /* 0 closed .. 1 open, per card */
+static float learnHover[NLESSONS];            /* hover glow, per card */
+static float learnScroll = 0, learnScrollTo = 0;
+static float learnStat[4];                    /* the stat chips count up to their value */
+static double learnLastDraw = -10, learnEnter = 0;
+
+static void LearnGlyph(int kind, float cx, float cy, Color c)
+{
+    if (kind == 0) {                                          /* an open book */
+        DrawRectangleRounded((Rectangle) { cx - 14, cy - 10, 13, 20 }, 0.2f, 4, c);
+        DrawRectangleRounded((Rectangle) { cx + 1, cy - 10, 13, 20 }, 0.2f, 4, Fade(c, 0.7f));
+    }
+    else if (kind == 1) {                                   /* a question mark in a circle */
+        DrawRing((Vector2) { cx, cy }, 10, 13, 0, 360, 32, c);
+        CenterTxt(fBold, "?", cx, cy - 10, 17, c);
+    }
+    else {                                                  /* braces */
+        CenterTxt(fCode, "{ }", cx, cy - 10, 19, c);
+    }
+}
+
 static void MenuLearn(Color accent)
 {
+    float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
+    double now = GetTime();
+    if (now - learnLastDraw > 0.3) { learnEnter = now; for (int i = 0; i < NLESSONS; i++) learnHover[i] = 0; }
+    learnLastDraw = now;
+    float since = (float)(now - learnEnter), t = (float)now;
+    Vector2 mouse = GetMousePosition();
+
     int overall = 0;
     for (int i = 0; i < NLESSONS; i++) overall += Mastery(lang, i);
     overall /= NLESSONS;
     MenuHeader("Your learning path", TextFormat("%s  -  %d%% mastered  -  read, quiz, then write real code to master each unit", LANG_NAME[lang], overall));
 
-    /* continue card */
     int cl = NextLesson(lang), act, np, cm = Mastery(lang, cl);
     const char* step = NextStepText(lang, cl, &act, &np);
-    Rectangle hero = { 268, 96, 560, 148 };
+    if (learnOpen == -2) { learnOpen = cl; learnOpenAnim[cl] = 1; }
+
+    /* ---- hero: continue learning ---- */
+    float heroIn = LearnEase(since / 0.4f);
+    Rectangle hero = { 268, 96 + (1 - heroIn) * 14, 560, 148 };
     Panel(hero, 0.07f, SURF, BORDER);
+    DrawRectangleGradientH((int)hero.x + 10, (int)hero.y + 6, (int)hero.width - 20, (int)hero.height - 12, Fade(accent, 0.20f), Fade(accent, 0.0f));
+    ScissorT((int)hero.x, (int)hero.y, (int)hero.width, (int)hero.height);
+    {   /* little code symbols drifting up behind the text */
+        static const char* gl[6] = { "{ }", ";", "&p", "*p", "[0]", "->" };
+        for (int i = 0; i < 6; i++) {
+            float gx = hero.x + 330 + i * 38 + sinf(t * 0.8f + i) * 6;
+            float gy = hero.y + hero.height - fmodf(t * (14 + i * 3) + i * 40, hero.height + 20);
+            DrawTextEx(fCode, gl[i], (Vector2) { gx, gy }, 20, 0, Fade(accent, 0.13f));
+        }
+    }
+    EndScissorMode();
     DrawRectangleRounded((Rectangle) { hero.x, hero.y, 6, hero.height }, 0.5f, 4, accent);
     Txt(fBold, "CONTINUE LEARNING", hero.x + 26, hero.y + 16, 12, accent);
     TxtFit(fBold, LESSONS[lang][cl].name + 3, hero.x + 26, hero.y + 36, 27, 380, TXT);
     TxtFit(fReg, step, hero.x + 26, hero.y + 78, 15, 380, (Color) { 190, 198, 216, 255 });
-    DrawRectangleRounded((Rectangle) { hero.x + 26, hero.y + 112, 380, 8 }, 0.5f, 6, SURF2);
-    if (cm) DrawRectangleRounded((Rectangle) { hero.x + 26, hero.y + 112, 380.0f * cm / 100, 8 }, 0.5f, 6, MasteryCol(cm));
+    Rectangle pb = { hero.x + 26, hero.y + 112, 380, 8 };
+    DrawRectangleRounded(pb, 0.5f, 6, SURF2);
+    if (cm) {
+        float fw = pb.width * cm / 100;
+        DrawRectangleRounded((Rectangle) { pb.x, pb.y, fw, pb.height }, 0.5f, 6, MasteryCol(cm));
+        float sx = fmodf(t * 90, pb.width + 40) - 20;                 /* a shimmer sweeping along the bar */
+        if (sx > 0 && sx < fw - 14) DrawRectangleRounded((Rectangle) { pb.x + sx, pb.y, 14, pb.height }, 0.5f, 6, Fade(WHITE, 0.35f));
+    }
     Txt(fBold, TextFormat("%s  %d%%", MasteryName(cm), cm), hero.x + 418, hero.y + 106, 14, MasteryCol(cm));
-    if (Button((Rectangle) { hero.x + hero.width - 132, hero.y + 34, 112, 46 }, "Continue", accent, 17)) {
+    Rectangle cb = { hero.x + hero.width - 132, hero.y + 34, 112, 46 };
+    float pulse = 0.5f + 0.5f * sinf(t * 3.0f);
+    DrawRectangleRounded((Rectangle) { cb.x - 4 - pulse * 3, cb.y - 4 - pulse * 3, cb.width + 8 + pulse * 6, cb.height + 8 + pulse * 6 }, 0.35f, 10, Fade(accent, 0.16f + 0.12f * pulse));
+    if (Button(cb, "Continue", accent, 17)) {
         if (act == 1) { lessonIdx = cl; StartQuiz(); }
         else if (act == 2) StartProblem(np);
         else StartLesson(cl);
     }
 
-    /* problem of the day */
+    /* ---- problem of the day ---- */
     int dp = DailyProblem();
     const Prob* DP = &PROBS[dp];
-    Rectangle dc = { 844, 96, 324, 148 };
+    Rectangle dc = { 844, 96 + (1 - LearnEase((since - 0.08f) / 0.4f)) * 14, 324, 148 };
     Panel(dc, 0.07f, SURF, BORDER);
+    DrawRectangleGradientH((int)dc.x + 10, (int)dc.y + 6, (int)dc.width - 20, (int)dc.height - 12, Fade((Color) { 255, 184, 64, 255 }, 0.0f), Fade((Color) { 255, 184, 64, 255 }, 0.13f));
     Txt(fBold, "PROBLEM OF THE DAY", dc.x + 20, dc.y + 16, 12, (Color) { 255, 184, 64, 255 });
     TxtFit(fBold, DP->title, dc.x + 20, dc.y + 36, 22, 280, TXT);
     Pill(DIFF_NAME[DP->diff], dc.x + 20, dc.y + 72, DIFF_COL[DP->diff]);
@@ -2240,36 +2312,157 @@ static void MenuLearn(Color accent)
     if (pro.solved[lang][dp]) { DrawCheck(dc.x + 36, dc.y + 120, 12, GOOD); Txt(fBold, "Solved", dc.x + 56, dc.y + 111, 16, GOOD); }
     if (Button((Rectangle) { dc.x + dc.width - 120, dc.y + 100, 100, 38 }, pro.solved[lang][dp] ? "Again" : "Solve", (Color) { 214, 140, 30, 255 }, 15)) StartProblem(dp);
 
-    /* course path */
-    Txt(fBold, "COURSE PATH", 268, 262, 12, DIM);
+    /* ---- stats strip: numbers count up ---- */
+    int perfect = 0; for (int i = 0; i < NLESSONS; i++) if (prog.best[lang][i] == LESSONS[lang][i].nQ) perfect++;
+    int xp = XpTotal(), lv = LevelOf(xp);
+    float target[4] = { (float)pro.streak, (float)lv, (float)SolvedTotal(lang), (float)perfect };
+    const char* label[4] = { "DAY STREAK", "LEVEL", "PROBLEMS SOLVED", "PERFECT QUIZZES" };
+    const char* of[4] = { "", "", TextFormat("/ %d", NPROB), TextFormat("/ %d", NLESSONS) };
+    Color sc4[4] = { { 255, 140, 40, 255 }, accent, GOOD, { 255, 214, 90, 255 } };
+    for (int i = 0; i < 4; i++) {
+        learnStat[i] += (target[i] - learnStat[i]) * (dt * 7 > 1 ? 1 : dt * 7);
+        if (fabsf(target[i] - learnStat[i]) < 0.02f) learnStat[i] = target[i];
+        float inA = LearnEase((since - 0.15f - i * 0.06f) / 0.35f);
+        Rectangle r = { 268.0f + i * 228, 258 + (1 - inA) * 12, 216, 56 };
+        bool hov = CheckCollisionPointRec(mouse, r);
+        if (hov) { hand = true; r.y -= 2; }
+        Panel(r, 0.18f, hov ? SURF2 : SURF, hov ? Fade(sc4[i], 0.7f) : BORDER);
+        float ix = r.x + 30, iy = r.y + 28;
+        if (i == 0) DrawFlame(ix, iy, 12, sc4[0]);
+        else if (i == 1) { DrawRing((Vector2) { ix, iy }, 12, 15, 0, 360, 36, SURF2); DrawRing((Vector2) { ix, iy }, 12, 15, -90, -90 + 360.0f * (xp - 30 * (lv - 1) * (lv - 1)) / (30 * lv * lv - 30 * (lv - 1) * (lv - 1)), 36, accent); }
+        else if (i == 2) { DrawCircle((int)ix, (int)iy, 14, Fade(GOOD, 0.2f)); DrawCheck(ix, iy, 14, GOOD); }
+        else { for (int k = 0; k < 5; k++) { float a = -PI / 2 + k * 2 * PI / 5; DrawTriangle((Vector2) { ix, iy }, (Vector2) { ix + cosf(a - 0.3f) * 6, iy + sinf(a - 0.3f) * 6 }, (Vector2) { ix + cosf(a) * 15, iy + sinf(a) * 15 }, sc4[3]); DrawTriangle((Vector2) { ix, iy }, (Vector2) { ix + cosf(a) * 15, iy + sinf(a) * 15 }, (Vector2) { ix + cosf(a + 0.3f) * 6, iy + sinf(a + 0.3f) * 6 }, sc4[3]); } }
+        Txt(fBold, TextFormat("%d", (int)(learnStat[i] + 0.5f)), r.x + 56, r.y + 5, 24, TXT);
+        if (of[i][0]) Txt(fReg, of[i], r.x + 56 + TxtW(fBold, TextFormat("%d", (int)(learnStat[i] + 0.5f)), 24) + 6, r.y + 13, 14, DIM);
+        Txt(fBold, label[i], r.x + 56, r.y + 35, 11, DIM);
+    }
+
+    /* ---- the journey: one card per lesson on a rail ---- */
+    Txt(fBold, "COURSE PATH", 268, 336, 12, DIM);
+    Txt(fReg, "click a lesson to open it", W - 32 - TxtW(fReg, "click a lesson to open it", 13), 335, 13, DIM);
+    const float areaTop = 358, areaH = H - areaTop;
+    const float cardX = 340, cardW = W - 32 - cardX, railX = 300;
+    const float collapsedH = 76, openH = 232, gap = 12;
+
+    float total = 0;
+    for (int i = 0; i < NLESSONS; i++) total += (learnOpen == i ? openH : collapsedH) + gap;
+    float maxScroll = total - areaH + 14; if (maxScroll < 0) maxScroll = 0;
+    if (mouse.y > areaTop) learnScrollTo -= GetMouseWheelMove() * 70;
+    if (learnScrollTo > maxScroll) learnScrollTo = maxScroll;
+    if (learnScrollTo < 0) learnScrollTo = 0;
+    learnScroll += (learnScrollTo - learnScroll) * (dt * 10 > 1 ? 1 : dt * 10);
+    if (learnScroll > maxScroll) learnScroll = maxScroll;
+
+    ScissorT(0, (int)areaTop, W, (int)areaH);
+    float y = areaTop + 8 - learnScroll;
+    float yPrev = 0;
+    bool inArea = mouse.y > areaTop;
     for (int i = 0; i < NLESSONS; i++) {
         const Lesson* L = &LESSONS[lang][i];
-        float y = 284.0f + i * 92;
-        Rectangle row = { 268, y, 900, 82 };
         int m = Mastery(lang, i); Color mc = MasteryCol(m);
-        bool hov = CheckCollisionPointRec(GetMousePosition(), row);
-        Panel(row, 0.1f, hov ? SURF2 : SURF, hov ? Fade(mc, 0.8f) : BORDER);
-        Vector2 c = { row.x + 46, y + 41 };
-        DrawRing(c, 25, 30, 0, 360, 48, SURF2);
-        if (m) DrawRing(c, 25, 30, -90, -90 + 360.0f * m / 100, 48, mc);
-        if (m >= 100) DrawCheck(c.x, c.y, 16, mc); else CenterTxt(fBold, TextFormat("%d", i + 1), c.x, c.y - 12, 22, m ? mc : DIM);
-        TxtFit(fBold, L->name + 3, row.x + 94, y + 10, 22, 330, TXT);
-        Pill(MasteryName(m), row.x + 94, y + 44, mc);
-        float sx = row.x + 94 + TxtW(fMed, MasteryName(m), 14) + 28 + 18;
-        const char* s1 = prog.read[lang][i] ? "Lesson done" : "Lesson", * s2 = prog.best[lang][i] >= 0 ? TextFormat("Quiz %d/%d", prog.best[lang][i], L->nQ) : "Quiz",
-            * s3 = TextFormat("Code %d/%d", SolvedInLesson(lang, i), ProbsInLesson(i));
-        bool d1 = prog.read[lang][i], d2 = prog.best[lang][i] >= 0, d3 = SolvedInLesson(lang, i) == ProbsInLesson(i);
-        const char* ss[3] = { s1, s2, s3 }; bool dd[3] = { d1, d2, d3 };
-        for (int k = 0; k < 3; k++) {
-            DrawCircle((int)sx + 7, (int)y + 58, 7, dd[k] ? GOOD : SURF2);
-            if (dd[k]) DrawCheck(sx + 7, y + 58, 9, WHITE);
-            Txt(fReg, ss[k], sx + 20, y + 49, 14, dd[k] ? (Color) { 190, 198, 216, 255 } : DIM);
-            sx += 20 + TxtW(fReg, ss[k], 14) + 22;
+        float tgt = (learnOpen == i) ? 1.0f : 0.0f;
+        learnOpenAnim[i] += (tgt - learnOpenAnim[i]) * (dt * 12 > 1 ? 1 : dt * 12);
+        if (fabsf(tgt - learnOpenAnim[i]) < 0.003f) learnOpenAnim[i] = tgt;
+        float oa = LearnEase(learnOpenAnim[i]);
+        float h = collapsedH + (openH - collapsedH) * oa;
+        float inA = LearnEase((since - 0.3f - i * 0.07f) / 0.35f);
+        float cy0 = y + (1 - inA) * 22;
+        Rectangle card = { cardX, cy0, cardW, h };
+        Rectangle head = { cardX, cy0, cardW, collapsedH };
+        bool hovHead = inArea && CheckCollisionPointRec(mouse, head);
+        bool hovCard = inArea && CheckCollisionPointRec(mouse, card);
+        learnHover[i] += ((hovCard ? 1.0f : 0.0f) - learnHover[i]) * (dt * 12 > 1 ? 1 : dt * 12);
+        if (hovHead) hand = true;
+        card.y -= learnHover[i] * 2;
+
+        /* the rail: a line down to this node, filled once the lesson before it is mastered */
+        float ny = card.y + collapsedH / 2;
+        if (i > 0) {
+            DrawRectangle((int)railX - 1, (int)yPrev, 3, (int)(ny - yPrev), SURF2);
+            if (Mastery(lang, i - 1) >= 100) DrawRectangle((int)railX - 1, (int)yPrev, 3, (int)(ny - yPrev), Fade(GOOD, 0.8f));
         }
-        if (Button((Rectangle) { row.x + row.width - 332, y + 20, 100, 42 }, "Learn", accent, 16)) StartLesson(i);
-        if (Button((Rectangle) { row.x + row.width - 224, y + 20, 100, 42 }, "Quiz", SURF2, 16)) { lessonIdx = i; StartQuiz(); }
-        if (Button((Rectangle) { row.x + row.width - 116, y + 20, 100, 42 }, "Code", (Color) { 40, 150, 145, 255 }, 16)) { menuTab = 1; pracLesson = i; pracDiff = -1; pracUnsolved = false; pracScroll = 0; }
+        yPrev = ny;
+
+        /* the card */
+        Color edge = i == cl ? Fade(accent, 0.55f + 0.25f * sinf(t * 2.5f)) : (learnHover[i] > 0.01f ? Fade(mc, 0.35f + 0.5f * learnHover[i]) : BORDER);
+        if (m == 0 && i != cl && learnHover[i] < 0.01f) edge = BORDER;
+        Panel(card, 0.09f, ColorBrightness(SURF, 0.03f * learnHover[i]), edge);
+        DrawRectangleGradientH((int)card.x + 10, (int)card.y + 5, (int)card.width - 20, (int)collapsedH - 10, Fade(mc, 0.10f + 0.06f * learnHover[i]), Fade(mc, 0.0f));
+        DrawRectangleRounded((Rectangle) { card.x, card.y + 10, 5, collapsedH - 20 }, 0.5f, 4, mc);
+
+        /* node on the rail */
+        Vector2 nc = { railX, ny };
+        if (i == cl) { float g = 0.5f + 0.5f * sinf(t * 3); DrawCircleV(nc, 22 + g * 4, Fade(accent, 0.12f + 0.08f * g)); }
+        DrawCircleV(nc, 17, BG);
+        DrawRing(nc, 14, 17, 0, 360, 40, SURF2);
+        if (m) DrawRing(nc, 14, 17, -90, -90 + 360.0f * m / 100, 40, mc);
+        if (m >= 100) DrawCheck(nc.x, nc.y, 11, mc); else CenterTxt(fBold, TextFormat("%d", i + 1), nc.x, nc.y - 10, 16, m ? mc : DIM);
+
+        /* title row */
+        TxtFit(fBold, L->name + 3, card.x + 26, card.y + 12, 22, 330, TXT);
+        Pill(MasteryName(m), card.x + 26, card.y + 42, mc);
+        if (i == cl) { Txt(fBold, "UP NEXT", card.x + 26 + TxtW(fMed, MasteryName(m), 14) + 28 + 16, card.y + 48, 12, accent); }
+        float sx = card.x + 360;
+        bool dd[3] = { prog.read[lang][i] != 0, prog.best[lang][i] >= 0, SolvedInLesson(lang, i) == ProbsInLesson(i) };
+        const char* ss[3] = { dd[0] ? "Lesson" : "Lesson", prog.best[lang][i] >= 0 ? TextFormat("Quiz %d/%d", prog.best[lang][i], L->nQ) : "Quiz", TextFormat("Code %d/%d", SolvedInLesson(lang, i), ProbsInLesson(i)) };
+        for (int k = 0; k < 3; k++) {
+            DrawCircle((int)sx + 8, (int)card.y + 38, 8, dd[k] ? GOOD : SURF2);
+            if (dd[k]) DrawCheck(sx + 8, card.y + 38, 10, WHITE);
+            Txt(fReg, ss[k], sx + 22, card.y + 29, 14, dd[k] ? (Color) { 200, 208, 224, 255 } : DIM);
+            sx += 22 + TxtW(fReg, ss[k], 14) + 22;
+        }
+        /* chevron */
+        {
+            float cxv = card.x + card.width - 30, cyv = card.y + collapsedH / 2;
+            float d = 5 - 10 * oa;                       /* down arrow turns into an up arrow */
+            DrawLineEx((Vector2) { cxv - 7, cyv - d * 0.6f }, (Vector2) { cxv, cyv + d * 0.6f }, 2.5f, hovHead ? TXT : DIM);
+            DrawLineEx((Vector2) { cxv, cyv + d * 0.6f }, (Vector2) { cxv + 7, cyv - d * 0.6f }, 2.5f, hovHead ? TXT : DIM);
+        }
+
+        /* open part: a short intro and three action tiles */
+        if (oa > 0.02f) {
+            ScissorT((int)card.x, (int)(card.y + collapsedH - 4 > areaTop ? card.y + collapsedH - 4 : areaTop), (int)card.width, (int)(card.height - collapsedH + 4));
+            float a = oa < 0.5f ? oa * 2 : 1.0f;
+            int ty = (int)(card.y + collapsedH + 4);
+            Wrapped(fReg, L->pages[0].text, card.x + 26, ty, card.width - 190, 14, Fade((Color) { 190, 198, 216, 255 }, a));
+            float tw = (card.width - 52 - 28) / 3.0f, tyy = card.y + collapsedH + 62;
+            const char* tt[3] = { "Learn", "Quiz", "Code" };
+            const char* sub[3] = { prog.read[lang][i] ? "Read - review any time" : "Start here: read it", prog.best[lang][i] >= 0 ? TextFormat("Best score %d of %d", prog.best[lang][i], L->nQ) : "Test what you learned", TextFormat("%d of %d problems solved", SolvedInLesson(lang, i), ProbsInLesson(i)) };
+            float pf[3] = { prog.read[lang][i] ? 1.0f : 0.0f, prog.best[lang][i] >= 0 ? (float)prog.best[lang][i] / L->nQ : 0.0f, ProbsInLesson(i) ? (float)SolvedInLesson(lang, i) / ProbsInLesson(i) : 0.0f };
+            Color tc[3] = { accent, (Color) { 255, 184, 64, 255 }, (Color) { 40, 190, 180, 255 } };
+            for (int k = 0; k < 3; k++) {
+                Rectangle tr = { card.x + 26 + k * (tw + 14), tyy, tw, 74 };
+                bool th = inArea && hovCard && CheckCollisionPointRec(mouse, tr);
+                if (th) { hand = true; tr.y -= 2; }
+                DrawRectangleRounded((Rectangle) { tr.x, tr.y + 3, tr.width, tr.height }, 0.2f, 8, Fade(BLACK, 0.25f * a));
+                DrawRectangleRounded(tr, 0.2f, 8, th ? Fade(tc[k], 0.9f) : Fade(tc[k], 0.20f * a + 0.0f));
+                LearnGlyph(k, tr.x + 34, tr.y + 26, th ? WHITE : tc[k]);
+                Txt(fBold, tt[k], tr.x + 64, tr.y + 10, 19, th ? WHITE : Fade(TXT, a));
+                TxtFit(fReg, sub[k], tr.x + 64, tr.y + 36, 13, tr.width - 76, th ? Fade(WHITE, 0.9f) : Fade(DIM, a));
+                DrawRectangleRounded((Rectangle) { tr.x + 16, tr.y + tr.height - 14, tr.width - 32, 5 }, 0.5f, 4, Fade(BLACK, 0.3f));
+                if (pf[k] > 0) DrawRectangleRounded((Rectangle) { tr.x + 16, tr.y + tr.height - 14, (tr.width - 32)* pf[k], 5 }, 0.5f, 4, th ? WHITE : tc[k]);
+                if (th && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    if (k == 0) StartLesson(i);
+                    else if (k == 1) { lessonIdx = i; StartQuiz(); }
+                    else { menuTab = 1; pracLesson = i; pracDiff = -1; pracUnsolved = false; pracScroll = 0; }
+                }
+            }
+            EndScissorMode();
+            ScissorT(0, (int)areaTop, W, (int)areaH);
+        }
+
+        /* click the header: open this card (or close it) */
+        if (hovHead && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            learnOpen = (learnOpen == i) ? -1 : i;
+            if (learnOpen == i) {                        /* scroll so the opened card is in view */
+                float off = 0;
+                for (int j = 0; j < i; j++) off += collapsedH + gap;
+                learnScrollTo = off - 4;
+            }
+        }
+        y += h + gap;
     }
+    EndScissorMode();
 }
 
 static void MenuPractice(Color accent)
@@ -2427,6 +2620,7 @@ static void DrawLesson(Color accent)
     else {
         if (Button((Rectangle) { W - 216, 698, 180, 48 }, "Take the quiz", GOOD, 16)) StartQuiz();
     }
+    DrawLessonExtras(accent);
 }
 
 /* ---- typed answers ----
@@ -2592,6 +2786,11 @@ static void DrawQuiz(Color accent)
         }
     }
 
+    if (sel >= 0 && !wasAnswered) {                /* just answered: remember it, and feed the spaced-repetition deck */
+        quizPick[qi] = sel; quizWasTyped[qi] = quizTyped;
+        snprintf(quizTypedTxt[qi], sizeof quizTypedTxt[qi], "%s", tbuf);
+        StudyRecord(lang * NLESSONS * 3 + lessonIdx * 3 + qi, sel == Q->correct, 1);
+    }
     DrawCompanion(1122, 668, 1.7f, sel < 0 ? MOOD_THINK : (sel == Q->correct ? MOOD_CHEER : MOOD_SAD), false);
     DrawRectangle(0, 684, W, H - 684, SURF);
     DrawLine(0, 684, W, 684, BORDER);
@@ -2657,6 +2856,7 @@ static void DrawResult(Color accent)
     if (Button((Rectangle) { bx, 550, 180, 52 }, "Retry quiz", accent, 16)) StartQuiz();
     if (Button((Rectangle) { bx + 194, 550, 180, 52 }, "Review lesson", SURF2, 16)) StartLesson(lessonIdx);
     if (Button((Rectangle) { bx + 388, 550, 180, 52 }, (fromWorld ? "Campus" : "Menu"), SURF2, 16)) GoMenu();
+    if (Button((Rectangle) { cx - 120, 606, 240, 38 }, "Review answers", (Color) { 80, 90, 130, 255 }, 15)) screen = SCR_ANSREV;
     DrawCompanion(1060, 640, 2.2f, score == L->nQ ? MOOD_CHEER : (score * 2 >= L->nQ ? MOOD_IDLE : MOOD_SAD), false);
 }
 
@@ -4115,6 +4315,7 @@ static void PlayerAnswer(const BQuestion* Q, int i)
 {
     if (bPhase != 1 || bPlayerDone) return;
     bPick = i; bPlayerDone = true;
+    StudyRecord(2 * NLESSONS * 3 + (int)(Q - BQS), i == Q->correct, 1);
     if (i == Q->correct) { EndRound(1, "You solved it first!"); return; }
     bPHP -= 10; if (bPHP < 0) bPHP = 0;
     if (bPHP <= 0)       EndRound(0, "Wrong answer - you are out of HP!");
@@ -6400,10 +6601,17 @@ static void FarmBuild(void)
         if (x >= fN || y >= fN || fN == 0) { fT[x][y].soil = 0; fT[x][y].e = FNew(E_GRASS); fT[x][y].e.age = F_GROW[E_GRASS]; fT[x][y].emptyT = 0; }
     fN = n; if (fD.x >= n) fD.x = n - 1; if (fD.y >= n) fD.y = n - 1; fD.fx = fD.x; fD.fy = fD.y;
 }
+/* everything unlocked: every upgrade, every item known, plenty of each resource */
+static void FarmUnlockAll(void)
+{
+    for (int i = 0; i < U_N; i++) fsv.unl[i] = 1;
+    for (int k = 0; k < IT_N; k++) { fsv.seen[k] = 1; if (fsv.inv[k] < 9999) fsv.inv[k] = 9999; }
+}
 static void FarmReset(void)
 {
     memset(&fsv, 0, sizeof fsv); fsv.magic = 0xFA12; fsv.speed = 1; fN = 0; fD.x = fD.y = 0; fMaze.on = false;
     fTime = 0; fActStart = 0; fCost = 0; fEvN = 0; fPowerTick = 0; fWaterT = 0; fGiantT = 0; memset(&fStat, 0, sizeof fStat); memset(&fD, 0, sizeof fD); memset(fGi, 0, sizeof fGi);
+    FarmUnlockAll();
     memset(fT, 0, sizeof fT); FarmBuild();
 }
 static void SaveFarm(void) { FILE* f = fopen("farm2.dat", "wb"); if (f) { fwrite(&fsv, sizeof fsv, 1, f); fclose(f); } }
@@ -6411,7 +6619,7 @@ static void LoadFarm(void)
 {
     FarmReset();
     FILE* f = fopen("farm2.dat", "rb"); if (!f) return;
-    if (fread(&fsv, sizeof fsv, 1, f) == 1 && fsv.magic == 0xFA12) { fN = 0; FarmBuild(); }
+    if (fread(&fsv, sizeof fsv, 1, f) == 1 && fsv.magic == 0xFA12) { FarmUnlockAll(); fN = 0; FarmBuild(); }
     else FarmReset();
     fclose(f);
 }
@@ -9913,6 +10121,993 @@ static void DrawTransition(float dt, Color accent)
     }
 }
 
+
+/* ======================================================================
+   STUDY TOOLS  (ideas from the Increment project)
+     - spaced repetition (SM-2, like Anki): every question you answer is remembered
+       and comes back sooner if you miss it, later if you know it
+     - skills and XP: each lesson topic is a skill that levels up
+     - speed rounds: ten generated "what is x?" snippets, ten seconds each
+     - notes and bookmarks per lesson, search across lessons, review answers
+     - living code backgrounds that match CodeQuest's look
+   Saved in study.dat and notes.dat.
+   ====================================================================== */
+#define NSKILL (2 * NLESSONS + 1)               /* one per lesson in each language, plus code tracing */
+#define POOL_LESSON (2 * NLESSONS * 3)
+#define POOL_N (POOL_LESSON + BQN)              /* every question that can be reviewed */
+#define STUDY_MAGIC 0x57D2
+
+typedef struct { float ease; int reps, interval, due, right, wrong, seen; } SRec;
+typedef struct {
+    int magic;
+    SRec rec[POOL_N];
+    int xp[NSKILL];
+    unsigned int recent[NSKILL];                /* last answers, newest in bit 0 (1 = right) */
+    int nrecent[NSKILL];
+    unsigned char mark[2][NLESSONS];            /* bookmarked lessons */
+    unsigned char gold[2][NLESSONS];            /* speed round cleared */
+    int bestStreak[2][NLESSONS];
+    int bg;                                     /* 0 off, 1 code rain, 2 pointers, 3 circuit */
+} StudyData;
+static StudyData sd;
+static char notes[2][NLESSONS][640];
+
+static void StudyInit(void)
+{
+    memset(&sd, 0, sizeof sd);
+    sd.magic = STUDY_MAGIC;
+    sd.bg = 1;
+    for (int i = 0; i < POOL_N; i++) sd.rec[i].ease = 2.5f;
+}
+static void SaveStudy(void) { FILE* f = fopen("study.dat", "wb"); if (f) { fwrite(&sd, sizeof sd, 1, f); fclose(f); } }
+static void SaveNotes(void) { FILE* f = fopen("notes.dat", "wb"); if (f) { fwrite(notes, sizeof notes, 1, f); fclose(f); } }
+static void LoadStudy(void)
+{
+    StudyInit();
+    FILE* f = fopen("study.dat", "rb");
+    if (f) {
+        StudyData t;
+        if (fread(&t, sizeof t, 1, f) == 1 && t.magic == STUDY_MAGIC) sd = t;
+        fclose(f);
+    }
+    memset(notes, 0, sizeof notes);
+    f = fopen("notes.dat", "rb");
+    if (f) {
+        if (fread(notes, sizeof notes, 1, f) != 1) memset(notes, 0, sizeof notes);
+        fclose(f);
+    }
+    for (int l = 0; l < 2; l++) for (int i = 0; i < NLESSONS; i++) notes[l][i][sizeof notes[l][i] - 1] = 0;
+}
+
+/* ---- the question pool: lesson quiz questions, then the battle questions ---- */
+typedef struct { const char* q, * code, * expl; const char* opts[4]; int correct, skill, diff; } PoolQ;
+
+static bool PoolValid(int id)
+{
+    if (id < 0 || id >= POOL_N) return false;
+    if (id < POOL_LESSON) return (id % 3) < LESSONS[id / (NLESSONS * 3)][(id / 3) % NLESSONS].nQ;
+    return true;
+}
+static void PoolGet(int id, PoolQ* o)
+{
+    if (id < POOL_LESSON) {
+        int lg = id / (NLESSONS * 3), les = (id / 3) % NLESSONS, k = id % 3;
+        const Question* Q = &LESSONS[lg][les].qs[k];
+        o->q = Q->q; o->code = NULL; o->expl = Q->expl; o->correct = Q->correct;
+        for (int i = 0; i < 4; i++) o->opts[i] = Q->opts[i];
+        o->skill = lg * NLESSONS + les; o->diff = k == 2 ? 2 : 1;
+    }
+    else {
+        const BQuestion* Q = &BQS[id - POOL_LESSON];
+        o->q = Q->q; o->code = Q->code; o->expl = Q->expl; o->correct = Q->correct;
+        for (int i = 0; i < 4; i++) o->opts[i] = Q->opts[i];
+        o->skill = NSKILL - 1; o->diff = 2;
+    }
+}
+static const char* PoolSrc(int id)
+{
+    if (id < POOL_LESSON) return TextFormat("%s  -  %s", LANG_NAME[id / (NLESSONS * 3)], LESSONS[id / (NLESSONS * 3)][(id / 3) % NLESSONS].name + 3);
+    return "Battle Arena";
+}
+static const char* SkillName(int s)
+{
+    if (s >= NSKILL - 1) return "Code tracing";
+    return TextFormat("%s: %s", LANG_NAME[s / NLESSONS], LESSONS[s / NLESSONS][s % NLESSONS].name + 3);
+}
+static Color SkillCol(int s)
+{
+    static const Color pal[6] = { { 64, 156, 255, 255 }, { 160, 112, 255, 255 }, { 52, 199, 120, 255 }, { 255, 184, 64, 255 }, { 240, 92, 104, 255 }, { 40, 190, 180, 255 } };
+    return pal[s % 6];
+}
+
+/* ---- spaced repetition (SM-2) ---- */
+static void SrUpdate(SRec* r, bool ok, bool speedy, int today)
+{
+    r->seen = 1;
+    if (ok) {
+        r->right++;
+        if (r->reps == 0) r->interval = 1;
+        else if (r->reps == 1) r->interval = 3;
+        else r->interval = (int)(r->interval * r->ease + 0.5f);
+        r->reps++;
+        if (speedy) r->ease += 0.1f;
+        if (r->ease > 3.2f) r->ease = 3.2f;
+        r->due = today + r->interval;
+    }
+    else {
+        r->wrong++;
+        r->reps = 0; r->interval = 0;
+        r->ease -= 0.2f;
+        if (r->ease < 1.3f) r->ease = 1.3f;
+        r->due = today;                         /* comes straight back */
+    }
+}
+static bool SrDue(const SRec* r, int today) { return r->seen && r->due <= today; }
+
+static void SkillGain(int s, int amount, bool ok)
+{
+    int before = LevelOf(sd.xp[s]);
+    sd.xp[s] += amount;
+    if (sd.xp[s] < 0) sd.xp[s] = 0;
+    sd.recent[s] = (sd.recent[s] << 1) | (ok ? 1u : 0u);
+    if (sd.nrecent[s] < 20) sd.nrecent[s]++;
+    int after = LevelOf(sd.xp[s]);
+    if (after > before) Notify(TextFormat("%s  -  level %d!", SkillName(s), after), (Color) { 255, 214, 90, 255 });
+}
+static float SkillAccuracy(int s)
+{
+    int n = sd.nrecent[s] < 20 ? sd.nrecent[s] : 20, r = 0;
+    for (int i = 0; i < n; i++) if (sd.recent[s] & (1u << i)) r++;
+    return n ? (float)r / n : -1.0f;
+}
+
+/* called by the quizzes and battles whenever a question is answered */
+static void StudyRecord(int id, bool ok, int mult)
+{
+    if (!PoolValid(id)) return;
+    PoolQ pq; PoolGet(id, &pq);
+    SRec* r = &sd.rec[id];
+    SrUpdate(r, ok, mult > 1, DayNow());
+    if (ok) SkillGain(pq.skill, 6 * pq.diff * mult + ((r->wrong > 0 && r->right <= r->wrong) ? 4 : 0), true);
+    else    SkillGain(pq.skill, -4, false);
+    SaveStudy();
+}
+
+/* ---- case-insensitive "contains" ---- */
+static const char* ContainsCI(const char* hay, const char* needle)
+{
+    size_t n = strlen(needle);
+    if (!n) return hay;
+    for (; *hay; hay++) {
+        size_t i = 0;
+        while (i < n && hay[i] && tolower((unsigned char)hay[i]) == tolower((unsigned char)needle[i])) i++;
+        if (i == n) return hay;
+    }
+    return NULL;
+}
+
+/* ---- living backgrounds: faint, in the accent colour, drawn behind the menus ---- */
+static float bgBoost = 0;                       /* speed rounds turn this up as the clock runs out */
+static const char* const BG_NAMES[4] = { "Off", "Code rain", "Pointers", "Circuit" };
+
+static void DrawLiveBg(Color accent)
+{
+    int style = sd.bg;
+    if (bgBoost > 0.05f && style == 0) style = 1;
+    if (style == 0) return;
+    float t = (float)GetTime(), boost = bgBoost;
+    if (style == 1) {                           /* columns of code falling, like a terminal waking up */
+        static const char GL[] = "01{}();<>#*&=+[]->%x";
+        const int gl = (int)sizeof GL - 1;
+        for (int i = 0; i < W / 30; i++) {
+            unsigned h = Hash(i, 11);
+            float sp = 26.0f + (float)(h % 60) + boost * 140.0f;
+            float y0 = fmodf(t * sp + (float)(Hash(i, 3) % 900), H + 240.0f) - 120.0f;
+            for (int k = 0; k < 9; k++) {
+                char g[2] = { GL[Hash(i * 9 + k, (int)(t * (1.2f + (h % 3) * 0.6f))) % (unsigned)gl], 0 };
+                float a = (0.15f - k * 0.015f) * (1.0f + boost * 2.2f);
+                Color c = k == 0 ? ColorBrightness(accent, 0.5f) : accent;
+                DrawTextEx(fCode, g, (Vector2) { i * 30.0f + 10, y0 - k * 19 }, 16, 0, Fade(c, a));
+            }
+        }
+    }
+    else if (style == 2) {                    /* memory cells drifting about, with pointers between them */
+        enum { N = 12 };
+        Vector2 p[N];
+        for (int i = 0; i < N; i++) {
+            float bx = (Hash(i, 1) % 1000) / 1000.0f * (W - 120) + 20, by = (Hash(i, 2) % 1000) / 1000.0f * (H - 80) + 20;
+            p[i] = (Vector2){ bx + sinf(t * 0.21f + i) * 36, by + cosf(t * 0.17f + i * 1.3f) * 28 };
+        }
+        for (int i = 0; i < N; i++) {
+            int j = (i * 5 + 3) % N;
+            if (j == i) continue;
+            Vector2 a = { p[i].x + 90, p[i].y + 13 }, b = { p[j].x, p[j].y + 13 };
+            DrawLineEx(a, b, 1.6f, Fade(accent, 0.10f));
+            float dx = b.x - a.x, dy = b.y - a.y, len = sqrtf(dx * dx + dy * dy) + 0.001f;
+            Vector2 d = { dx / len, dy / len }, n = { -d.y, d.x };
+            DrawTriangle(b, (Vector2) { b.x - d.x * 10 + n.x * 5, b.y - d.y * 10 + n.y * 5 }, (Vector2) { b.x - d.x * 10 - n.x * 5, b.y - d.y * 10 - n.y * 5 }, Fade(accent, 0.16f));
+        }
+        for (int i = 0; i < N; i++) {
+            float glow = 0.5f + 0.5f * sinf(t * 1.4f + i * 2.1f);
+            Rectangle r = { p[i].x, p[i].y, 90, 26 };
+            DrawRectangleRounded(r, 0.3f, 6, Fade(accent, 0.05f + 0.04f * glow));
+            DrawRectangleRounded((Rectangle) { r.x, r.y, 3, r.height }, 0.5f, 4, Fade(accent, 0.28f));
+            DrawTextEx(fCode, TextFormat("0x%04X", Hash(i, 9) & 0xFFFF), (Vector2) { r.x + 9, r.y + 6 }, 13, 0, Fade(accent, 0.20f + 0.10f * glow));
+        }
+    }
+    else {                                    /* circuit traces with pulses running along them */
+        for (int i = 0; i < 16; i++) {
+            Vector2 pts[6];
+            float x = (float)((Hash(i, 5) % 60) * 20), y = (float)((Hash(i, 6) % 36) * 20);
+            pts[0] = (Vector2){ x, y };
+            float total = 0, seg[5];
+            for (int k = 0; k < 5; k++) {
+                float len = 40.0f + (Hash(i, 20 + k) % 6) * 20.0f, sgn = (Hash(i, 30 + k) & 1) ? 1.0f : -1.0f;
+                if (k % 2 == 0) x += len * sgn; else y += len * sgn;
+                pts[k + 1] = (Vector2){ x, y };
+                seg[k] = len; total += len;
+            }
+            for (int k = 0; k < 5; k++) DrawLineEx(pts[k], pts[k + 1], 2, Fade(accent, 0.09f));
+            for (int k = 0; k < 6; k++) DrawRectangle((int)pts[k].x - 3, (int)pts[k].y - 3, 6, 6, Fade(accent, 0.16f));
+            float sp = (34.0f + (i % 5) * 12.0f) * (1.0f + boost * 3.0f);
+            float u = fmodf(t * sp + i * 57.0f, total + 160.0f);
+            for (int tail = 0; tail < 4; tail++) {
+                float d = u - tail * 9.0f;
+                if (d < 0 || d > total) continue;
+                int k = 0;
+                while (k < 4 && d > seg[k]) { d -= seg[k]; k++; }
+                float f = d / seg[k];
+                Vector2 q = { pts[k].x + (pts[k + 1].x - pts[k].x) * f, pts[k].y + (pts[k + 1].y - pts[k].y) * f };
+                DrawCircleV(q, tail == 0 ? 3.5f : 2.5f, Fade(tail == 0 ? ColorBrightness(accent, 0.5f) : accent, (tail == 0 ? 0.55f : 0.3f - tail * 0.06f)));
+            }
+        }
+    }
+}
+
+/* ---- speed rounds: generated "what is x?" snippets ---- */
+typedef struct {
+    char line[7][56];
+    char note[7][24];                           /* the value after each line, shown after a miss */
+    int n, ans, opts[4], correct;
+    char var[8];
+} SpQ;
+
+static int Rnd(int lo, int hi) { return GetRandomValue(lo, hi); }
+static void SpLine(SpQ* q, const char* code, const char* note)
+{
+    if (q->n >= 7) return;
+    snprintf(q->line[q->n], sizeof q->line[0], "%s", code);
+    snprintf(q->note[q->n], sizeof q->note[0], "%s", note);
+    q->n++;
+}
+static const char* SpVal(const char* name, int v) { return TextFormat("%s = %d", name, v); }
+
+/* kind = which lesson: 0 arithmetic, 1 control flow, 2 functions/arrays, 3 pointers/references, 4 structs/memory */
+static void SpMake(SpQ* q, int lg, int kind)
+{
+    memset(q, 0, sizeof * q);
+    char b[64];
+    switch (kind) {
+    case 0: {
+        int a = Rnd(2, 9), bb = Rnd(2, 9), op = Rnd(0, 2), k = Rnd(3, 7);
+        int c = op == 0 ? a + bb : op == 1 ? a * bb : a * bb - a;
+        snprintf(b, sizeof b, "int a = %d;", a); SpLine(q, b, SpVal("a", a));
+        snprintf(b, sizeof b, "int b = %d;", bb); SpLine(q, b, SpVal("b", bb));
+        snprintf(b, sizeof b, op == 0 ? "int c = a + b;" : op == 1 ? "int c = a * b;" : "int c = a * b - a;"); SpLine(q, b, SpVal("c", c));
+        int a2 = c % k;
+        snprintf(b, sizeof b, "a = c %% %d;", k); SpLine(q, b, SpVal("a", a2));
+        if (Rnd(0, 1)) { q->ans = a2; strcpy(q->var, "a"); }
+        else { q->ans = c; strcpy(q->var, "c"); }
+        break;
+    }
+    case 1: {
+        int v = Rnd(0, 2);
+        if (v == 0) {
+            int n = Rnd(3, 5), k = Rnd(1, 3), s = 0;
+            SpLine(q, "int s = 0;", "s = 0");
+            snprintf(b, sizeof b, "for (int i = 1; i <= %d; i++)", n); SpLine(q, b, "i goes 1, 2, 3...");
+            for (int i = 1; i <= n; i++) s += i * k;
+            snprintf(b, sizeof b, "    s += i * %d;", k); SpLine(q, b, SpVal("s", s));
+            q->ans = s; strcpy(q->var, "s");
+        }
+        else if (v == 1) {
+            int x = Rnd(3, 12), x0 = x;
+            snprintf(b, sizeof b, "int x = %d;", x0); SpLine(q, b, SpVal("x", x0));
+            SpLine(q, "if (x % 2 == 0)", x % 2 == 0 ? "true: even" : "false: odd");
+            SpLine(q, "    x = x / 2;", x % 2 == 0 ? SpVal("x", x / 2) : "(skipped)");
+            SpLine(q, "else", "");
+            SpLine(q, "    x = x * 3 + 1;", x % 2 ? SpVal("x", x * 3 + 1) : "(skipped)");
+            q->ans = x % 2 == 0 ? x / 2 : x * 3 + 1; strcpy(q->var, "x");
+        }
+        else {
+            static const int ns[5] = { 8, 12, 16, 20, 40 };
+            int n = ns[Rnd(0, 4)], n0 = n, c = 0;
+            snprintf(b, sizeof b, "int n = %d;", n0); SpLine(q, b, SpVal("n", n0));
+            SpLine(q, "int c = 0;", "c = 0");
+            SpLine(q, "while (n > 1) {", "repeat while n > 1");
+            SpLine(q, "    n = n / 2;", "n is halved");
+            while (n > 1) { n /= 2; c++; }
+            SpLine(q, "    c++;", SpVal("c", c));
+            SpLine(q, "}", "");
+            q->ans = c; strcpy(q->var, "c");
+        }
+        break;
+    }
+    case 2: {
+        int v = Rnd(0, 1);
+        if (lg == 1) {
+            int p = Rnd(2, 6), r = Rnd(2, 6), k = Rnd(2, 5);
+            snprintf(b, sizeof b, "vector<int> v = { %d, %d };", p, r); SpLine(q, b, "v = {..} size 2");
+            snprintf(b, sizeof b, "v.push_back(%d);", k); SpLine(q, b, "size is now 3");
+            SpLine(q, "int t = v.size() * v[2];", SpVal("t", 3 * k));
+            q->ans = 3 * k; strcpy(q->var, "t");
+        }
+        else if (v == 0) {
+            int k = Rnd(2, 4), c = Rnd(1, 5), a0 = Rnd(1, 4), d = Rnd(0, 2);
+            int f1 = a0 * k + c, a2 = (f1 - d) * k + c;
+            snprintf(b, sizeof b, "int f(int n) { return n * %d + %d; }", k, c); SpLine(q, b, "f doubles-ish");
+            snprintf(b, sizeof b, "int a = f(%d);", a0); SpLine(q, b, SpVal("a", f1));
+            snprintf(b, sizeof b, "a = f(a - %d);", d); SpLine(q, b, SpVal("a", a2));
+            q->ans = a2; strcpy(q->var, "a");
+        }
+        else {
+            int e[4]; for (int i = 0; i < 4; i++) e[i] = Rnd(1, 9);
+            snprintf(b, sizeof b, "int v[4] = { %d, %d, %d, %d };", e[0], e[1], e[2], e[3]); SpLine(q, b, "indexes 0 to 3");
+            SpLine(q, "int t = v[1] + v[3];", SpVal("t", e[1] + e[3]));
+            SpLine(q, "v[0] = t;", SpVal("v[0]", e[1] + e[3]));
+            q->ans = e[1] + e[3]; strcpy(q->var, "v[0]");
+        }
+        break;
+    }
+    case 3: {
+        int v = Rnd(0, 1);
+        if (v == 0) {
+            int a = Rnd(2, 9), k = Rnd(1, 6), m = Rnd(2, 4);
+            snprintf(b, sizeof b, "int a = %d;", a); SpLine(q, b, SpVal("a", a));
+            SpLine(q, lg ? "int &r = a;" : "int *p = &a;", lg ? "r is another name for a" : "p holds a's address");
+            snprintf(b, sizeof b, lg ? "r = r + %d;" : "*p = *p + %d;", k); SpLine(q, b, SpVal("a", a + k));
+            snprintf(b, sizeof b, "a = a * %d;", m); SpLine(q, b, SpVal("a", (a + k) * m));
+            q->ans = (a + k) * m; strcpy(q->var, "a");
+        }
+        else {
+            int x = Rnd(2, 9), y = Rnd(2, 9);
+            snprintf(b, sizeof b, "int x = %d, y = %d;", x, y); SpLine(q, b, "x and y set");
+            SpLine(q, "int *p = &x, *q = &y;", "p -> x, q -> y");
+            SpLine(q, "*p = *p + *q;", SpVal("x", x + y));
+            SpLine(q, "*q = *p - *q;", SpVal("y", x));
+            SpLine(q, "*p = *p - *q;", SpVal("x", y));
+            q->ans = y; strcpy(q->var, "x");
+        }
+        break;
+    }
+    default: {
+        int v = Rnd(0, 1);
+        if (v == 0) {
+            int x = Rnd(1, 6), y = Rnd(2, 6), k = Rnd(1, 4);
+            snprintf(b, sizeof b, "struct P { int x, y; } p = { %d, %d };", x, y); SpLine(q, b, "p.x and p.y set");
+            snprintf(b, sizeof b, "p.x += %d;", k); SpLine(q, b, SpVal("p.x", x + k));
+            SpLine(q, "int t = p.x * p.y;", SpVal("t", (x + k) * y));
+            q->ans = (x + k) * y; strcpy(q->var, "t");
+        }
+        else {
+            int a = Rnd(1, 9), bb = Rnd(1, 9), c = Rnd(1, 9);
+            snprintf(b, sizeof b, "int a[3] = { %d, %d, %d };", a, bb, c); SpLine(q, b, "a[0], a[1], a[2]");
+            SpLine(q, "int *p = a;", "p -> a[0]");
+            SpLine(q, "p++;", "p -> a[1]");
+            SpLine(q, "int t = *p + p[1];", SpVal("t", bb + c));
+            q->ans = bb + c; strcpy(q->var, "t");
+        }
+        break;
+    }
+    }
+    /* three believable wrong answers, in a random order */
+    int wrong[4], nw = 0, tries = 0;
+    static const int off[] = { 1, -1, 2, -2, 3, 5, -3, 10, 4 };
+    while (nw < 3 && tries < 40) {
+        int cand = q->ans + off[Rnd(0, 8)], dup = cand == q->ans;
+        for (int i = 0; i < nw; i++) if (wrong[i] == cand) dup = 1;
+        tries++;
+        if (!dup) wrong[nw++] = cand;
+    }
+    while (nw < 3) wrong[nw] = q->ans + 100 + nw, nw++;
+    q->correct = Rnd(0, 3);
+    for (int i = 0, w = 0; i < 4; i++) q->opts[i] = i == q->correct ? q->ans : wrong[w++];
+}
+
+#define SP_TARGET 10
+#define SP_TIME 10.0f
+static int spLesson = 0;
+static SpQ spQ;
+static int spStreak = 0, spPick = -1, spPhase = 0;        /* phase: 0 asking, 1 showing the answer, 2 over */
+static float spT = SP_TIME, spShow = 0, spShake = 0;
+static bool spWon = false, spTimeout = false, spScored = false, spMiss = false;
+
+static void SpNext(void)
+{
+    SpMake(&spQ, lang, spLesson % 5);
+    spPick = -1; spPhase = 0; spT = SP_TIME; spShow = 0; spScored = false; spMiss = false;
+}
+static void StartSpeed(int les)
+{
+    spLesson = les; spStreak = 0; spWon = false; spTimeout = false;
+    SpNext();
+    screen = SCR_SPEED;
+}
+
+static void DrawSpeed(Color accent)
+{
+    float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
+    float urg = spPhase == 0 ? (spT < 5.0f ? 1.0f - spT / 5.0f : 0.0f) : 0.0f;     /* 0..1 over the last five seconds */
+    bgBoost = urg;
+    spShake = urg * urg * 6.0f;
+    float shx = spShake ? (float)GetRandomValue(-100, 100) / 100.0f * spShake : 0, shy = spShake ? (float)GetRandomValue(-100, 100) / 100.0f * spShake : 0;
+
+    TopBar();
+    if (Button((Rectangle) { 24, 14, 104, 44 }, BACKL, SURF2, 16)) { screen = SCR_STUDY; bgBoost = 0; return; }
+    TxtFit(fMed, TextFormat("Speed round  /  %s", LESSONS[lang][spLesson].name + 3), 150, 20, 22, 640, TXT);
+    /* progress: ten pips */
+    for (int i = 0; i < SP_TARGET; i++) {
+        float px = W - 36 - (SP_TARGET - i) * 24.0f;
+        DrawCircle((int)px + 8, 36, 8, i < spStreak ? (Color) { 255, 214, 90, 255 } : SURF2);
+        if (i < spStreak) DrawCircle((int)px + 8, 36, 12, Fade((Color) { 255, 214, 90, 255 }, 0.15f));
+    }
+
+    if (spPhase == 2) {
+        float cx = W / 2.0f;
+        Panel((Rectangle) { cx - 360, 110, 720, spWon ? 360 : 548 }, 0.05f, SURF, spWon ? (Color) { 255, 214, 90, 255 } : BORDER);
+        if (spWon) {
+            CenterTxt(fBold, "Gold!", cx, 150, 54, (Color) { 255, 214, 90, 255 });
+            CenterTxt(fReg, TextFormat("Ten in a row on \"%s\".", LESSONS[lang][spLesson].name + 3), cx, 226, 20, TXT);
+            for (int k = 0; k < 5; k++) {
+                float a = -PI / 2 + k * 2 * PI / 5, ox = cx, oy = 340;
+                DrawTriangle((Vector2) { ox, oy }, (Vector2) { ox + cosf(a - 0.32f) * 14, oy + sinf(a - 0.32f) * 14 }, (Vector2) { ox + cosf(a) * 42, oy + sinf(a) * 42 }, (Color) { 255, 214, 90, 255 });
+                DrawTriangle((Vector2) { ox, oy }, (Vector2) { ox + cosf(a) * 42, oy + sinf(a) * 42 }, (Vector2) { ox + cosf(a + 0.32f) * 14, oy + sinf(a + 0.32f) * 14 }, (Color) { 255, 214, 90, 255 });
+            }
+        }
+        else {
+            CenterTxt(fBold, spTimeout ? "Time's up" : "Not quite", cx, 132, 38, BAD);
+            CenterTxt(fReg, TextFormat("%d in a row. Here is what each line did:", spStreak), cx, 184, 18, DIM);
+            float y = 232;
+            for (int i = 0; i < spQ.n; i++) {
+                Txt(fCode, spQ.line[i], cx - 330, y, 17, TXT);
+                if (spQ.note[i][0]) Txt(fCode, spQ.note[i], cx + 100, y, 16, (Color) { 120, 220, 170, 255 });
+                y += 34;
+            }
+            CenterTxt(fBold, TextFormat("%s was %d", spQ.var, spQ.ans), cx, y + 18, 26, GOOD);
+        }
+        float by = spWon ? 430 : 600;
+        if (Button((Rectangle) { cx - 200, by, 190, 52 }, "Try again", accent, 17)) StartSpeed(spLesson);
+        if (Button((Rectangle) { cx + 10, by, 190, 52 }, "Back", SURF2, 17)) { screen = SCR_STUDY; bgBoost = 0; }
+        DrawCompanion(1090, 640, 2.0f, spWon ? MOOD_CHEER : MOOD_SAD, false);
+        return;
+    }
+
+    /* the timer */
+    if (spPhase == 0) {
+        spT -= dt;
+        if (spT <= 0) { spT = 0; spPick = -2; spTimeout = true; spPhase = 1; spScored = false; spShow = 1.4f; }
+    }
+    Rectangle bar = { 150, 96, 900, 10 };
+    DrawRectangleRounded(bar, 0.5f, 6, SURF2);
+    Color tc = urg > 0 ? (Color) { (unsigned char)(80 + 160 * urg), (unsigned char)(200 - 110 * urg), 110, 255 } : GOOD;
+    DrawRectangleRounded((Rectangle) { bar.x, bar.y, bar.width* (spT / SP_TIME), bar.height }, 0.5f, 6, tc);
+    CenterTxt(fCode, TextFormat("%.1f", spT), W / 2.0f, 112, 18, urg > 0 ? tc : DIM);
+
+    /* the code: it grows a little as time runs out */
+    float fs = 22 + 5 * urg, lh = fs * 1.55f;
+    float ph = 28 + spQ.n * lh;
+    Rectangle cp = { 150 + shx, 150 + shy, 900, ph };
+    Panel(cp, 0.04f, CODEBG, urg > 0 ? Fade(BAD, 0.4f + 0.5f * urg * (0.5f + 0.5f * sinf((float)GetTime() * 14))) : BORDER);
+    float cw = MeasureTextEx(fCode, "M", fs, 0).x;
+    for (int i = 0; i < spQ.n; i++) HighlightLine(spQ.line[i], cp.x + 30, cp.y + 14 + i * lh, fs, cw);
+
+    float qy = cp.y + cp.height + 28;
+    CenterTxt(fBold, TextFormat("What is %s at the end?", spQ.var), W / 2.0f + shx, qy + shy, 30, TXT);
+
+    /* the four answers */
+    float oy = qy + 64;
+    for (int i = 0; i < 4; i++) {
+        Rectangle r = { 150.0f + (i % 2) * 456 + shx, oy + (i / 2) * 84 + shy, 444, 70 };
+        bool hov = spPhase == 0 && CheckCollisionPointRec(GetMousePosition(), r);
+        Color fill = SURF, edge = hov ? accent : BORDER;
+        if (spPhase == 1) {
+            if (i == spQ.correct) { fill = Fade(GOOD, 0.18f); edge = GOOD; }
+            else if (i == spPick) { fill = Fade(BAD, 0.18f); edge = BAD; }
+        }
+        if (hov) hand = true;
+        Panel(r, 0.18f, hov ? SURF2 : fill, edge);
+        DrawCircle((int)r.x + 34, (int)r.y + 35, 17, Fade(accent, 0.18f));
+        CenterTxt(fBold, TextFormat("%d", i + 1), r.x + 34, r.y + 23, 20, accent);
+        CenterTxt(fCode, TextFormat("%d", spQ.opts[i]), r.x + r.width / 2 + 10, r.y + 20, 28, TXT);
+        if (spPhase == 0 && ((hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) || IsKeyPressed(KEY_ONE + i))) { spPick = i; spPhase = 1; spScored = false; spShow = 0.7f; }
+    }
+
+    if (spPhase == 1) {                         /* a short pause showing the answer, then on (or the end) */
+        if (!spScored) {
+            bool ok = spPick == spQ.correct;
+            int skill = lang * NLESSONS + spLesson;
+            spScored = true; spMiss = !ok;
+            if (ok) { spStreak++; SkillGain(skill, 8 + spStreak, true); }
+            else    SkillGain(skill, -3, false);
+            if (spStreak > sd.bestStreak[lang][spLesson]) sd.bestStreak[lang][spLesson] = spStreak;
+            if (ok && spStreak >= SP_TARGET) {
+                spWon = true;
+                if (!sd.gold[lang][spLesson]) { sd.gold[lang][spLesson] = 1; GainCredits(25, "Gold speed round"); }
+            }
+            SaveStudy();
+        }
+        spShow -= dt;
+        if (spShow <= 0) { if (spMiss || spWon) spPhase = 2; else SpNext(); }
+    }
+    DrawCompanion(1122, 668, 1.6f, spPhase == 1 ? (spMiss ? MOOD_SAD : MOOD_CHEER) : MOOD_THINK, false);
+}
+
+/* ---- review sessions: the questions that are due, one at a time ---- */
+static int srQueue[POOL_N], srN = 0, srPos = 0, srRight = 0, srPick = -1;
+static bool srTimed = false, srScored = false;
+static float srTimer = 0;
+#define SR_TIME 15.0f
+
+static void SrBuild(bool challenge)
+{
+    int today = DayNow(), ids[POOL_N], n = 0;
+    float sc[POOL_N];
+    for (int id = 0; id < POOL_N; id++) {
+        if (!PoolValid(id)) continue;
+        const SRec* r = &sd.rec[id];
+        bool due = SrDue(r, today);
+        float s;
+        if (challenge) s = (due ? 50.0f + (today - r->due) * 5.0f : (r->seen ? 0.0f : 15.0f)) + r->wrong * 6.0f - r->right * 2.0f;
+        else if (due) s = 100.0f + (today - r->due);
+        else if (!r->seen) s = 10.0f - id * 0.01f;
+        else continue;
+        int k = n++;
+        while (k > 0 && sc[k - 1] < s) { sc[k] = sc[k - 1]; ids[k] = ids[k - 1]; k--; }
+        sc[k] = s; ids[k] = id;
+    }
+    srN = n < (challenge ? 10 : 12) ? n : (challenge ? 10 : 12);
+    for (int i = 0; i < srN; i++) srQueue[i] = ids[i];
+    srPos = 0; srRight = 0; srPick = -1; srScored = false; srTimed = challenge; srTimer = SR_TIME;
+}
+static void StartReview(bool challenge) { SrBuild(challenge); screen = SCR_STUDYRUN; }
+
+static void DrawStudyRun(Color accent)
+{
+    float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
+    const float x0 = 150, cw = 900;
+    TopBar();
+    if (Button((Rectangle) { 24, 14, 104, 44 }, BACKL, SURF2, 16)) { screen = SCR_STUDY; return; }
+    Txt(fMed, srTimed ? "Short challenge" : "Review", 150, 20, 22, TXT);
+    DrawRectangle(0, 72, W, 4, SURF2);
+    if (srN > 0) DrawRectangle(0, 72, (int)(W * (srPos + (srPick != -1 ? 1 : 0)) / (float)srN), 4, accent);
+
+    if (srN == 0 || srPos >= srN) {
+        float cx = W / 2.0f;
+        Panel((Rectangle) { cx - 320, 150, 640, 420 }, 0.05f, SURF, BORDER);
+        if (srN == 0) {
+            CenterTxt(fBold, "Nothing to review", cx, 200, 34, TXT);
+            CenterFit(fReg, "You're all caught up. Answer quiz and battle questions and they will show up here.", cx, 260, 18, 560, DIM);
+        }
+        else {
+            CenterTxt(fBold, "Session complete", cx, 190, 34, TXT);
+            CenterTxt(fBold, TextFormat("%d / %d", srRight, srN), cx, 258, 64, srRight == srN ? GOOD : accent);
+            CenterFit(fReg, srRight == srN ? "Perfect. These will wait longer before they come back." : "The ones you missed come straight back next time.", cx, 360, 18, 560, DIM);
+        }
+        if (Button((Rectangle) { cx - 200, 470, 190, 52 }, "Back to hub", SURF2, 17)) screen = SCR_STUDY;
+        if (Button((Rectangle) { cx + 10, 470, 190, 52 }, "Another round", accent, 17)) SrBuild(srTimed);
+        DrawCompanion(1090, 640, 2.0f, srN && srRight * 2 >= srN ? MOOD_CHEER : MOOD_IDLE, false);
+        return;
+    }
+
+    int id = srQueue[srPos];
+    PoolQ Q; PoolGet(id, &Q);
+    bool answered = srPick != -1;
+    if (srTimed && !answered) {
+        srTimer -= dt;
+        if (srTimer <= 0) { srTimer = 0; srPick = -2; }
+    }
+    Txt(fBold, TextFormat("QUESTION %d OF %d", srPos + 1, srN), x0, 98, 14, accent);
+    Pill(PoolSrc(id), x0 + 190, 92, SkillCol(Q.skill));
+    if (srTimed) {
+        Rectangle bar = { W - 36 - 220.0f, 102, 220, 8 };
+        DrawRectangleRounded(bar, 0.5f, 6, SURF2);
+        float f = srTimer / SR_TIME;
+        DrawRectangleRounded((Rectangle) { bar.x, bar.y, bar.width* f, bar.height }, 0.5f, 6, f < 0.3f ? BAD : GOOD);
+    }
+    int qEnd = Wrapped(fBold, Q.q, x0, 136, cw, 26, TXT);
+    float y = (float)qEnd + 10;
+    if (Q.code) y = (float)DrawCode(Q.code, x0, y, cw, 16, "snippet.c") + 14;
+    float yOpt = y > 220 ? y : 220;
+    for (int i = 0; i < 4; i++) {
+        Rectangle r = { x0, yOpt + i * 64, cw, 54 };
+        bool hov = !answered && CheckCollisionPointRec(GetMousePosition(), r);
+        Color fill = SURF, edge = hov ? accent : BORDER;
+        if (answered) {
+            if (i == Q.correct) { fill = Fade(GOOD, 0.16f); edge = GOOD; }
+            else if (i == srPick) { fill = Fade(BAD, 0.16f); edge = BAD; }
+        }
+        if (hov) hand = true;
+        Panel(r, 0.18f, hov ? SURF2 : fill, edge);
+        DrawCircle((int)r.x + 30, (int)r.y + 27, 15, Fade(accent, 0.18f));
+        CenterTxt(fBold, TextFormat("%d", i + 1), r.x + 30, r.y + 16, 17, accent);
+        TxtFit(fReg, Q.opts[i], r.x + 62, r.y + 14, 20, cw - 90, TXT);
+        if (!answered && ((hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) || IsKeyPressed(KEY_ONE + i))) srPick = i;
+    }
+    answered = srPick != -1;
+    if (answered && !srScored) {
+        bool ok = srPick == Q.correct;
+        StudyRecord(id, ok, srTimed ? 2 : 1);
+        if (ok) srRight++;
+        srScored = true;
+    }
+    if (answered) {
+        bool ok = srPick == Q.correct;
+        Color col = ok ? GOOD : BAD;
+        float fy = yOpt + 4 * 64 + 6;
+        const SRec* r = &sd.rec[id];
+        const char* when = ok ? (r->interval <= 1 ? "Back tomorrow" : TextFormat("Back in %d days", r->interval)) : "Back again soon";
+        float ph = 46 + WrapH(fReg, Q.expl, cw - 44, 16) + 8;
+        Panel((Rectangle) { x0, fy, cw, ph }, 0.12f, Fade(col, 0.10f), col);
+        Txt(fBold, srPick == -2 ? "Time's up" : (ok ? "Correct!" : "Not quite"), x0 + 22, fy + 12, 20, col);
+        Txt(fReg, when, x0 + cw - 22 - TxtW(fReg, when, 14), fy + 16, 14, DIM);
+        Wrapped(fReg, Q.expl, x0 + 22, fy + 44, cw - 44, 16, (Color) { 205, 211, 228, 255 });
+        bool last = srPos == srN - 1;
+        if (Button((Rectangle) { W - 196, 698, 160, 48 }, last ? "Finish" : "Next >", accent, 16) || IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)) {
+            srPos++; srPick = -1; srScored = false; srTimer = SR_TIME;
+        }
+    }
+    DrawCompanion(1122, 668, 1.5f, !answered ? MOOD_THINK : (srPick == Q.correct ? MOOD_CHEER : MOOD_SAD), false);
+}
+
+/* ---- notes for a lesson ---- */
+static int notesLang = 0, notesLesson = 0;
+static void StartNotes(int lg, int les) { notesLang = lg; notesLesson = les; screen = SCR_NOTES; }
+
+static void DrawNotes(Color accent)
+{
+    char* buf = notes[notesLang][notesLesson];
+    int cap = (int)sizeof notes[0][0] - 1, len = (int)strlen(buf);
+    TopBar();
+    if (Button((Rectangle) { 24, 14, 104, 44 }, BACKL, SURF2, 16)) { screen = SCR_LESSON; return; }
+    TxtFit(fMed, TextFormat("Notes  /  %s  /  %s", LANG_NAME[notesLang], LESSONS[notesLang][notesLesson].name + 3), 150, 20, 22, 760, TXT);
+    Rectangle ed = { 150, 100, 900, 520 };
+    Panel(ed, 0.03f, CODEBG, accent);
+    bool changed = false;
+    int ch;
+    while ((ch = GetCharPressed()) > 0) if (ch >= 32 && ch <= 126 && len < cap) { buf[len++] = (char)ch; buf[len] = 0; changed = true; }
+    if (IsKeyPressed(KEY_ENTER) && len < cap) { buf[len++] = '\n'; buf[len] = 0; changed = true; }
+    static float bs = 0;
+    if (IsKeyPressed(KEY_BACKSPACE)) { if (len > 0) { buf[--len] = 0; changed = true; } bs = 0; }
+    else if (IsKeyDown(KEY_BACKSPACE)) { bs += GetFrameTime(); if (bs > 0.4f && len > 0) { buf[--len] = 0; changed = true; bs = 0.36f; } }
+    if (changed) SaveNotes();
+    ibeam = CheckCollisionPointRec(GetMousePosition(), ed);
+    ScissorT((int)ed.x, (int)ed.y, (int)ed.width, (int)ed.height);
+    if (len == 0) Txt(fReg, "Write anything here: explanations in your own words, reminders, questions for later.", ed.x + 24, ed.y + 22, 17, DIM);
+    else {
+        char shown[sizeof notes[0][0] + 2];
+        snprintf(shown, sizeof shown, "%s%s", buf, ((int)(GetTime() * 2) & 1) ? "|" : " ");
+        Wrapped(fReg, shown, ed.x + 24, ed.y + 22, ed.width - 48, 19, TXT);
+    }
+    EndScissorMode();
+    Txt(fReg, TextFormat("%d / %d characters   -   saved as you type", len, cap), 150, 632, 14, DIM);
+    if (Button((Rectangle) { 1050 - 130, 628, 130, 38 }, "Clear", SURF2, 15) && len) { buf[0] = 0; SaveNotes(); }
+    if (Button((Rectangle) { 150, 680, 220, 48 }, "Back to the lesson", accent, 16)) screen = SCR_LESSON;
+}
+
+static void StarShape(float cx, float cy, float r, Color c)
+{
+    for (int k = 0; k < 5; k++) {
+        float a = -PI / 2 + k * 2 * PI / 5;
+        Vector2 m = { cx, cy };
+        DrawTriangle(m, (Vector2) { cx + cosf(a - 0.34f) * r * 0.46f, cy + sinf(a - 0.34f) * r * 0.46f }, (Vector2) { cx + cosf(a) * r, cy + sinf(a) * r }, c);
+        DrawTriangle(m, (Vector2) { cx + cosf(a) * r, cy + sinf(a) * r }, (Vector2) { cx + cosf(a + 0.34f) * r * 0.46f, cy + sinf(a + 0.34f) * r * 0.46f }, c);
+    }
+}
+
+/* ---- the extras on the lesson screen: a bookmark star and a Notes button ---- */
+static void DrawLessonExtras(Color accent)
+{
+    (void)accent;
+    Vector2 m = GetMousePosition();
+    float sx = W - 48 - (LESSONS[lang][lessonIdx].nPages - 1) * 26 - 44, sy = 36;
+    bool hov = (m.x - sx) * (m.x - sx) + (m.y - sy) * (m.y - sy) < 18 * 18;
+    bool on = sd.mark[lang][lessonIdx] != 0;
+    Color sc = (Color){ 255, 214, 90, 255 };
+    if (hov) hand = true;
+    StarShape(sx, sy + 1, 13, on ? sc : (hov ? TXT : DIM));
+    if (!on) StarShape(sx, sy + 1, 8, SURF);
+    if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { sd.mark[lang][lessonIdx] ^= 1; SaveStudy(); Notify(sd.mark[lang][lessonIdx] ? "Lesson saved" : "Bookmark removed", sc); }
+    bool has = notes[lang][lessonIdx][0] != 0;
+    if (Button((Rectangle) { 204, 704, 130, 44 }, has ? "Notes (1)" : "Notes", (Color) { 80, 90, 130, 255 }, 16)) StartNotes(lang, lessonIdx);
+}
+
+/* ---- review the answers of the quiz you just took ---- */
+
+static void DrawAnswerReview(Color accent)
+{
+    const Lesson* L = &LESSONS[lang][lessonIdx];
+    TopBar();
+    if (Button((Rectangle) { 24, 14, 104, 44 }, BACKL, SURF2, 16)) { screen = SCR_RESULT; return; }
+    TxtFit(fMed, TextFormat("Review answers  /  %s", L->name + 3), 150, 20, 22, 760, TXT);
+    Txt(fMed, TextFormat("Score  %d / %d", score, L->nQ), W - 36 - TxtW(fMed, TextFormat("Score  %d / %d", score, L->nQ), 18), 22, 18, accent);
+    static float sc = 0;
+    sc -= GetMouseWheelMove() * 50;
+    float y0 = 92;
+    float total = 0;
+    float hs[3];
+    for (int i = 0; i < L->nQ; i++) {
+        const Question* Q = &L->qs[i];
+        hs[i] = 130 + WrapH(fBold, Q->q, 860, 20) + WrapH(fReg, Q->expl, 860, 15);
+        total += hs[i] + 14;
+    }
+    float maxS = total - (H - y0 - 20); if (maxS < 0) maxS = 0;
+    if (sc < 0) sc = 0;
+    if (sc > maxS) sc = maxS;
+    ScissorT(0, 76, W, H - 76);
+    float y = y0 - sc;
+    for (int i = 0; i < L->nQ; i++) {
+        const Question* Q = &L->qs[i];
+        bool ok = quizPick[i] == Q->correct;
+        bool skipped = quizPick[i] < 0;
+        Color col = skipped ? DIM : (ok ? GOOD : BAD);
+        Rectangle card = { 150, y, 900, hs[i] };
+        Panel(card, 0.05f, Fade(col, 0.07f), Fade(col, 0.7f));
+        Txt(fBold, TextFormat("QUESTION %d", i + 1), card.x + 22, card.y + 14, 13, accent);
+        Txt(fBold, skipped ? "Not answered" : (ok ? "Correct" : "Not quite"), card.x + card.width - 22 - TxtW(fBold, skipped ? "Not answered" : (ok ? "Correct" : "Not quite"), 15), card.y + 13, 15, col);
+        float qy = (float)Wrapped(fBold, Q->q, card.x + 22, card.y + 38, 860, 20, TXT) + 6;
+        const char* yours = skipped ? "-" : (quizWasTyped[i] ? quizTypedTxt[i] : Q->opts[quizPick[i]]);
+        Txt(fBold, "You:", card.x + 22, qy, 15, DIM);
+        TxtFit(fReg, yours, card.x + 80, qy, 16, 760, ok ? GOOD : BAD);
+        Txt(fBold, "Answer:", card.x + 22, qy + 28, 15, DIM);
+        TxtFit(fReg, Q->opts[Q->correct], card.x + 100, qy + 28, 16, 740, GOOD);
+        Wrapped(fReg, Q->expl, card.x + 22, qy + 62, 860, 15, (Color) { 205, 211, 228, 255 });
+        y += hs[i] + 14;
+    }
+    EndScissorMode();
+    DrawCompanion(1122, 700, 1.2f, MOOD_IDLE, false);
+}
+
+/* ---- the Study hub ---- */
+static int hubTab = 0;                          /* 0 review, 1 speed rounds, 2 skills, 3 saved, 4 search */
+static float hubScroll = 0;
+static char hubQuery[40] = "";
+static bool hubFocus = false;
+static void StartStudy(void) { screen = SCR_STUDY; hubScroll = 0; }
+
+typedef struct { int lg, les, page; char snip[120]; } SearchHit;
+static SearchHit hits[48];
+static int nHits = 0;
+static char hitsFor[40] = "\x01";
+
+static void SnippetAround(const char* text, const char* at, char* out, int cap)
+{
+    int back = (int)(at - text); if (back > 30) back = 30;
+    const char* s = at - back;
+    snprintf(out, (size_t)cap, "%s%.*s%s", s > text ? "..." : "", 90, s, strlen(s) > 90 ? "..." : "");
+    for (char* c = out; *c; c++) if (*c == '\n') *c = ' ';
+}
+static void RunSearch(void)
+{
+    nHits = 0;
+    snprintf(hitsFor, sizeof hitsFor, "%s", hubQuery);
+    if (strlen(hubQuery) < 2) return;
+    for (int lg = 0; lg < 2; lg++)
+        for (int les = 0; les < NLESSONS; les++) {
+            const Lesson* L = &LESSONS[lg][les];
+            const char* at;
+            if ((at = ContainsCI(L->name, hubQuery)) && nHits < 48) {
+                hits[nHits] = (SearchHit){ lg, les, 0, "" };
+                snprintf(hits[nHits].snip, sizeof hits[0].snip, "Lesson: %s", L->name);
+                nHits++;
+            }
+            for (int p = 0; p < L->nPages && nHits < 48; p++) {
+                const char* hay[2] = { L->pages[p].title, L->pages[p].text };
+                for (int k = 0; k < 2; k++)
+                    if ((at = ContainsCI(hay[k], hubQuery)) && nHits < 48) {
+                        hits[nHits] = (SearchHit){ lg, les, p, "" };
+                        SnippetAround(hay[k], at, hits[nHits].snip, (int)sizeof hits[0].snip);
+                        nHits++;
+                        break;
+                    }
+            }
+        }
+}
+
+static void HubStat(Rectangle r, const char* label, int value, Color c)
+{
+    Panel(r, 0.14f, SURF, BORDER);
+    DrawRectangleRounded((Rectangle) { r.x, r.y + 10, 4, r.height - 20 }, 0.5f, 4, c);
+    Txt(fBold, TextFormat("%d", value), r.x + 22, r.y + 8, 32, TXT);
+    Txt(fBold, label, r.x + 22, r.y + 50, 12, DIM);
+}
+
+static void DrawStudy(Color accent)
+{
+    Vector2 mouse = GetMousePosition();
+    int today = DayNow();
+    TopBar();
+    if (Button((Rectangle) { 24, 14, 104, 44 }, BACKL, SURF2, 16)) { GoMenu(); return; }
+    Txt(fBold, "Study hub", 150, 14, 30, TXT);
+    /* background style chips */
+    Txt(fReg, "Background", W - 36 - 4 * 86 - TxtW(fReg, "Background", 13) - 10, 27, 13, DIM);
+    for (int i = 0; i < 4; i++) {
+        Rectangle r = { W - 36.0f - (4 - i) * 86, 18, 80, 36 };
+        bool hov = CheckCollisionPointRec(mouse, r), on = sd.bg == i;
+        if (hov) hand = true;
+        Panel(r, 0.3f, on ? Fade(accent, 0.25f) : (hov ? SURF2 : SURF), on ? accent : BORDER);
+        CenterFit(fMed, BG_NAMES[i], r.x + r.width / 2, r.y + 9, 14, r.width - 10, on ? TXT : DIM);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { sd.bg = i; SaveStudy(); }
+    }
+
+    /* tabs */
+    static const char* tabs[5] = { "Review", "Speed rounds", "Skills", "Saved & notes", "Search" };
+    float tx = 40;
+    for (int i = 0; i < 5; i++) {
+        float tw = TxtW(fBold, tabs[i], 18) + 36;
+        Rectangle r = { tx, 88, tw, 42 };
+        bool hov = CheckCollisionPointRec(mouse, r);
+        if (hov) hand = true;
+        if (hubTab == i) { DrawRectangleRounded(r, 0.3f, 8, Fade(accent, 0.18f)); DrawRectangle((int)r.x + 12, (int)r.y + 38, (int)tw - 24, 3, accent); }
+        else if (hov) DrawRectangleRounded(r, 0.3f, 8, SURF2);
+        Txt(fBold, tabs[i], r.x + 18, r.y + 9, 18, hubTab == i ? TXT : DIM);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { hubTab = i; hubScroll = 0; hubFocus = (i == 4); }
+        tx += tw + 8;
+    }
+    DrawLine(40, 132, W - 40, 132, BORDER);
+
+    const float top = 146;
+    if (hubTab == 0) {                                          /* ---------------- review ---------------- */
+        int due = 0, fresh = 0, learned = 0, total = 0;
+        for (int id = 0; id < POOL_N; id++) {
+            if (!PoolValid(id)) continue;
+            total++;
+            const SRec* r = &sd.rec[id];
+            if (!r->seen) fresh++;
+            else { if (r->due <= today) due++; if (r->interval >= 6) learned++; }
+        }
+        HubStat((Rectangle) { 40, top, 210, 82 }, "DUE NOW", due, due ? (Color) { 255, 184, 64, 255 } : GOOD);
+        HubStat((Rectangle) { 266, top, 210, 82 }, "NEW", fresh, accent);
+        HubStat((Rectangle) { 492, top, 210, 82 }, "WELL KNOWN", learned, GOOD);
+        HubStat((Rectangle) { 718, top, 210, 82 }, "IN YOUR DECK", total - fresh, (Color) { 160, 112, 255, 255 });
+        Txt(fReg, "Questions you miss come back soon; ones you know wait longer.", 40, top + 98, 15, DIM);
+        if (Button((Rectangle) { 40, top + 128, 260, 56 }, due ? TextFormat("Start review (%d due)", due) : "Start review", accent, 18)) StartReview(false);
+        if (Button((Rectangle) { 316, top + 128, 300, 56 }, "Short challenge  (10 hardest, timed)", (Color) { 214, 140, 30, 255 }, 15)) StartReview(true);
+
+        /* the questions that need the most work */
+        Txt(fBold, "NEEDS WORK", 40, top + 210, 12, DIM);
+        int order[POOL_N], n = 0;
+        for (int id = 0; id < POOL_N; id++) if (PoolValid(id) && sd.rec[id].wrong > 0) {
+            int k = n++;
+            while (k > 0 && sd.rec[order[k - 1]].wrong - sd.rec[order[k - 1]].right < sd.rec[id].wrong - sd.rec[id].right) { order[k] = order[k - 1]; k--; }
+            order[k] = id;
+        }
+        if (!n) Txt(fReg, "Nothing yet. Answer some quiz or battle questions and your weak spots will appear here.", 40, top + 238, 16, DIM);
+        for (int i = 0; i < n && i < 5; i++) {
+            int id = order[i]; const SRec* r = &sd.rec[id]; PoolQ pq; PoolGet(id, &pq);
+            Rectangle row = { 40, top + 234 + i * 58.0f, W - 80, 50 };
+            Panel(row, 0.15f, SURF, BORDER);
+            TxtFit(fBold, pq.q, row.x + 18, row.y + 6, 16, row.width - 360, TXT);
+            TxtFit(fReg, PoolSrc(id), row.x + 18, row.y + 28, 13, row.width - 360, DIM);
+            int tot = r->right + r->wrong;
+            Txt(fBold, TextFormat("%d%% right", tot ? r->right * 100 / tot : 0), row.x + row.width - 320, row.y + 15, 16, r->right * 2 >= tot ? GOOD : BAD);
+            const char* nx = r->due <= today ? "due now" : TextFormat("due in %d d", r->due - today);
+            Txt(fReg, nx, row.x + row.width - 190, row.y + 17, 14, r->due <= today ? (Color) { 255, 184, 64, 255 } : DIM);
+            Txt(fReg, TextFormat("%d right / %d wrong", r->right, r->wrong), row.x + row.width - 110 - TxtW(fReg, TextFormat("%d right / %d wrong", r->right, r->wrong), 13) + 100, row.y + 17, 13, DIM);
+        }
+    }
+    else if (hubTab == 1) {                                   /* ---------------- speed rounds ---------------- */
+        Txt(fReg, "Ten snippets, ten seconds each. What is the variable at the end? One miss ends the run; ten in a row earns a gold star.", 40, top, 15, (Color) { 190, 198, 216, 255 });
+        for (int l = 0; l < 2; l++) {
+            Rectangle r = { W - 40.0f - (2 - l) * 100, top - 8, 94, 34 };
+            bool hov = CheckCollisionPointRec(mouse, r);
+            if (hov) hand = true;
+            Panel(r, 0.3f, l == lang ? ACCENTS[l] : SURF, l == lang ? ACCENTS[l] : BORDER);
+            CenterTxt(fMed, LANG_NAME[l], r.x + r.width / 2, r.y + 7, 16, l == lang ? WHITE : DIM);
+            if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) lang = l;
+        }
+        int golds = 0; for (int i = 0; i < NLESSONS; i++) golds += sd.gold[lang][i];
+        for (int i = 0; i < NLESSONS; i++) {
+            Rectangle r = { 40, top + 44 + i * 86.0f, W - 80, 76 };
+            bool hov = CheckCollisionPointRec(mouse, r);
+            Panel(r, 0.12f, hov ? SURF2 : SURF, sd.gold[lang][i] ? (Color) { 255, 214, 90, 255 } : (hov ? accent : BORDER));
+            Color kc = sd.gold[lang][i] ? (Color) { 255, 214, 90, 255 } : DIM;
+            StarShape(r.x + 40, r.y + 38, 20, kc);
+            if (!sd.gold[lang][i]) StarShape(r.x + 40, r.y + 38, 12, hov ? SURF2 : SURF);
+            TxtFit(fBold, LESSONS[lang][i].name + 3, r.x + 84, r.y + 10, 22, 460, TXT);
+            Txt(fReg, TextFormat("Best run: %d / %d   -   %s", sd.bestStreak[lang][i], SP_TARGET, sd.gold[lang][i] ? "Gold!" : "No gold yet"), r.x + 84, r.y + 44, 14, sd.gold[lang][i] ? (Color) { 255, 214, 90, 255 } : DIM);
+            if (Button((Rectangle) { r.x + r.width - 150, r.y + 14, 130, 48 }, sd.gold[lang][i] ? "Again" : "Start", sd.gold[lang][i] ? SURF2 : accent, 17)) StartSpeed(i);
+        }
+        Txt(fReg, TextFormat("%d of %d gold in %s", golds, NLESSONS, LANG_NAME[lang]), 40, top + 44 + NLESSONS * 86.0f + 6, 14, DIM);
+    }
+    else if (hubTab == 2) {                                   /* ---------------- skills ---------------- */
+        Txt(fReg, "Every right answer earns XP in the topic it came from (more for hard ones and speed rounds); wrong answers lose a little.", 40, top, 15, (Color) { 190, 198, 216, 255 });
+        for (int s = 0; s < NSKILL; s++) {
+            Rectangle r = { 40, top + 32 + s * 48.0f, W - 80, 42 };
+            Panel(r, 0.2f, SURF, BORDER);
+            Color c = SkillCol(s);
+            int xp = sd.xp[s], lv = LevelOf(xp), lo = 30 * (lv - 1) * (lv - 1), hi = 30 * lv * lv;
+            DrawRectangleRounded((Rectangle) { r.x, r.y + 6, 4, r.height - 12 }, 0.5f, 4, c);
+            TxtFit(fBold, SkillName(s), r.x + 20, r.y + 10, 17, 330, TXT);
+            Txt(fBold, TextFormat("Lv %d", lv), r.x + 370, r.y + 10, 17, c);
+            Rectangle bar = { r.x + 450, r.y + 16, 300, 10 };
+            DrawRectangleRounded(bar, 0.5f, 6, SURF2);
+            if (xp > lo) DrawRectangleRounded((Rectangle) { bar.x, bar.y, bar.width* (xp - lo) / (hi - lo), bar.height }, 0.5f, 6, c);
+            Txt(fReg, TextFormat("%d / %d XP", xp, hi), bar.x + bar.width + 14, r.y + 12, 13, DIM);
+            float acc = SkillAccuracy(s);
+            if (acc < 0) Txt(fReg, "no answers yet", r.x + r.width - 20 - TxtW(fReg, "no answers yet", 13), r.y + 13, 13, DIM);
+            else {
+                const char* t = TextFormat("%d%% recent", (int)(acc * 100 + 0.5f));
+                bool weak = acc < 0.6f && sd.nrecent[s] >= 5;
+                Txt(fBold, weak ? "NEEDS WORK" : t, r.x + r.width - 20 - TxtW(fBold, weak ? "NEEDS WORK" : t, 13), r.y + 13, 13, weak ? BAD : (acc >= 0.8f ? GOOD : DIM));
+            }
+        }
+    }
+    else if (hubTab == 3) {                                   /* ---------------- saved & notes ---------------- */
+        hubScroll -= GetMouseWheelMove() * 50; if (hubScroll < 0) hubScroll = 0;
+        int rows = 0;
+        ScissorT(0, (int)top - 6, W, H - (int)top + 6);
+        for (int lg = 0; lg < 2; lg++) for (int les = 0; les < NLESSONS; les++) {
+            if (!sd.mark[lg][les] && !notes[lg][les][0]) continue;
+            Rectangle r = { 40, top + rows * 74.0f - hubScroll, W - 80, 66 };
+            rows++;
+            Panel(r, 0.12f, SURF, BORDER);
+            if (sd.mark[lg][les]) StarShape(r.x + 34, r.y + 33, 14, (Color) { 255, 214, 90, 255 });
+            TxtFit(fBold, TextFormat("%s  -  %s", LANG_NAME[lg], LESSONS[lg][les].name + 3), r.x + 66, r.y + 9, 19, 520, TXT);
+            if (notes[lg][les][0]) {
+                char pv[70]; snprintf(pv, sizeof pv, "%.66s", notes[lg][les]);
+                for (char* c = pv; *c; c++) if (*c == '\n') *c = ' ';
+                TxtFit(fReg, pv, r.x + 66, r.y + 38, 14, 520, DIM);
+            }
+            else Txt(fReg, "No notes yet", r.x + 66, r.y + 38, 14, DIM);
+            if (Button((Rectangle) { r.x + r.width - 270, r.y + 11, 120, 44 }, "Lesson", accent, 15) && r.y > 120) { lang = lg; StartLesson(les); }
+            if (Button((Rectangle) { r.x + r.width - 140, r.y + 11, 120, 44 }, "Notes", SURF2, 15) && r.y > 120) { lang = lg; lessonIdx = les; StartNotes(lg, les); }
+        }
+        EndScissorMode();
+        { float maxS = rows * 74.0f - (H - top) + 20; if (maxS < 0) maxS = 0; if (hubScroll > maxS) hubScroll = maxS; }
+        if (!rows) {
+            CenterTxt(fBold, "Nothing saved yet", W / 2.0f, top + 90, 26, TXT);
+            CenterTxt(fReg, "Tap the star at the top of a lesson to save it, and use Notes to write in your own words.", W / 2.0f, top + 130, 16, DIM);
+        }
+    }
+    else {                                                    /* ---------------- search ---------------- */
+        Rectangle box = { 40, top, W - 80, 52 };
+        bool hov = CheckCollisionPointRec(mouse, box);
+        Panel(box, 0.2f, SURF, hubFocus ? accent : BORDER);
+        if (hov) ibeam = true;
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) hubFocus = hov;
+        if (hubFocus) {
+            int ch, len = (int)strlen(hubQuery);
+            while ((ch = GetCharPressed()) > 0) if (ch >= 32 && ch <= 126 && len < (int)sizeof hubQuery - 1) { hubQuery[len++] = (char)ch; hubQuery[len] = 0; }
+            static float bs = 0;
+            if (IsKeyPressed(KEY_BACKSPACE)) { if (len > 0) hubQuery[len - 1] = 0; bs = 0; }
+            else if (IsKeyDown(KEY_BACKSPACE)) { bs += GetFrameTime(); if (bs > 0.4f && len > 0) { hubQuery[len - 1] = 0; bs = 0.36f; } }
+        }
+        if (strcmp(hitsFor, hubQuery)) RunSearch();
+        if (hubQuery[0]) Txt(fReg, hubQuery, box.x + 20, box.y + 13, 22, TXT);
+        else Txt(fReg, "Search every lesson: try \"pointer\", \"loop\" or \"struct\"", box.x + 20, box.y + 15, 19, DIM);
+        if (hubFocus && ((int)(GetTime() * 2) & 1)) DrawRectangle((int)(box.x + 22 + TxtW(fReg, hubQuery, 22)), (int)box.y + 12, 2, 28, TXT);
+        hubScroll -= GetMouseWheelMove() * 50; if (hubScroll < 0) hubScroll = 0;
+        if (strlen(hubQuery) < 2) Txt(fReg, "Type at least two letters.", 40, top + 70, 15, DIM);
+        else if (!nHits) Txt(fReg, "No lesson mentions that.", 40, top + 70, 15, DIM);
+        else {
+            Txt(fReg, TextFormat("%d result%s", nHits, nHits == 1 ? "" : "s"), 40, top + 66, 14, DIM);
+            ScissorT(0, (int)top + 90, W, H - (int)top - 90);
+            for (int i = 0; i < nHits; i++) {
+                Rectangle r = { 40, top + 94 + i * 64.0f - hubScroll, W - 80, 56 };
+                if (r.y > H || r.y + r.height < top + 90) continue;
+                bool rh = CheckCollisionPointRec(mouse, r) && mouse.y > top + 90;
+                if (rh) hand = true;
+                Panel(r, 0.14f, rh ? SURF2 : SURF, rh ? accent : BORDER);
+                Pill(LANG_NAME[hits[i].lg], r.x + 14, r.y + 14, ACCENTS[hits[i].lg]);
+                TxtFit(fBold, TextFormat("%s  /  page %d", LESSONS[hits[i].lg][hits[i].les].name + 3, hits[i].page + 1), r.x + 116, r.y + 8, 16, 700, TXT);
+                TxtFit(fReg, hits[i].snip, r.x + 116, r.y + 32, 13, r.width - 140, DIM);
+                if (rh && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { lang = hits[i].lg; StartLesson(hits[i].les); page = hits[i].page; }
+            }
+            EndScissorMode();
+        }
+    }
+}
+
 int main(void)
 {
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);      /* smoother rounded corners */
@@ -9931,12 +11126,16 @@ int main(void)
     LoadQuest();
     LoadGame();
     LoadFarm();
+    LoadStudy();
     WorldEnter();                           /* start in the campus sim */
     screen = SCR_BOOT;                      /* ...after the loading screen */
 
     while (!quit && !WindowShouldClose()) {
         if (IsKeyPressed(KEY_ESCAPE)) {
             if (screen == SCR_BOOT) bootT = 99.0f;
+            else if (screen == SCR_STUDYRUN || screen == SCR_SPEED) { screen = SCR_STUDY; bgBoost = 0; }
+            else if (screen == SCR_NOTES) screen = SCR_LESSON;
+            else if (screen == SCR_ANSREV) screen = SCR_RESULT;
             else if (screen == SCR_MENU) quit = true;
             else if (screen == SCR_WORLD) {
                 if (dlg != DLG_NONE) dlg = DLG_NONE;
@@ -9960,6 +11159,10 @@ int main(void)
         BeginMode2D((Camera2D) { { gOffX, gOffY }, { 0, 0 }, 0.0f, gScale });
         ClearBackground(BG);
         if (screen != SCR_WORLD) DrawRectangleGradientV(0, 0, W, H, (Color) { 22, 27, 44, 255 }, (Color) { 12, 14, 22, 255 });
+        if (screen != SCR_SPEED) bgBoost = 0;
+        if (screen == SCR_MENU || screen == SCR_LESSON || screen == SCR_QUIZ || screen == SCR_RESULT || screen == SCR_MEM ||
+            screen == SCR_STUDY || screen == SCR_STUDYRUN || screen == SCR_SPEED || screen == SCR_NOTES || screen == SCR_ANSREV)
+            DrawLiveBg(accent);                                  /* the faint living background */
         switch (screen) {
         case SCR_MENU:   DrawMenu(accent);   break;
         case SCR_LESSON: DrawLesson(accent); break;
@@ -9974,6 +11177,11 @@ int main(void)
         case SCR_PROBLEM: DrawProblem(accent); break;
         case SCR_MEM:    DrawMem();          break;
         case SCR_BOOT:   DrawBoot();         break;
+        case SCR_STUDY:    DrawStudy(accent);        break;
+        case SCR_STUDYRUN: DrawStudyRun(accent);     break;
+        case SCR_SPEED:    DrawSpeed(accent);        break;
+        case SCR_NOTES:    DrawNotes(accent);        break;
+        case SCR_ANSREV:   DrawAnswerReview(accent); break;
         }
         {
             static int prevScreen = -1;

@@ -1497,16 +1497,17 @@ static const char* LANG_NAME[2] = { "C", "C++" };
 /* ------------------------------------------------------------------ */
 /*  Theme and global state                                             */
 /* ------------------------------------------------------------------ */
-static const Color BG = { 15, 17, 23, 255 };
-static const Color SURF = { 23, 27, 38, 255 };
-static const Color SURF2 = { 33, 38, 54, 255 };
-static const Color BORDER = { 44, 50, 70, 255 };
-static const Color TXT = { 232, 236, 245, 255 };
-static const Color DIM = { 139, 148, 170, 255 };
-static const Color GOOD = { 52, 199, 120, 255 };
-static const Color BAD = { 240, 92, 104, 255 };
-static const Color CODEBG = { 11, 13, 19, 255 };
-static const Color ACCENTS[2] = { { 64, 156, 255, 255 }, { 160, 112, 255, 255 } };
+/* winter farm palette: pine greens, warm wood, snow-cream text, lantern gold and frost blue */
+static const Color BG = { 14, 28, 22, 255 };
+static const Color SURF = { 25, 44, 34, 255 };
+static const Color SURF2 = { 36, 60, 45, 255 };
+static const Color BORDER = { 104, 74, 46, 255 };        /* wood */
+static const Color TXT = { 244, 237, 218, 255 };
+static const Color DIM = { 164, 176, 152, 255 };
+static const Color GOOD = { 120, 206, 106, 255 };
+static const Color BAD = { 228, 100, 84, 255 };
+static const Color CODEBG = { 10, 22, 17, 255 };
+static const Color ACCENTS[2] = { { 228, 170, 74, 255 }, { 128, 192, 208, 255 } };
 
 #define SPC 0.2f          /* letter spacing for the UI font */
 #define UI_SCALE 1.14f    /* serif fonts look smaller than sans at the same size */
@@ -1540,6 +1541,8 @@ static void DrawNotes(Color accent);
 static void DrawAnswerReview(Color accent);
 static void DrawCompanion(float cx, float footY, float sc, int mood, bool below);
 static void DrawBoot(void);
+static void CompBurst(float x, float y, int n);
+static void CompDrawBits(float dt);
 static void DrawTransition(float dt, Color accent);
 static void DrawMem(void);
 static void TryIt(const char* code);
@@ -1811,7 +1814,7 @@ static int Mastery(int lg, int les)
     return (int)(m + 0.5f);
 }
 static const char* MasteryName(int m) { return m <= 0 ? "Not started" : m < 35 ? "Attempted" : m < 65 ? "Familiar" : m < 100 ? "Proficient" : "Mastered"; }
-static Color MasteryCol(int m) { return m <= 0 ? DIM : m < 35 ? (Color) { 100, 170, 255, 255 } : m < 65 ? (Color) { 70, 200, 190, 255 } : m < 100 ? (Color) { 255, 184, 64, 255 } : (Color) { 255, 214, 90, 255 }; }
+static Color MasteryCol(int m) { return m <= 0 ? DIM : m < 35 ? (Color) { 128, 192, 208, 255 } : m < 65 ? (Color) { 70, 200, 190, 255 } : m < 100 ? (Color) { 255, 184, 64, 255 } : (Color) { 255, 214, 90, 255 }; }
 
 static int XpTotal(void)
 {
@@ -1957,9 +1960,9 @@ static void Panel(Rectangle r, float rd, Color fill, Color border)
     DrawRectangleRounded(r, rd, 10, border);
     if (fill.a < 255) {            /* blend a see-through fill over the dark background, not over the border */
         float al = fill.a / 255.0f;
-        fill.r = (unsigned char)(fill.r * al + 20 * (1 - al));
-        fill.g = (unsigned char)(fill.g * al + 24 * (1 - al));
-        fill.b = (unsigned char)(fill.b * al + 36 * (1 - al));
+        fill.r = (unsigned char)(fill.r * al + 16 * (1 - al));
+        fill.g = (unsigned char)(fill.g * al + 32 * (1 - al));
+        fill.b = (unsigned char)(fill.b * al + 25 * (1 - al));
         fill.a = 255;
     }
     Rectangle in = { r.x + 1, r.y + 1, r.width - 2, r.height - 2 };
@@ -1985,10 +1988,60 @@ static void Pill(const char* label, float x, float y, Color col)
     Txt(fMed, label, x + 14, y + 5, 14, col);
 }
 
+/* ---- wood: planks with grain, knots and seams; used for the sidebar and the top bars ---- */
+static unsigned WoodHash(int a, int b)
+{
+    unsigned h = (unsigned)a * 374761393u + (unsigned)b * 668265263u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return h ^ (h >> 16);
+}
+
+static void DrawWood(float x, float y, float w, float h, bool vertical, int seed)
+{
+    const float plank = vertical ? 40.0f : 36.0f;
+    ScissorT((int)x, (int)y, (int)w, (int)h);
+    int n = (int)((vertical ? w : h) / plank) + 1;
+    for (int i = 0; i < n; i++) {
+        int v = (int)(WoodHash(i, seed) % 16);
+        Color c = { (unsigned char)(72 + v), (unsigned char)(50 + v * 2 / 3), (unsigned char)(33 + v / 2), 255 };
+        float px = vertical ? x + i * plank : x, py = vertical ? y : y + i * plank;
+        float pw = vertical ? plank : w, ph = vertical ? h : plank;
+        DrawRectangle((int)px, (int)py, (int)pw, (int)ph, c);
+        for (int k = 0; k < 5; k++) {                          /* grain lines */
+            float off = (WoodHash(i, seed + 10 + k) % 1000) / 1000.0f * (vertical ? pw : ph);
+            Color gc = (k & 1) ? Fade(WHITE, 0.035f) : Fade(BLACK, 0.12f);
+            if (vertical) DrawLine((int)(px + off), (int)py, (int)(px + off + (k - 2) * 2), (int)(py + ph), gc);
+            else DrawLine((int)px, (int)(py + off), (int)(px + pw), (int)(py + off + (k - 2)), gc);
+        }
+        if (WoodHash(i, seed + 99) % 3 == 0) {                 /* a knot */
+            float kx = vertical ? px + pw * 0.5f : px + (WoodHash(i, seed + 5) % (unsigned)(w > 60 ? (int)w - 40 : 40)) + 20;
+            float ky = vertical ? py + (WoodHash(i, seed + 6) % (unsigned)(h > 60 ? (int)h - 80 : 40)) + 40 : py + ph * 0.5f;
+            DrawEllipse((int)kx, (int)ky, vertical ? 5.0f : 9.0f, vertical ? 9.0f : 5.0f, Fade(BLACK, 0.16f));
+            DrawEllipse((int)kx, (int)ky, vertical ? 2.5f : 5.0f, vertical ? 5.0f : 2.5f, Fade(BLACK, 0.18f));
+        }
+        if (vertical) { DrawRectangle((int)px, (int)py, 2, (int)ph, Fade(BLACK, 0.40f)); DrawRectangle((int)px + 2, (int)py, 1, (int)ph, Fade(WHITE, 0.06f)); }
+        else { DrawRectangle((int)px, (int)py, (int)pw, 2, Fade(BLACK, 0.40f)); DrawRectangle((int)px, (int)py + 2, (int)pw, 1, Fade(WHITE, 0.06f)); }
+    }
+    EndScissorMode();
+}
+
+/* a rim of snow along an edge of the wood */
+static void DrawSnowRim(float x, float y, float w)
+{
+    Color snow = { 238, 244, 247, 255 };
+    DrawRectangle((int)x, (int)y - 2, (int)w, 4, snow);
+    for (int i = 0; i * 13 < w; i++) {
+        float r = 3.0f + (float)(WoodHash(i, 77) % 4);
+        DrawCircle((int)(x + i * 13 + 6), (int)y + 1, r, snow);
+    }
+}
+
 static void TopBar(void)
 {
-    DrawRectangle(0, 0, W, 72, SURF);
-    DrawLine(0, 72, W, 72, BORDER);
+    DrawWood(0, 0, W, 72, false, 21);
+    DrawRectangle(0, 0, W, 72, Fade(BLACK, 0.10f));
+    DrawRectangle(0, 70, W, 3, (Color) { 40, 26, 16, 255 });
+    DrawSnowRim(0, 72, W);
 }
 
 /* ---- syntax highlighting (monospace) ---- */
@@ -2024,7 +2077,7 @@ static void HighlightLine(const char* line, float x, float y, float fs, float cw
     while (i < n) {
         char c = line[i];
         int j = i + 1;
-        Color col = { 215, 218, 235, 255 };
+        Color col = { 239, 231, 209, 255 };
         if (c == ' ') {
             while (j < n && line[j] == ' ') j++;
             x += (j - i) * cw;
@@ -2032,7 +2085,7 @@ static void HighlightLine(const char* line, float x, float y, float fs, float cw
             continue;
         }
         else if (c == '#' && i == f) {
-            j = n; col = (Color){ 190, 140, 255, 255 };
+            j = n; col = (Color){ 214, 148, 170, 255 };
         }
         else if (c == '/' && i + 1 < n && line[i + 1] == '/') {
             j = n; col = (Color){ 106, 153, 85, 255 };
@@ -2051,7 +2104,7 @@ static void HighlightLine(const char* line, float x, float y, float fs, float cw
             if (wl > 63) wl = 63;
             memcpy(w, line + i, wl);
             w[wl] = 0;
-            if (IsKeyword(w)) col = (Color){ 86, 156, 255, 255 };
+            if (IsKeyword(w)) col = (Color){ 120, 190, 226, 255 };
             else if (j < n && line[j] == '(') col = (Color){ 235, 220, 130, 255 };
         }
         else if (isdigit((unsigned char)c)) {
@@ -2091,7 +2144,7 @@ static int DrawCode(const char* code, float x, float y, float w, float fs, const
         if (*p == '\n') p++;
         const char* num = TextFormat("%d", ln++);
         float nw = MeasureTextEx(fCode, num, fs, 0).x;
-        DrawTextEx(fCode, num, (Vector2) { x + 48 - nw, cy }, fs, 0, (Color) { 76, 84, 108, 255 });
+        DrawTextEx(fCode, num, (Vector2) { x + 48 - nw, cy }, fs, 0, (Color) { 88, 92, 77, 255 });
         HighlightLine(line, x + 70, cy, fs, cw);
         cy += lh;
     }
@@ -2148,14 +2201,15 @@ static void NavIcon(int k, float cx, float cy, Color c)
 
 static void MenuSidebar(Color accent)
 {
-    DrawRectangle(0, 0, 236, H, (Color) { 12, 14, 21, 255 });
-    DrawLine(236, 0, 236, H, BORDER);
-    DrawRectangleRounded((Rectangle) { 20, 20, 42, 42 }, 0.3f, 10, accent);
+    DrawWood(0, 0, 236, H, true, 7);
+    DrawRectangle(0, 0, 236, H, Fade(BLACK, 0.12f));
+    DrawRectangle(233, 0, 3, H, (Color) { 40, 26, 16, 255 });
+    DrawRectangleRounded((Rectangle) { 22, 31, 21, 42 }, 0.3f, 10, accent);
     CenterTxt(fCode, "</>", 41, 31, 16, WHITE);
     Txt(fBold, "CodeQuest", 72, 14, 25, TXT);
     Txt(fReg, "C & C++ academy", 74, 44, 12, DIM);
 
-    static const char* nm[8] = { "Learn", "Practice", "Coding Lab", "Campus & Arena", "Mower Farm", "Shop", "Memory Lab", "Study hub" };
+    static const char* nm[8] = { "Learn", "Practice", "Coding Lab", "Campus & Arena", "Mower Farm", "Shop", "Code Breakdown", "Study hub" };
     for (int i = 0; i < 8; i++) {
         Rectangle r = { 12, 92.0f + i * 50 + (i >= 2 ? 22 : 0), 212, 44 };
         bool hov = CheckCollisionPointRec(GetMousePosition(), r), act = i < 2 && i == menuTab;
@@ -2163,7 +2217,7 @@ static void MenuSidebar(Color accent)
         if (act) { DrawRectangleRounded(r, 0.25f, 8, Fade(accent, 0.18f)); DrawRectangleRounded((Rectangle) { r.x, r.y + 8, 4, r.height - 16 }, 0.5f, 4, accent); }
         else if (hov) DrawRectangleRounded(r, 0.25f, 8, SURF2);
         NavIcon(i, r.x + 30, r.y + 22, act ? accent : (hov ? TXT : DIM));
-        Txt(fBold, nm[i], r.x + 58, r.y + 10, 18, act || hov ? TXT : (Color) { 180, 188, 208, 255 });
+        Txt(fBold, nm[i], r.x + 58, r.y + 10, 18, act || hov ? TXT : (Color) { 208, 200, 178, 255 });
         if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             if (i < 2) { menuTab = i; pracScroll = 0; }
             else if (i == 2) StartLab();
@@ -2174,7 +2228,7 @@ static void MenuSidebar(Color accent)
             else StartStudy();
         }
     }
-    Txt(fBold, "SPACES", 24, 92.0f + 2 * 50 + 4, 11, (Color) { 90, 98, 122, 255 });
+    Txt(fBold, "SPACES", 24, 92.0f + 2 * 50 + 4, 11, (Color) { 101, 106, 89, 255 });
 
     /* language switch */
     Panel((Rectangle) { 16, 520, 204, 44 }, 0.3f, SURF, BORDER);
@@ -2218,6 +2272,36 @@ static const char* NextStepText(int lg, int les, int* action, int* prob)
     for (int i = 0; i < NPROB; i++) if (PROBS[i].lesson == les && !pro.solved[lg][i]) { *action = 2; *prob = i; return TextFormat("Next: solve \"%s\"", PROBS[i].title); }
     if (prog.best[lg][les] < LESSONS[lg][les].nQ) { *action = 1; return "Next: retake the quiz for a perfect score"; }
     *action = 0; return "Review the lesson any time";
+}
+
+/* word-wrapped text limited to maxLines; the last line ends in "..." if there was more */
+static void WrapLines(Font f, const char* t, float x, float y, float maxW, float fs, Color c, int maxLines)
+{
+    char line[512] = "";
+    int len = 0, n = 0;
+    const char* p = t;
+    float lh = fs * 1.6f;
+    for (;;) {
+        while (*p == ' ' || *p == '\n') p++;
+        char word[128];
+        int wl = 0;
+        while (*p&&* p != ' ' && *p != '\n' && wl < 127) word[wl++] = *p++;
+        word[wl] = 0;
+        char test[700];
+        snprintf(test, sizeof test, "%s%s%s", line, len ? " " : "", word);
+        bool over = wl && len && TxtW(f, test, fs) > maxW;
+        if (wl && !over) { snprintf(line, sizeof line, "%s", test); len = (int)strlen(line); continue; }
+        if (n + 1 >= maxLines && over) {                       /* out of room: cut with an ellipsis */
+            while (len > 0 && TxtW(f, TextFormat("%s...", line), fs) > maxW) line[--len] = 0;
+            Txt(f, TextFormat("%s...", line), x, y + n * lh, fs, c);
+            return;
+        }
+        if (len) Txt(f, line, x, y + n * lh, fs, c);
+        n++;
+        if (!over) return;
+        snprintf(line, sizeof line, "%s", word);
+        len = (int)strlen(line);
+    }
 }
 
 /* ---- the Learn page: hero, stats strip, and a lesson journey of expanding cards ---- */
@@ -2271,16 +2355,16 @@ static void MenuLearn(Color accent)
     {   /* little code symbols drifting up behind the text */
         static const char* gl[6] = { "{ }", ";", "&p", "*p", "[0]", "->" };
         for (int i = 0; i < 6; i++) {
-            float gx = hero.x + 330 + i * 38 + sinf(t * 0.8f + i) * 6;
+            float gx = hero.x + 430 + i * 20 + sinf(t * 0.8f + i) * 4;
             float gy = hero.y + hero.height - fmodf(t * (14 + i * 3) + i * 40, hero.height + 20);
-            DrawTextEx(fCode, gl[i], (Vector2) { gx, gy }, 20, 0, Fade(accent, 0.13f));
+            DrawTextEx(fCode, gl[i], (Vector2) { gx, gy }, 20, 0, Fade(accent, 0.08f));
         }
     }
     EndScissorMode();
     DrawRectangleRounded((Rectangle) { hero.x, hero.y, 6, hero.height }, 0.5f, 4, accent);
     Txt(fBold, "CONTINUE LEARNING", hero.x + 26, hero.y + 16, 12, accent);
     TxtFit(fBold, LESSONS[lang][cl].name + 3, hero.x + 26, hero.y + 36, 27, 380, TXT);
-    TxtFit(fReg, step, hero.x + 26, hero.y + 78, 15, 380, (Color) { 190, 198, 216, 255 });
+    TxtFit(fReg, step, hero.x + 26, hero.y + 78, 15, 380, (Color) { 217, 209, 187, 255 });
     Rectangle pb = { hero.x + 26, hero.y + 112, 380, 8 };
     DrawRectangleRounded(pb, 0.5f, 6, SURF2);
     if (cm) {
@@ -2308,7 +2392,7 @@ static void MenuLearn(Color accent)
     Txt(fBold, "PROBLEM OF THE DAY", dc.x + 20, dc.y + 16, 12, (Color) { 255, 184, 64, 255 });
     TxtFit(fBold, DP->title, dc.x + 20, dc.y + 36, 22, 280, TXT);
     Pill(DIFF_NAME[DP->diff], dc.x + 20, dc.y + 72, DIFF_COL[DP->diff]);
-    Txt(fReg, DP->topic, dc.x + 28 + TxtW(fMed, DIFF_NAME[DP->diff], 14) + 28, dc.y + 76, 14, DIM);
+    { float tx = dc.x + 28 + TxtW(fMed, DIFF_NAME[DP->diff], 14) + 28; TxtFit(fReg, DP->topic, tx, dc.y + 76, 14, dc.x + dc.width - 16 - tx, DIM); }
     if (pro.solved[lang][dp]) { DrawCheck(dc.x + 36, dc.y + 120, 12, GOOD); Txt(fBold, "Solved", dc.x + 56, dc.y + 111, 16, GOOD); }
     if (Button((Rectangle) { dc.x + dc.width - 120, dc.y + 100, 100, 38 }, pro.solved[lang][dp] ? "Again" : "Solve", (Color) { 214, 140, 30, 255 }, 15)) StartProblem(dp);
 
@@ -2378,8 +2462,9 @@ static void MenuLearn(Color accent)
         /* the rail: a line down to this node, filled once the lesson before it is mastered */
         float ny = card.y + collapsedH / 2;
         if (i > 0) {
-            DrawRectangle((int)railX - 1, (int)yPrev, 3, (int)(ny - yPrev), SURF2);
-            if (Mastery(lang, i - 1) >= 100) DrawRectangle((int)railX - 1, (int)yPrev, 3, (int)(ny - yPrev), Fade(GOOD, 0.8f));
+            float ra = yPrev + 21, rb = ny - 21;                 /* from the edge of one node to the edge of the next */
+            DrawRectangle((int)railX - 1, (int)ra, 3, (int)(rb - ra), SURF2);
+            if (Mastery(lang, i - 1) >= 100) DrawRectangle((int)railX - 1, (int)ra, 3, (int)(rb - ra), Fade(GOOD, 0.8f));
         }
         yPrev = ny;
 
@@ -2399,16 +2484,16 @@ static void MenuLearn(Color accent)
         if (m >= 100) DrawCheck(nc.x, nc.y, 11, mc); else CenterTxt(fBold, TextFormat("%d", i + 1), nc.x, nc.y - 10, 16, m ? mc : DIM);
 
         /* title row */
-        TxtFit(fBold, L->name + 3, card.x + 26, card.y + 12, 22, 330, TXT);
+        TxtFit(fBold, L->name + 3, card.x + 26, card.y + 12, 22, 350, TXT);
         Pill(MasteryName(m), card.x + 26, card.y + 42, mc);
         if (i == cl) { Txt(fBold, "UP NEXT", card.x + 26 + TxtW(fMed, MasteryName(m), 14) + 28 + 16, card.y + 48, 12, accent); }
-        float sx = card.x + 360;
+        float sx = card.x + 396;
         bool dd[3] = { prog.read[lang][i] != 0, prog.best[lang][i] >= 0, SolvedInLesson(lang, i) == ProbsInLesson(i) };
         const char* ss[3] = { dd[0] ? "Lesson" : "Lesson", prog.best[lang][i] >= 0 ? TextFormat("Quiz %d/%d", prog.best[lang][i], L->nQ) : "Quiz", TextFormat("Code %d/%d", SolvedInLesson(lang, i), ProbsInLesson(i)) };
         for (int k = 0; k < 3; k++) {
             DrawCircle((int)sx + 8, (int)card.y + 38, 8, dd[k] ? GOOD : SURF2);
             if (dd[k]) DrawCheck(sx + 8, card.y + 38, 10, WHITE);
-            Txt(fReg, ss[k], sx + 22, card.y + 29, 14, dd[k] ? (Color) { 200, 208, 224, 255 } : DIM);
+            Txt(fReg, ss[k], sx + 22, card.y + 29, 14, dd[k] ? (Color) { 227, 219, 197, 255 } : DIM);
             sx += 22 + TxtW(fReg, ss[k], 14) + 22;
         }
         /* chevron */
@@ -2424,7 +2509,7 @@ static void MenuLearn(Color accent)
             ScissorT((int)card.x, (int)(card.y + collapsedH - 4 > areaTop ? card.y + collapsedH - 4 : areaTop), (int)card.width, (int)(card.height - collapsedH + 4));
             float a = oa < 0.5f ? oa * 2 : 1.0f;
             int ty = (int)(card.y + collapsedH + 4);
-            Wrapped(fReg, L->pages[0].text, card.x + 26, ty, card.width - 190, 14, Fade((Color) { 190, 198, 216, 255 }, a));
+            WrapLines(fReg, L->pages[0].text, card.x + 26, (float)ty, card.width - 60, 14, Fade((Color) { 217, 209, 187, 255 }, a), 2);
             float tw = (card.width - 52 - 28) / 3.0f, tyy = card.y + collapsedH + 62;
             const char* tt[3] = { "Learn", "Quiz", "Code" };
             const char* sub[3] = { prog.read[lang][i] ? "Read - review any time" : "Start here: read it", prog.best[lang][i] >= 0 ? TextFormat("Best score %d of %d", prog.best[lang][i], L->nQ) : "Test what you learned", TextFormat("%d of %d problems solved", SolvedInLesson(lang, i), ProbsInLesson(i)) };
@@ -2536,7 +2621,7 @@ static void MenuPractice(Color accent)
         if (y > view.y + view.height || y + rh < view.y) continue;
         Rectangle r = { view.x, y, view.width, rh };
         bool hov = CheckCollisionPointRec(GetMousePosition(), r) && CheckCollisionPointRec(GetMousePosition(), view);
-        DrawRectangleRec(r, hov ? SURF2 : (k & 1 ? (Color) { 18, 21, 31, 255 } : (Color) { 15, 17, 25, 255 }));
+        DrawRectangleRec(r, hov ? SURF2 : (k & 1 ? (Color) { 19, 27, 18, 255 } : (Color) { 15, 22, 14, 255 }));
         if (hov) hand = true;
         float cy = y + rh / 2;
         if (pro.solved[lang][i]) { DrawCircle((int)r.x + 30, (int)cy, 11, GOOD); DrawCheck(r.x + 30, cy, 14, WHITE); }
@@ -2583,7 +2668,7 @@ static void DrawLesson(Color accent)
     y += 28;
     TxtFit(fBold, P->title, x0, y, 36, cw, TXT);
     y += 66;
-    y = (float)Wrapped(fReg, P->text, x0, y, cw, 19, (Color) { 205, 211, 228, 255 });
+    y = (float)Wrapped(fReg, P->text, x0, y, cw, 19, (Color) { 231, 223, 201, 255 });
     y += 18;
     y = (float)DrawCode(P->code, x0, y, cw, 18, lang == 0 ? "main.c" : "main.cpp");
     y += 40;
@@ -2808,7 +2893,7 @@ static void DrawQuiz(Color accent)
         float ph = 46 + WrapH(fReg, ebuf, cw - 44, 16) + 8;
         Panel((Rectangle) { x0, fy, cw, ph }, 0.12f, Fade(col, 0.10f), col);
         Txt(fBold, ok ? "Correct!" : "Not quite", x0 + 22, fy + 12, 20, col);
-        Wrapped(fReg, ebuf, x0 + 22, fy + 44, cw - 44, 16, (Color) { 205, 211, 228, 255 });
+        Wrapped(fReg, ebuf, x0 + 22, fy + 44, cw - 44, 16, (Color) { 231, 223, 201, 255 });
 
         bool lastQ = (qi == L->nQ - 1);
         if (Button((Rectangle) { W - 196, 698, 160, 48 }, lastQ ? "Finish" : "Next >", accent, 16)
@@ -2856,7 +2941,7 @@ static void DrawResult(Color accent)
     if (Button((Rectangle) { bx, 550, 180, 52 }, "Retry quiz", accent, 16)) StartQuiz();
     if (Button((Rectangle) { bx + 194, 550, 180, 52 }, "Review lesson", SURF2, 16)) StartLesson(lessonIdx);
     if (Button((Rectangle) { bx + 388, 550, 180, 52 }, (fromWorld ? "Campus" : "Menu"), SURF2, 16)) GoMenu();
-    if (Button((Rectangle) { cx - 120, 606, 240, 38 }, "Review answers", (Color) { 80, 90, 130, 255 }, 15)) screen = SCR_ANSREV;
+    if (Button((Rectangle) { cx - 120, 606, 240, 38 }, "Review answers", (Color) { 98, 103, 86, 255 }, 15)) screen = SCR_ANSREV;
     DrawCompanion(1060, 640, 2.2f, score == L->nQ ? MOOD_CHEER : (score * 2 >= L->nQ ? MOOD_IDLE : MOOD_SAD), false);
 }
 
@@ -2878,14 +2963,14 @@ typedef struct { const char* name, * greet; Color shirt, hair; int dir; } Teache
 
 static Teacher TEACH[2][5] = {
   { { "Ms. Byte",       "Every program has to start somewhere! Ready to write your first line of C?",        { 230, 120, 160, 255 }, { 60, 40, 30, 255 }, 0 },
-    { "Mr. Loop",       "Decisions and loops... that's where programs get their power. Shall we begin?",     { 90, 170, 120, 255 },  { 30, 30, 40, 255 }, 0 },
+    { "Mr. Loop",       "Decisions and loops... that's where programs get their power. Shall we begin?",     { 90, 170, 120, 255 },  { 27, 37, 25, 255 }, 0 },
     { "Dr. Func",       "Functions and arrays are the building blocks of tidy code. Take a seat!",           { 230, 170, 70, 255 },  { 150, 90, 50, 255 }, 0 },
-    { "Prof. Pointer",  "Pointers scare everyone at first. Let me show you they are just addresses.",        { 150, 110, 220, 255 }, { 200, 200, 210, 255 }, 0 },
+    { "Prof. Pointer",  "Pointers scare everyone at first. Let me show you they are just addresses.",        { 150, 110, 220, 255 }, { 219, 211, 189, 255 }, 0 },
     { "Mrs. Heap",      "Structs and memory - handle with care, and always free what you malloc!",           { 220, 100, 90, 255 },  { 110, 60, 40, 255 }, 0 } },
   { { "Mr. Stream",     "Welcome to C++! Today we talk about streams, strings and auto.",                    { 80, 170, 200, 255 },  { 40, 30, 30, 255 }, 0 },
     { "Dr. Vector",     "References and vectors will make your life so much easier. Ready?",                 { 120, 190, 110, 255 }, { 220, 190, 90, 255 }, 0 },
     { "Ms. Object",     "Classes let you model the real world. Come in and take a seat!",                    { 235, 140, 190, 255 }, { 50, 35, 30, 255 }, 0 },
-    { "Prof. Virtual",  "Inheritance and polymorphism - the heart of object-oriented programming.",          { 170, 120, 230, 255 }, { 190, 190, 200, 255 }, 0 },
+    { "Prof. Virtual",  "Inheritance and polymorphism - the heart of object-oriented programming.",          { 189, 181, 159, 255 }, { 209, 201, 179, 255 }, 0 },
     { "Mr. Template",   "Write it once, use it for every type. Templates are pure magic.",                   { 235, 190, 80, 255 },  { 90, 60, 40, 255 }, 0 } }
 };
 
@@ -2897,7 +2982,7 @@ static const Color ARENA_C = { 240, 120, 80, 255 };
 
 static Teacher RIVT[3] = {
   { "Rookie Ron",    "I just started coding too! Let's see who solves problems faster.",   { 110, 190, 120, 255 }, { 120, 80, 50, 255 }, 0 },
-  { "Rival Rex",     "Think you can out-code me? The first correct answer takes the round!", { 80, 120, 230, 255 }, { 30, 30, 40, 255 }, 0 },
+  { "Rival Rex",     "Think you can out-code me? The first correct answer takes the round!", { 80, 120, 230, 255 }, { 27, 37, 25, 255 }, 0 },
   { "Champion Cora", "I haven't lost a round in weeks. Show me what you've learned.",        { 230, 80, 100, 255 }, { 220, 200, 120, 255 }, 0 }
 };
 
@@ -2950,26 +3035,26 @@ static const int ITEMN[NCAT] = { 8, 8, 7, 6, 5 };
 static const Item ITEMS[NCAT][MAXIT] = {
   { /* outfits: a = top, b = trousers.  kind: 0 plain, 1 stripes, 2 hoodie, 3 lab coat */
     { "Student Red",   0,   { 225, 85, 85, 255 },   { 55, 70, 120, 255 }, 0 },
-    { "Ocean Blue",    60,  { 70, 140, 230, 255 },  { 40, 50, 90, 255 }, 0 },
+    { "Ocean Blue",    60,  { 70, 140, 230, 255 },  { 48, 64, 46, 255 }, 0 },
     { "Forest Green",  60,  { 70, 170, 100, 255 },  { 80, 62, 50, 255 }, 0 },
-    { "Sunny Stripes", 120, { 240, 190, 70, 255 },  { 70, 70, 90, 255 }, 1 },
-    { "Cozy Hoodie",   160, { 125, 130, 148, 255 }, { 50, 55, 80, 255 }, 2 },
-    { "Royal Stripes", 200, { 150, 100, 220, 255 }, { 40, 40, 70, 255 }, 1 },
-    { "Lab Coat",      280, { 236, 239, 246, 255 }, { 60, 70, 100, 255 }, 3 },
-    { "Hacker Hoodie", 350, { 34, 38, 52, 255 },    { 24, 26, 36, 255 }, 2 } },
+    { "Sunny Stripes", 120, { 240, 190, 70, 255 },  { 75, 79, 66, 255 }, 1 },
+    { "Cozy Hoodie",   160, { 132, 138, 116, 255 }, { 49, 66, 47, 255 }, 2 },
+    { "Royal Stripes", 200, { 150, 100, 220, 255 }, { 40, 54, 38, 255 }, 1 },
+    { "Lab Coat",      280, { 236, 239, 246, 255 }, { 75, 79, 66, 255 }, 3 },
+    { "Hacker Hoodie", 350, { 33, 45, 31, 255 },    { 23, 32, 22, 255 }, 2 } },
   { /* hats: a = main colour, b = accent.  kind: 0 none, 1 cap, 2 wizard, 3 beanie, 4 crown, 5 headphones, 6 grad cap, 7 top hat */
     { "No hat",        0,   { 0, 0, 0, 0 },         { 0, 0, 0, 0 }, 0 },
     { "Red Cap",       40,  { 215, 60, 60, 255 },   { 140, 30, 30, 255 }, 1 },
     { "Blue Beanie",   60,  { 80, 160, 210, 255 },  { 230, 240, 250, 255 }, 3 },
-    { "Headphones",    90,  { 60, 64, 80, 255 },    { 90, 200, 190, 255 }, 5 },
-    { "Grad Cap",      150, { 30, 30, 40, 255 },    { 240, 190, 60, 255 }, 6 },
+    { "Headphones",    90,  { 54, 72, 52, 255 },    { 90, 200, 190, 255 }, 5 },
+    { "Grad Cap",      150, { 27, 37, 25, 255 },    { 240, 190, 60, 255 }, 6 },
     { "Top Hat",       220, { 32, 32, 40, 255 },    { 200, 60, 70, 255 }, 7 },
     { "Wizard Hat",    300, { 110, 70, 190, 255 },  { 255, 215, 90, 255 }, 2 },
     { "Golden Crown",  500, { 250, 205, 70, 255 },  { 230, 70, 90, 255 }, 4 } },
   { /* hair: a = colour.  kind: 0 short, 1 long, 2 spiky */
     { "Brown Short",   0,   { 70, 45, 30, 255 },    { 0, 0, 0, 0 }, 0 },
     { "Black Short",   30,  { 32, 32, 40, 255 },    { 0, 0, 0, 0 }, 0 },
-    { "Silver Short",  90,  { 200, 205, 216, 255 }, { 0, 0, 0, 0 }, 0 },
+    { "Silver Short",  90,  { 223, 215, 193, 255 }, { 0, 0, 0, 0 }, 0 },
     { "Ginger Spikes", 50,  { 222, 112, 50, 255 },  { 0, 0, 0, 0 }, 2 },
     { "Blue Spikes",   120, { 70, 130, 240, 255 },  { 0, 0, 0, 0 }, 2 },
     { "Blonde Long",   70,  { 232, 202, 112, 255 }, { 0, 0, 0, 0 }, 1 },
@@ -2980,7 +3065,7 @@ static const Item ITEMS[NCAT][MAXIT] = {
     { "Green Bag",     50,  { 60, 160, 90, 255 },   { 0, 0, 0, 0 }, 0 },
     { "Purple Bag",    60,  { 140, 90, 210, 255 },  { 0, 0, 0, 0 }, 0 },
     { "Red Cape",      180, { 200, 40, 60, 255 },   { 0, 0, 0, 0 }, 1 },
-    { "Jetpack",       350, { 150, 156, 172, 255 }, { 0, 0, 0, 0 }, 2 } },
+    { "Jetpack",       350, { 156, 164, 137, 255 }, { 0, 0, 0, 0 }, 2 } },
   { /* trails: kind = particle type (1 sparkles, 2 leaves, 3 pixels, 4 hearts) */
     { "No trail",      0,   { 0, 0, 0, 0 },         { 0, 0, 0, 0 }, 0 },
     { "Gold Sparkles", 100, { 255, 205, 90, 255 },  { 0, 0, 0, 0 }, 1 },
@@ -3093,7 +3178,7 @@ static void DrawNotices(float dt)
         float w = TxtW(fMed, notices[i].text, 16) + 44, x = W - 24 - w, y = 84.0f + row * 46;
         float slide = notices[i].t > 3.1f ? (notices[i].t - 3.1f) * 3.3f * 60 : 0;
         DrawRectangleRounded((Rectangle) { x + slide, y + 3, w, 38 }, 0.4f, 8, Fade(BLACK, 0.3f * a));
-        DrawRectangleRounded((Rectangle) { x + slide, y, w, 38 }, 0.4f, 8, Fade((Color) { 28, 32, 48, 255 }, 0.97f * a));
+        DrawRectangleRounded((Rectangle) { x + slide, y, w, 38 }, 0.4f, 8, Fade((Color) { 29, 40, 27, 255 }, 0.97f * a));
         DrawRectangleRounded((Rectangle) { x + slide, y, 5, 38 }, 0.5f, 6, Fade(notices[i].c, a));
         Txt(fMed, notices[i].text, x + 20 + slide, y + 9, 16, Fade(notices[i].c, a));
         row++;
@@ -3455,13 +3540,13 @@ static void UpdateWorld(float dt)
 /* ---- characters ---- */
 static void OutRR(float x, float y, float w, float h, float rd, Color fill, float o)
 {
-    DrawRectangleRounded((Rectangle) { x - o, y - o, w + 2 * o, h + 2 * o }, rd, 6, (Color) { 24, 22, 34, 255 });
+    DrawRectangleRounded((Rectangle) { x - o, y - o, w + 2 * o, h + 2 * o }, rd, 6, (Color) { 21, 30, 20, 255 });
     DrawRectangleRounded((Rectangle) { x, y, w, h }, rd, 6, fill);
 }
 
 static void OutTri(Vector2 t, Vector2 l, Vector2 r, Color fill, float o)
 {
-    DrawTriangle((Vector2) { t.x, t.y - o * 1.6f }, (Vector2) { l.x - o * 1.4f, l.y + o }, (Vector2) { r.x + o * 1.4f, r.y + o }, (Color) { 24, 22, 34, 255 });
+    DrawTriangle((Vector2) { t.x, t.y - o * 1.6f }, (Vector2) { l.x - o * 1.4f, l.y + o }, (Vector2) { r.x + o * 1.4f, r.y + o }, (Color) { 21, 30, 20, 255 });
     DrawTriangle(t, l, r, fill);
 }
 
@@ -3469,7 +3554,7 @@ static void OutTri(Vector2 t, Vector2 l, Vector2 r, Color fill, float o)
 static void DrawPersonEx(float x, float fy, int dir, float sc, float ph, const Look* L)
 {
 #define K(v) ((v) * sc)
-    const Color ink = { 24, 22, 34, 255 }, shoe = { 58, 40, 36, 255 };
+    const Color ink = { 21, 30, 20, 255 }, shoe = { 58, 40, 36, 255 };
     const float o = 1.3f * sc;
     float s = sinf(ph) * K(3.0f), bob = fabsf(sinf(ph)) * K(1.5f);
     float offL = s > 0 ? s : 0, offR = s < 0 ? -s : 0;
@@ -3510,9 +3595,9 @@ static void DrawPersonEx(float x, float fy, int dir, float sc, float ph, const L
     if (L->outfit == 3) {                                             /* lab coat: longer, with a collar */
         OutRR(x - K(13), by + K(12), K(26), K(14), 0.2f, shirt, o);
         if (dir == 0) {
-            DrawRectangle((int)(x - K(0.8f)), (int)by, (int)(K(1.6f) + 1), (int)K(26), (Color) { 190, 196, 210, 255 });
+            DrawRectangle((int)(x - K(0.8f)), (int)by, (int)(K(1.6f) + 1), (int)K(26), (Color) { 215, 207, 185, 255 });
             DrawRectangle((int)(x - K(4)), (int)by, (int)K(8), (int)K(5), (Color) { 90, 140, 220, 255 });
-            DrawRectangle((int)(x + K(5)), (int)(by + K(15)), (int)K(5), (int)K(5), (Color) { 205, 210, 224, 255 });
+            DrawRectangle((int)(x + K(5)), (int)(by + K(15)), (int)K(5), (int)K(5), (Color) { 229, 221, 199, 255 });
         }
     }
     if (L->outfit == 1)                                               /* stripes */
@@ -3832,11 +3917,11 @@ static void DrawCampusTile(char c, int x, int y, int sx, int sy)
         DrawGrass(x, y, sx, sy);
         bool lit = Daylight() < 0.5f;
         DrawEllipse(sx + 24, sy + 44, 11, 4, Fade(BLACK, 0.26f));
-        DrawRectangle(sx + 22, sy + 14, 4, 30, (Color) { 52, 54, 68, 255 });
-        DrawRectangle(sx + 17, sy + 42, 14, 4, (Color) { 64, 66, 82, 255 });
-        DrawRectangleRounded((Rectangle) { (float)sx + 15, (float)sy + 4, 18, 14 }, 0.3f, 4, (Color) { 60, 62, 78, 255 });
+        DrawRectangle(sx + 22, sy + 14, 4, 30, (Color) { 46, 62, 44, 255 });
+        DrawRectangle(sx + 17, sy + 42, 14, 4, (Color) { 57, 75, 54, 255 });
+        DrawRectangleRounded((Rectangle) { (float)sx + 15, (float)sy + 4, 18, 14 }, 0.3f, 4, (Color) { 53, 71, 51, 255 });
         DrawRectangleRounded((Rectangle) { (float)sx + 18, (float)sy + 7, 12, 9 }, 0.3f, 4,
-            lit ? (Color) { 255, 228, 140, 255 } : (Color) { 196, 206, 220, 255 });
+            lit ? (Color) { 255, 228, 140, 255 } : (Color) { 223, 215, 193, 255 });
         return;
     }
 
@@ -3888,12 +3973,12 @@ static void DrawArenaTile(char c, int x, int y, int sx, int sy)
 {
     unsigned h = Hash(x, y) & 255;
     if (c == '#') {
-        DrawRectangleGradientV(sx, sy, TS, TS, (Color) { 52, 36, 58, 255 }, (Color) { 34, 24, 40, 255 });
+        DrawRectangleGradientV(sx, sy, TS, TS, (Color) { 39, 53, 37, 255 }, (Color) { 26, 36, 25, 255 });
         DrawRectangle(sx, sy + TS - 5, TS, 5, ARENA_C);
         return;
     }
     if (c == 'u') {                                   /* cheering crowd */
-        DrawRectangle(sx, sy, TS, TS, (Color) { 52, 38, 66, 255 });
+        DrawRectangle(sx, sy, TS, TS, (Color) { 42, 56, 40, 255 });
         float cheer = sinf((float)GetTime() * 5.0f + x * 1.7f) * 2.0f;
         for (int k = 0; k < 3; k++) {
             Color body = { (unsigned char)(110 + (h * (k + 1)) % 120), (unsigned char)(80 + (h * 7 * (k + 2)) % 130),
@@ -3904,7 +3989,7 @@ static void DrawArenaTile(char c, int x, int y, int sx, int sy)
         }
         return;
     }
-    Color base = ((x + y) & 1) ? (Color) { 44, 48, 70, 255 } : (Color) { 40, 44, 64, 255 };
+    Color base = ((x + y) & 1) ? (Color) { 43, 58, 41, 255 } : (Color) { 39, 53, 37, 255 };
     if (c == 'o') base = ((x + y) & 1) ? (Color) { 104, 58, 50, 255 } : (Color) { 94, 52, 44, 255 };
     DrawRectangle(sx, sy, TS, TS, base);
     if (c == 'o') DrawRectangle(sx, sy, TS, 1, Fade((Color) { 255, 180, 120, 255 }, 0.25f));
@@ -3919,14 +4004,14 @@ static void DrawInteriorTile(char c, int x, int y, int sx, int sy, Color accent)
     if (inside == 2) { DrawArenaTile(c, x, y, sx, sy); return; }
     unsigned h = Hash(x, y) & 255;
     if (c == '#') {
-        DrawRectangleGradientV(sx, sy, TS, TS, (Color) { 68, 75, 106, 255 }, (Color) { 50, 56, 84, 255 });
+        DrawRectangleGradientV(sx, sy, TS, TS, (Color) { 81, 85, 71, 255 }, (Color) { 51, 68, 48, 255 });
         DrawRectangle(sx + TS / 2, sy + 8, 1, TS - 16, Fade(BLACK, 0.18f));
-        DrawRectangle(sx, sy, TS, 6, (Color) { 82, 90, 124, 255 });
-        DrawRectangle(sx, sy + TS - 4, TS, 4, (Color) { 40, 45, 68, 255 });
+        DrawRectangle(sx, sy, TS, 6, (Color) { 97, 102, 85, 255 });
+        DrawRectangle(sx, sy + TS - 4, TS, 4, (Color) { 41, 55, 39, 255 });
         return;
     }
     if (c == ',' || c == 'X') {
-        DrawRectangle(sx, sy, TS, TS, ((x + y) & 1) ? (Color) { 143, 153, 178, 255 } : (Color) { 150, 160, 185, 255 });
+        DrawRectangle(sx, sy, TS, TS, ((x + y) & 1) ? (Color) { 155, 163, 136, 255 } : (Color) { 162, 170, 142, 255 });
         if (c == ',' && y == 9) {                                   /* red carpet down the hallway */
             DrawRectangle(sx, sy + 6, TS, TS - 12, (Color) { 150, 52, 64, 255 });
             DrawRectangle(sx, sy + 6, TS, 3, (Color) { 224, 184, 84, 255 });
@@ -3945,7 +4030,7 @@ static void DrawInteriorTile(char c, int x, int y, int sx, int sy, Color accent)
     {   /* a rug in front of each teacher's desk */
         int lx = (x - 1) % 6;
         if (c == '.' && lx >= 1 && lx <= 3 && (y == 5 || y == 6)) {
-            DrawRectangle(sx, sy, TS, TS, (Color) { 92, 72, 132, 255 });
+            DrawRectangle(sx, sy, TS, TS, (Color) { 97, 102, 85, 255 });
             if (lx == 1) DrawRectangle(sx, sy, 4, TS, (Color) { 224, 184, 84, 255 });
             if (lx == 3) DrawRectangle(sx + TS - 4, sy, 4, TS, (Color) { 224, 184, 84, 255 });
             if (y == 5) DrawRectangle(sx, sy, TS, 4, (Color) { 224, 184, 84, 255 });
@@ -3976,7 +4061,7 @@ static void DrawBubble(float cx, float y, const char* s, Color col)
 {
     float bob = sinf((float)GetTime() * 4.0f) * 2.0f;
     DrawCircle((int)cx, (int)(y + bob), 10, col);
-    CenterTxt(fBold, s, cx, y + bob - 9, 16, (Color) { 30, 30, 40, 255 });
+    CenterTxt(fBold, s, cx, y + bob - 9, 16, (Color) { 27, 37, 25, 255 });
 }
 
 static void DrawNpcs(float camX, float camY)
@@ -3986,7 +4071,7 @@ static void DrawNpcs(float camX, float camY)
         Teacher* t = INHALL ? &TEACH[inside][i] : &RIVT[i];
         int tx = INHALL ? 3 + 6 * i : (i == 0 ? 4 : (i == 1 ? 10 : 16));
         float cx = tx * TS - camX + TS / 2.0f, fy = TROW * TS - camY + TS - 6;
-        DrawPerson(cx, fy, t->dir, t->shirt, t->hair, (Color) { 50, 55, 80, 255 }, INHALL, false, 0);
+        DrawPerson(cx, fy, t->dir, t->shirt, t->hair, (Color) { 49, 66, 47, 255 }, INHALL, false, 0);
         if (INHALL) {
             if (!prog.read[inside][i]) DrawBubble(cx, fy - 76, "!", (Color) { 250, 205, 70, 255 });
             else if (prog.best[inside][i] == LESSONS[inside][i].nQ) DrawBubble(cx, fy - 76, "*", GOOD);
@@ -4103,7 +4188,7 @@ static void DrawWorld(void)
         /* day / night */
         float L = Daylight();
         float dark = powf(1.0f - L, 1.5f) * 0.50f;
-        if (dark > 0.005f) DrawRectangle(0, 0, W, H, Fade((Color) { 10, 16, 56, 255 }, dark));
+        if (dark > 0.005f) DrawRectangle(0, 0, W, H, Fade((Color) { 22, 31, 21, 255 }, dark));
         float golden = 1.0f - fabsf(L - 0.5f) * 3.5f;
         if (golden > 0) DrawRectangle(0, 0, W, H, Fade((Color) { 255, 150, 60, 255 }, 0.10f * golden));
         if (L < 0.55f) {
@@ -4167,7 +4252,7 @@ static void DrawWorld(void)
         Teacher* t = Speaker();
         float bx = 60, bh = 170, by = H - 200.0f, bw = W - 120;
         Panel((Rectangle) { bx, by, bw, bh }, 0.08f, SURF, accent);
-        DrawPerson(bx + 90, by + bh - 20, 0, t->shirt, t->hair, (Color) { 50, 55, 80, 255 }, INHALL, false, 0);
+        DrawPerson(bx + 90, by + bh - 20, 0, t->shirt, t->hair, (Color) { 49, 66, 47, 255 }, INHALL, false, 0);
 
         float nw = TxtW(fBold, t->name, 18) + 40;
         DrawRectangleRounded((Rectangle) { bx + 180, by - 18, nw, 36 }, 0.4f, 8, accent);
@@ -4264,7 +4349,7 @@ static int bRival = 0, bOrder[BQN], bRound = 0, bPHP = 100, bRHP = 100, bPick = 
 static float bT = 0, bRivalAt = 5, bDispP = 100, bDispR = 100;
 static bool bRivalCorrect = false, bRivalDone = false, bPlayerDone = false, bWon = false;
 static char bMsg[200] = "";
-static Color bMsgCol = { 139, 148, 170, 255 };
+static Color bMsgCol = { 149, 157, 131, 255 };
 
 static float Rand01(void) { return GetRandomValue(0, 1000) / 1000.0f; }
 
@@ -4349,7 +4434,7 @@ static void DrawFighter(float x, float y, float w, const char* name, float hp, b
 {
     Panel((Rectangle) { x, y, w, 96 }, 0.12f, SURF, BORDER);
     if (you) DrawPlayer(x + 44, y + 88, 0, 1.0f, 0);
-    else     DrawPerson(x + 44, y + 88, 0, t->shirt, t->hair, (Color) { 50, 55, 80, 255 }, false, false, 0);
+    else     DrawPerson(x + 44, y + 88, 0, t->shirt, t->hair, (Color) { 49, 66, 47, 255 }, false, false, 0);
 
     TxtFit(fBold, name, x + 90, y + 10, 20, w - 110, TXT);
     float bw = w - 110, frac = hp / 100.0f;
@@ -4438,7 +4523,7 @@ static void DrawBattle(void)
         Panel((Rectangle) { 36, 548, W - 72, 150 }, 0.08f, SURF, bMsgCol);
         TxtFit(fBold, bMsg, 58, 558, 20, W - 330, bMsgCol);
         Txt(fMed, TextFormat("Answer:  %c)  %s", 'A' + Q->correct, Q->opts[Q->correct]), 58, 592, 17, TXT);
-        Wrapped(fReg, Q->expl, 58, 620, W - 72 - 290, 15, (Color) { 205, 211, 228, 255 });
+        Wrapped(fReg, Q->expl, 58, 620, W - 72 - 290, 15, (Color) { 231, 223, 201, 255 });
 
         bool over = bPHP <= 0 || bRHP <= 0 || bRound >= BQN - 1;
         if (Button((Rectangle) { W - 36 - 190, 596, 170, 52 }, over ? "See result" : "Next round", ac, 18)
@@ -4492,7 +4577,7 @@ static const QQuestion QBANK[3][QPOOL] = {
       "<iostream> provides the standard stream objects cin, cout and cerr." }
   },
   { /* ---------- MEDIUM ---------- */
-    { "What does this print?", "int a[] = {4, 8, 15, 16};\nprintf(\"%d\", a[1] + a[3]);", { "12", "20", "24", "31" }, 2, NULL,
+    { "What does this print?", "int a[] = { 7, 12, 7, 16 };\nprintf(\"%d\", a[1] + a[3]);", { "12", "20", "24", "31" }, 2, NULL,
       "a[1] is 8 and a[3] is 16, so the sum is 24." },
     { "What does this print?", "int x = 10;\nint *p = &x;\nint **q = &p;\nprintf(\"%d\", **q);", { "The address of x", "10", "0", "It will not compile" }, 1, NULL,
       "q points to p and p points to x. Dereferencing twice gives x, which is 10." },
@@ -4534,8 +4619,8 @@ static Spark sparks[160];
 
 static void Burst(float x, float y, int n)
 {
-    static const Color pal[5] = { { 255, 205, 90, 255 }, { 52, 199, 120, 255 }, { 80, 160, 255, 255 },
-                                  { 240, 92, 104, 255 }, { 190, 140, 255, 255 } };
+    static const Color pal[5] = { { 255, 205, 90, 255 }, { 120, 206, 106, 255 }, { 128, 192, 208, 255 },
+                                  { 240, 92, 104, 255 }, { 214, 148, 170, 255 } };
     for (int i = 0; i < 160 && n > 0; i++) {
         if (sparks[i].life > 0) continue;
         sparks[i].x = x; sparks[i].y = y;
@@ -4603,7 +4688,7 @@ static void DrawQuest(void)
 {
     float dt = GetFrameTime();
     if (dt > 0.05f) dt = 0.05f;
-    const Color gold = { 255, 205, 90, 255 }, soft = { 205, 211, 228, 255 };
+    const Color gold = { 255, 205, 90, 255 }, soft = { 231, 223, 201, 255 };
     bool wasAnswered = (questPhase == 2);
     bool typed = (questTier == 2);
 
@@ -5682,7 +5767,7 @@ static void LabDrawEditor(float cw)
     EndScissorMode();
 
     /* gutter drawn over the text so scrolled code never shows through */
-    DrawRectangle(LAB_X + 1, LAB_Y + 1, LAB_GUT, LAB_H - 2, (Color) { 17, 20, 29, 255 });
+    DrawRectangle(LAB_X + 1, LAB_Y + 1, LAB_GUT, LAB_H - 2, (Color) { 18, 25, 17, 255 });
     DrawLine(LAB_X + LAB_GUT, LAB_Y + 1, LAB_X + LAB_GUT, LAB_Y + LAB_H - 1, BORDER);
     ScissorT(LAB_X + 1, LAB_Y + 1, LAB_GUT, LAB_H - 2);
     for (int ln = first; ln < nLines; ln++) {
@@ -5693,7 +5778,7 @@ static void LabDrawEditor(float cw)
         const char* num = TextFormat("%d", ln + 1);
         float nw = MeasureTextEx(fCode, num, LAB_FS, 0).x;
         DrawTextEx(fCode, num, (Vector2) { LAB_X + LAB_GUT - 12 - nw, y + 2 }, LAB_FS, 0,
-            isErr ? BAD : (ln == curLine ? (Color) { 190, 196, 215, 255 } : (Color) { 76, 84, 108, 255 }));
+            isErr ? BAD : (ln == curLine ? (Color) { 216, 208, 186, 255 } : (Color) { 88, 92, 77, 255 }));
         if (isErr) DrawCircle(LAB_X + 12, (int)y + LAB_LH / 2 - 2, 4, BAD);
     }
     EndScissorMode();
@@ -5735,7 +5820,7 @@ static void LabDrawOutput(float cw)
         int cl = len > 299 ? 299 : len;
         memcpy(line, p, (size_t)cl);
         line[cl] = 0;
-        Color col = (Color){ 215, 218, 235, 255 };
+        Color col = (Color){ 239, 231, 209, 255 };
         if (line[0] == '[') col = DIM;
         else if (strstr(line, "error") || strstr(line, "Error")) col = (Color){ 255, 130, 140, 255 };
         else if (strstr(line, "warning")) col = (Color){ 240, 190, 80, 255 };
@@ -6063,7 +6148,7 @@ static float ProbBox(const char* label, const char* text, float x, float y, floa
         const char* e = strchr(p, '\n'); int len = e ? (int)(e - p) : (int)strlen(p);
         char line[160]; int n = len > 159 ? 159 : len; memcpy(line, p, (size_t)n); line[n] = 0;
         int maxc = (int)((w - 20) / 8.6f); if (n > maxc && maxc > 3) { line[maxc - 2] = '.'; line[maxc - 1] = '.'; line[maxc] = 0; }
-        DrawTextEx(fCode, line, (Vector2) { x + 10, cy }, 15, 0, (Color) { 215, 218, 235, 255 });
+        DrawTextEx(fCode, line, (Vector2) { x + 10, cy }, 15, 0, (Color) { 239, 231, 209, 255 });
         cy += 22; ln++; p += len; if (*p == '\n') p++;
     }
     return y + h + 10;
@@ -6091,7 +6176,7 @@ static void ProbLeft(Rectangle L, Color accent)
         Pill(P->topic, cv.x + TxtW(fMed, DIFF_NAME[P->diff], 14) + 36, y, DIM);
         if (pro.solved[lang][probIdx]) Pill("Solved", cv.x + w - TxtW(fMed, "Solved", 14) - 28, y, GOOD);
         y += 42;
-        y += Wrapped(fReg, P->desc, cv.x, y, w, 17, (Color) { 205, 211, 228, 255 }) + 10;
+        y += Wrapped(fReg, P->desc, cv.x, y, w, 17, (Color) { 231, 223, 201, 255 }) + 10;
         Txt(fBold, "INPUT / OUTPUT", cv.x, y, 12, DIM); y += 22;
         y = ProbBox("", P->fmt, cv.x, y, w, 6);
         for (int e = 0; e < 2; e++) {
@@ -6110,7 +6195,7 @@ static void ProbLeft(Rectangle L, Color accent)
             Rectangle c = { cv.x, y, w, shown ? (float)WrapH(fReg, P->hint[h], w - 32, 16) + 56 : 64 };
             DrawRectangleRounded(c, 0.08f, 8, shown ? SURF2 : CODEBG);
             Txt(fBold, TextFormat("Hint %d", h + 1), c.x + 16, c.y + 12, 15, shown ? accent : DIM);
-            if (shown) Wrapped(fReg, P->hint[h], c.x + 16, c.y + 40, w - 32, 16, (Color) { 215, 220, 235, 255 });
+            if (shown) Wrapped(fReg, P->hint[h], c.x + 16, c.y + 40, w - 32, 16, (Color) { 239, 231, 209, 255 });
             else if (h == pro.hints[probIdx]) {
                 if (Button((Rectangle) { c.x + w - 136, c.y + 12, 120, 40 }, "Reveal", (Color) { 214, 140, 30, 255 }, 15)) { pro.hints[probIdx]++; SaveProfile(); }
             }
@@ -6128,7 +6213,7 @@ static void ProbLeft(Rectangle L, Color accent)
             y += 160;
         }
         else {
-            y += Wrapped(fReg, P->why, cv.x, y, w, 16, (Color) { 205, 211, 228, 255 }) + 14;
+            y += Wrapped(fReg, P->why, cv.x, y, w, 16, (Color) { 231, 223, 201, 255 }) + 14;
             y = (float)DrawCode(lang == 0 ? P->solC : P->solCpp, cv.x, y, w, 12.5f, lang == 0 ? "solution.c" : "solution.cpp") + 14;
             Wrapped(fReg, "Compare this with your own code. Is yours shorter, clearer or handling more cases? Try rewriting it from memory tomorrow.", cv.x, y, w, 14, DIM);
             y += 70;
@@ -6174,7 +6259,7 @@ static void ProbResults(Rectangle R)
         y += 42;
     }
     if (probRes == 1) {
-        Wrapped(fReg, TextFormat("All %d tests passed. Nice work - +%d credits the first time you solve it. Open the Solution tab to compare approaches.", P->nt, DIFF_CR[P->diff]), x, y, w, 15, (Color) { 205, 211, 228, 255 });
+        Wrapped(fReg, TextFormat("All %d tests passed. Nice work - +%d credits the first time you solve it. Open the Solution tab to compare approaches.", P->nt, DIFF_CR[P->diff]), x, y, w, 15, (Color) { 231, 223, 201, 255 });
         int nx = -1; for (int k = 1; k <= NPROB; k++) { int j = (probIdx + k) % NPROB; if (!pro.solved[lang][j]) { nx = j; break; } }
         if (nx >= 0 && Button((Rectangle) { R.x + R.width - 220, R.y + R.height - 58, 200, 42 }, "Next problem >", GOOD, 15)) StartProblem(nx);
         return;
@@ -6260,7 +6345,7 @@ static void DrawShop(void)
 {
     float dt = GetFrameTime();
     if (dt > 0.05f) dt = 0.05f;
-    const Color gold = { 255, 205, 90, 255 }, soft = { 205, 211, 228, 255 };
+    const Color gold = { 255, 205, 90, 255 }, soft = { 231, 223, 201, 255 };
     Vector2 m = GetMousePosition();
 
     TopBar();
@@ -6281,9 +6366,9 @@ static void DrawShop(void)
     /* ---------- the mannequin ---------- */
     Rectangle pv = { 36, 92, 340, 632 };
     Panel(pv, 0.05f, SURF, BORDER);
-    DrawRectangleGradientV((int)pv.x + 1, (int)pv.y + 1, (int)pv.width - 2, 400, (Color) { 38, 50, 98, 255 }, (Color) { 96, 72, 124, 255 });
-    DrawRectangle((int)pv.x + 1, (int)pv.y + 340, (int)pv.width - 2, 61, (Color) { 62, 54, 84, 255 });
-    DrawRectangle((int)pv.x + 1, (int)pv.y + 340, (int)pv.width - 2, 3, (Color) { 120, 104, 150, 255 });
+    DrawRectangleGradientV((int)pv.x + 1, (int)pv.y + 1, (int)pv.width - 2, 400, (Color) { 50, 66, 47, 255 }, (Color) { 95, 100, 84, 255 });
+    DrawRectangle((int)pv.x + 1, (int)pv.y + 340, (int)pv.width - 2, 61, (Color) { 53, 71, 51, 255 });
+    DrawRectangle((int)pv.x + 1, (int)pv.y + 340, (int)pv.width - 2, 3, (Color) { 122, 128, 107, 255 });
     for (int k = 0; k < 14; k++) {                                              /* twinkling stars */
         float sx = pv.x + 20 + fmodf(k * 61.0f, pv.width - 40), sy = pv.y + 14 + fmodf(k * 37.0f, 160.0f);
         DrawCircle((int)sx, (int)sy, 1.5f, Fade(WHITE, 0.4f + 0.4f * sinf((float)GetTime() * 2 + k)));
@@ -6331,8 +6416,8 @@ static void DrawShop(void)
         Panel(c, 0.07f, hov ? SURF2 : SURF, worn ? GOOD : (hov ? gold : BORDER));
 
         Rectangle win = { c.x + 8, c.y + 8, c.width - 16, 150 };
-        DrawRectangleRounded(win, 0.1f, 6, (Color) { 22, 26, 40, 255 });
-        DrawRectangleGradientV((int)win.x + 2, (int)win.y + 2, (int)win.width - 4, 100, (Color) { 34, 42, 70, 255 }, (Color) { 22, 26, 40, 255 });
+        DrawRectangleRounded(win, 0.1f, 6, (Color) { 23, 33, 22, 255 });
+        DrawRectangleGradientV((int)win.x + 2, (int)win.y + 2, (int)win.width - 4, 100, (Color) { 39, 53, 37, 255 }, (Color) { 23, 33, 22, 255 });
         unsigned char tc[NCAT];
         memcpy(tc, gm.eq, sizeof tc);
         tc[shopCat] = (unsigned char)i;
@@ -6370,7 +6455,7 @@ static void DrawShop(void)
         }
         else {
             bool can = gm.credits >= it->price;
-            if (Button(b, "Buy", can ? (Color) { 36, 150, 96, 255 } : (Color) { 82, 86, 108, 255 }, 15)) ShopBuy(shopCat, i, c.x + c.width / 2, c.y + 80);
+            if (Button(b, "Buy", can ? (Color) { 36, 150, 96, 255 } : (Color) { 90, 95, 79, 255 }, 15)) ShopBuy(shopCat, i, c.x + c.width / 2, c.y + 80);
         }
     }
 
@@ -6444,7 +6529,7 @@ static void FarmDrawMower(float cx, float fy, int dir, float sc, float blade, fl
 #define K(v) ((v) * sc)
     Look L = LookFrom(gm.eq);
     const Color red = { 206, 52, 58, 255 }, redD = { 150, 34, 42, 255 }, redL = { 240, 98, 96, 255 };
-    const Color ink = { 24, 22, 34, 255 }, steel = { 134, 142, 156, 255 }, steelD = { 86, 92, 106, 255 }, tyre = { 38, 38, 46, 255 };
+    const Color ink = { 21, 30, 20, 255 }, steel = { 141, 148, 124, 255 }, steelD = { 93, 98, 81, 255 }, tyre = { 38, 38, 46, 255 };
     int pdir = dir == 0 ? 3 : (dir == 1 ? 2 : (dir == 2 ? 0 : 1));
     float t = (float)GetTime(), spin = t * 40.0f;
     float lift = flip > 0 ? sinf((0.7f - flip) / 0.7f * 3.14159f) * K(26) : 0;
@@ -6472,7 +6557,7 @@ static void FarmDrawMower(float cx, float fy, int dir, float sc, float blade, fl
             float a = (cx + k) * 0.18f + k * 1.5708f;
             DrawLine((int)(cx - sg * K(16)), (int)(fy - K(10)), (int)(cx - sg * K(16) + cosf(a) * K(8)), (int)(fy - K(10) + sinf(a) * K(8)), steelD);
         }
-        OutRR(cx - sg * K(24) - (sg < 0 ? K(38) : 0), fy - K(27), K(38), K(8), 0.4f, (Color) { 52, 54, 66, 255 }, 1.1f * sc);   /* seat */
+        OutRR(cx - sg * K(24) - (sg < 0 ? K(38) : 0), fy - K(27), K(38), K(8), 0.4f, (Color) { 46, 61, 44, 255 }, 1.1f * sc);   /* seat */
         DrawPersonEx(cx - sg * K(8), fy - K(11), pdir, sc * 0.8f, 0, &L);
         OutRR(cx - (sg > 0 ? K(25) : K(14)), fy - K(21), K(39), K(13), 0.35f, red, 1.2f * sc);                              /* body */
         DrawRectangle((int)(cx - (sg > 0 ? K(22) : K(11))), (int)(fy - K(20)), (int)K(33), (int)K(3), redL);
@@ -6493,7 +6578,7 @@ static void FarmDrawMower(float cx, float fy, int dir, float sc, float blade, fl
         OutRR(cx + K(17), fy - K(20), K(9), K(20), 0.3f, tyre, 1.1f * sc);
         DrawRectangle((int)(cx - K(24)), (int)(fy - K(14)), (int)K(5), (int)K(8), steelD);
         DrawRectangle((int)(cx + K(19)), (int)(fy - K(14)), (int)K(5), (int)K(8), steelD);
-        OutRR(cx - K(16), fy - K(30), K(32), K(8), 0.4f, (Color) { 52, 54, 66, 255 }, 1.1f * sc);   /* seat */
+        OutRR(cx - K(16), fy - K(30), K(32), K(8), 0.4f, (Color) { 46, 61, 44, 255 }, 1.1f * sc);   /* seat */
         DrawPersonEx(cx, fy - K(11), pdir, sc * 0.8f, 0, &L);
         OutRR(cx - K(18), fy - K(21), K(36), K(15), 0.3f, red, 1.2f * sc);                   /* body */
         DrawRectangle((int)(cx - K(15)), (int)(fy - K(20)), (int)K(30), (int)K(3), redL);
@@ -8048,12 +8133,12 @@ static Rectangle FWinFrame(int id)
     float h = w->min ? FTITLE : w->h;
     DrawRectangle((int)w->x + 4, (int)w->y + 5, (int)w->w, (int)h, Fade(BLACK, 0.3f));
     DrawRectangle((int)w->x, (int)w->y, (int)w->w, (int)h, (Color) { 16, 18, 24, 244 });
-    DrawRectangle((int)w->x, (int)w->y, (int)w->w, (int)FTITLE, id == fz[W_N - 1] ? (Color) { 52, 56, 70, 255 } : (Color) { 40, 43, 54, 255 });
-    DrawRectangleLines((int)w->x, (int)w->y, (int)w->w, (int)h, id == fz[W_N - 1] ? (Color) { 120, 126, 146, 255 } : GB_EDGE);
+    DrawRectangle((int)w->x, (int)w->y, (int)w->w, (int)FTITLE, id == fz[W_N - 1] ? (Color) { 47, 64, 45, 255 } : (Color) { 37, 50, 35, 255 });
+    DrawRectangleLines((int)w->x, (int)w->y, (int)w->w, (int)h, id == fz[W_N - 1] ? (Color) { 128, 135, 112, 255 } : GB_EDGE);
     Txt(fBold, w->title, w->x + 10, w->y + 4, 16, WHITE);
     Rectangle c = FBtnClose(id), mn = FBtnMin(id);
     DrawRectangleRec(c, (Color) { 74, 40, 44, 255 }); DrawLine((int)c.x + 6, (int)c.y + 6, (int)c.x + 16, (int)c.y + 16, WHITE); DrawLine((int)c.x + 16, (int)c.y + 6, (int)c.x + 6, (int)c.y + 16, WHITE);
-    DrawRectangleRec(mn, (Color) { 58, 62, 78, 255 }); DrawRectangle((int)mn.x + 6, (int)mn.y + 14, 10, 2, WHITE);
+    DrawRectangleRec(mn, (Color) { 53, 70, 50, 255 }); DrawRectangle((int)mn.x + 6, (int)mn.y + 14, 10, 2, WHITE);
     if (w->min) return (Rectangle) { 0, 0, 0, 0 };
     Rectangle g = FGrip(id);
     DrawTriangle((Vector2) { g.x + 16, g.y + 3 }, (Vector2) { g.x + 3, g.y + 16 }, (Vector2) { g.x + 16, g.y + 16 }, GB_EDGE);
@@ -8069,18 +8154,18 @@ static void FEditorWin(Rectangle r)
     if (GBtn((Rectangle) { x, r.y + 3, 66, 30 }, fRunning ? "Stop" : "Run", fRunning ? (Color) { 190, 60, 60, 255 } : (Color) { 40, 150, 70, 255 }, 16)) { if (fRunning) FarmStop(); else LabRequestRun(); }
     x += 72;
     for (int i = 0; i < 4; i++) {
-        if (GBtn((Rectangle) { x, r.y + 3, 34, 30 }, TextFormat("%dx", F_SPEEDS[i]), i == (fsv.speed & 3) ? (Color) { 40, 150, 70, 255 } : (Color) { 58, 62, 78, 255 }, 14)) { fsv.speed = i; SaveFarm(); }
+        if (GBtn((Rectangle) { x, r.y + 3, 34, 30 }, TextFormat("%dx", F_SPEEDS[i]), i == (fsv.speed & 3) ? (Color) { 40, 150, 70, 255 } : (Color) { 53, 70, 50, 255 }, 14)) { fsv.speed = i; SaveFarm(); }
         x += 36;
     }
     x += 6;
     float rightEdge = r.x + r.width - 4;
     if (rightEdge - x > 160) {
-        if (GBtn((Rectangle) { rightEdge - 52, r.y + 3, 52, 30 }, "Load", (Color) { 58, 62, 78, 255 }, 14)) { FarmSetCode(FEX[fEx].code); labEnsure = true; }
+        if (GBtn((Rectangle) { rightEdge - 52, r.y + 3, 52, 30 }, "Load", (Color) { 53, 70, 50, 255 }, 14)) { FarmSetCode(FEX[fEx].code); labEnsure = true; }
         float tx = x, tw = rightEdge - 52 - 6 - x - 52;
-        if (GBtn((Rectangle) { tx, r.y + 3, 24, 30 }, "<", (Color) { 58, 62, 78, 255 }, 16)) fEx = (fEx + F_NEX - 1) % F_NEX;
+        if (GBtn((Rectangle) { tx, r.y + 3, 24, 30 }, "<", (Color) { 53, 70, 50, 255 }, 16)) fEx = (fEx + F_NEX - 1) % F_NEX;
         DrawRectangle((int)tx + 26, (int)r.y + 3, (int)tw, 30, GB_DARK);
-        TxtFit(fReg, FEX[fEx].title, tx + 32, r.y + 8, 14, tw - 12, (Color) { 210, 214, 226, 255 });
-        if (GBtn((Rectangle) { tx + 28 + tw, r.y + 3, 24, 30 }, ">", (Color) { 58, 62, 78, 255 }, 16)) fEx = (fEx + 1) % F_NEX;
+        TxtFit(fReg, FEX[fEx].title, tx + 32, r.y + 8, 14, tw - 12, (Color) { 233, 225, 203, 255 });
+        if (GBtn((Rectangle) { tx + 28 + tw, r.y + 3, 24, 30 }, ">", (Color) { 53, 70, 50, 255 }, 16)) fEx = (fEx + 1) % F_NEX;
     }
     labX = (int)r.x; labY = (int)(r.y + tb); labW = (int)r.width; labH = (int)(r.height - tb);
     float cw = MeasureTextEx(fCode, "M", LAB_FS, 0).x;
@@ -8102,7 +8187,7 @@ static void FEditorWin(Rectangle r)
 
 static void FOutWin(Rectangle r)
 {
-    if (GBtn((Rectangle) { r.x + r.width - 62, r.y + 3, 56, 24 }, "Clear", (Color) { 58, 62, 78, 255 }, 13)) { labOutLen = 0; labOut[0] = 0; labErrN = 0; }
+    if (GBtn((Rectangle) { r.x + r.width - 62, r.y + 3, 56, 24 }, "Clear", (Color) { 53, 70, 50, 255 }, 13)) { labOutLen = 0; labOut[0] = 0; labErrN = 0; }
     DrawRectangle((int)r.x, (int)r.y + 30, (int)r.width, (int)r.height - 30, CODEBG);
     Rectangle body = { r.x, r.y + 30, r.width, r.height - 30 };
     const float fs = 16, lh = 22; float cw = MeasureTextEx(fCode, "M", fs, 0).x;
@@ -8122,7 +8207,7 @@ static void FOutWin(Rectangle r)
     for (const char* p = labOut; *p;) {
         const char* e = strchr(p, '\n'); int len = e ? (int)(e - p) : (int)strlen(p);
         char line[300]; int cl = len > 299 ? 299 : len; memcpy(line, p, (size_t)cl); line[cl] = 0;
-        Color col = { 215, 218, 235, 255 };
+        Color col = { 239, 231, 209, 255 };
         if (!strncmp(line, "Line ", 5)) col = (Color){ 255, 130, 140, 255 };
         else if (!strncmp(line, "Program finished", 16) || !strncmp(line, "Stopped", 7)) col = DIM;
         else if (!strncmp(line, "Treasure", 8) || !strncmp(line, "Giant", 5) || !strncmp(line, "The sunflower", 13)) col = (Color){ 255, 214, 100, 255 };
@@ -8158,7 +8243,7 @@ static void FUpgWin(Rectangle r)
         DrawRectangleRec(c, own ? (Color) { 24, 50, 38, 255 } : GB_PANEL);
         DrawRectangleLines((int)c.x, (int)c.y, (int)c.width, (int)c.height, own ? GOOD : (ready && aff ? (Color) { 230, 180, 50, 255 } : GB_EDGE));
         TxtFit(fBold, FUPG[i].name, c.x + 10, y + 5, 17, c.width - 130, ready || own ? WHITE : DIM);
-        TxtFit(fReg, FUPG[i].desc, c.x + 10, y + 27, 13, c.width - 20, (Color) { 176, 182, 198, 255 });
+        TxtFit(fReg, FUPG[i].desc, c.x + 10, y + 27, 13, c.width - 20, (Color) { 201, 193, 171, 255 });
         if (own) { Txt(fBold, "Unlocked", c.x + c.width - 10 - TxtW(fBold, "Unlocked", 15), y + 8, 15, GOOD); continue; }
         float cx = c.x + 14;
         for (int k = 0; k < IT_N; k++) if (FUPG[i].cost[k] > 0) {
@@ -8171,9 +8256,9 @@ static void FUpgWin(Rectangle r)
             char need[120] = "Needs: ";
             for (int k = 0; k < 2; k++) if (FUPG[i].req[k] >= 0 && !fsv.unl[FUPG[i].req[k]]) { strcat(need, FUPG[i].name == NULL ? "" : FUPG[FUPG[i].req[k]].name); strcat(need, " "); }
             Txt(fReg, need, c.x + c.width - 10 - fminf(TxtW(fReg, need, 12), c.width * 0.45f), y + 8, 12, (Color) { 220, 150, 90, 255 });
-            DrawRectangleRec(b, (Color) { 36, 38, 48, 255 }); CenterTxt(fBold, "Locked", b.x + b.width / 2, b.y + 5, 14, DIM);
+            DrawRectangleRec(b, (Color) { 33, 44, 31, 255 }); CenterTxt(fBold, "Locked", b.x + b.width / 2, b.y + 5, 14, DIM);
         }
-        else if (GBtn(b, "Unlock", aff ? (Color) { 40, 150, 70, 255 } : (Color) { 70, 74, 90, 255 }, 15) && aff) {
+        else if (GBtn(b, "Unlock", aff ? (Color) { 40, 150, 70, 255 } : (Color) { 76, 80, 67, 255 }, 15) && aff) {
             for (int k = 0; k < IT_N; k++) fsv.inv[k] -= FUPG[i].cost[k];
             fsv.unl[i] = 1; FarmBuild(); SaveFarm();
             GainCredits(15, "Farm upgrade"); Notify(TextFormat("Unlocked: %s", FUPG[i].name), GOOD);
@@ -8215,13 +8300,13 @@ static void FHelpWin(Rectangle r)
     float yTop = r.y + 8 - fHelpScroll, y = yTop, w = r.width - 24, x = r.x + 12;
     ScissorT((int)r.x, (int)r.y, (int)r.width, (int)r.height);
     Txt(fBold, "The language", x, y, 17, (Color) { 255, 214, 100, 255 }); y += 26;
-    y += Wrapped(fReg, "A small Python. Variables, numbers, text, True/False/None, lists, if / elif / else, while, for ... in range(n), def and return, and / or / not, # comments. Indent with 4 spaces. Some of it is locked until you buy the upgrade.", x, y, w, 14, (Color) { 190, 196, 212, 255 });
+    y += Wrapped(fReg, "A small Python. Variables, numbers, text, True/False/None, lists, if / elif / else, while, for ... in range(n), def and return, and / or / not, # comments. Indent with 4 spaces. Some of it is locked until you buy the upgrade.", x, y, w, 14, (Color) { 215, 207, 185, 255 });
     y += 14;
     Txt(fBold, "Functions", x, y, 17, (Color) { 255, 214, 100, 255 }); y += 28;
     for (int i = 0; i < (int)(sizeof FHELP / sizeof FHELP[0]); i++) {
         bool lock = FHELP[i].req >= 0 && !fsv.unl[FHELP[i].req];
         DrawTextEx(fCode, FHELP[i].sig, (Vector2) { x, y }, 15, 0, lock ? (Color) { 150, 120, 120, 255 } : (Color) { 130, 226, 210, 255 }); y += 21;
-        y += Wrapped(fReg, FHELP[i].desc, x + 10, y, w - 10, 13, (Color) { 190, 196, 212, 255 });
+        y += Wrapped(fReg, FHELP[i].desc, x + 10, y, w - 10, 13, (Color) { 215, 207, 185, 255 });
         if (lock) { Txt(fReg, TextFormat("Locked: buy \"%s\"", FUPG[FHELP[i].req].name), x + 10, y, 12, (Color) { 230, 140, 90, 255 }); y += 18; }
         y += 8;
     }
@@ -8229,7 +8314,7 @@ static void FHelpWin(Rectangle r)
     Txt(fBold, "Crops", x, y, 17, (Color) { 255, 214, 100, 255 }); y += 28;
     for (int i = 0; i < 6; i++) {
         Txt(fBold, TextFormat("%s  -  %ds", FCROP[i].name, FCROP[i].grow), x, y, 15, WHITE); y += 20;
-        y += Wrapped(fReg, TextFormat("Costs %s. %s.", FCROP[i].cost, FCROP[i].gives), x + 10, y, w - 10, 13, (Color) { 190, 196, 212, 255 }); y += 8;
+        y += Wrapped(fReg, TextFormat("Costs %s. %s.", FCROP[i].cost, FCROP[i].gives), x + 10, y, w - 10, 13, (Color) { 215, 207, 185, 255 }); y += 8;
     }
     float total = y - yTop + 20, maxS = total - r.height; if (maxS < 0) maxS = 0;
     if (CheckCollisionPointRec(GetMousePosition(), r)) fHelpScroll -= GetMouseWheelMove() * 50;
@@ -8280,7 +8365,7 @@ static void FTutWin(Rectangle r)
         Rectangle bx = { r.x + 10, y + 3, 16, 16 };
         DrawRectangleRec(bx, done ? (Color) { 40, 150, 70, 255 } : GB_DARK); DrawRectangleLines((int)bx.x, (int)bx.y, 16, 16, i == cur ? (Color) { 255, 214, 100, 255 } : GB_EDGE);
         if (done) { DrawLine((int)bx.x + 3, (int)bx.y + 8, (int)bx.x + 7, (int)bx.y + 12, WHITE); DrawLine((int)bx.x + 7, (int)bx.y + 12, (int)bx.x + 13, (int)bx.y + 4, WHITE); }
-        Color c = done ? DIM : (i == cur ? WHITE : (Color) { 150, 156, 172, 255 });
+        Color c = done ? DIM : (i == cur ? WHITE : (Color) { 156, 164, 137, 255 });
         y += Wrapped(fReg, FTUT[i].text, r.x + 34, y, w - 26, 13, c) + 6;
     }
     if (cur < 0) Wrapped(fReg, "Tutorial complete! The farm is yours.", r.x + 12, y + 4, w, 14, GOOD);
@@ -8292,16 +8377,16 @@ static void FTopBar(void)
 {
     DrawRectangle(0, 0, W, (int)FTB, GB_DARK);
     DrawRectangle(0, (int)FTB, W, 2, GB_EDGE);
-    if (GBtn((Rectangle) { 8, 7, 100, 36 }, BACKL, (Color) { 70, 74, 90, 255 }, 15)) { FarmSaveCode(); SaveFarm(); GoMenu(); }
+    if (GBtn((Rectangle) { 8, 7, 100, 36 }, BACKL, (Color) { 76, 80, 67, 255 }, 15)) { FarmSaveCode(); SaveFarm(); GoMenu(); }
     float x = 118;
     for (int i = 0; i < IT_N; i++) if (fsv.seen[i] || i == IT_HAY) { FChip(x, 8, i, fsv.inv[i]); x += TxtW(fBold, TextFormat("%d", fsv.inv[i]), 17) + 52 + 6; }
     DrawCreditsChip(W - 8 - 4 * 42 - 6, 5);
     float pulse = 0.5f + 0.5f * sinf((float)GetTime() * 5);
     Rectangle b0 = FTopBtn(0), b1 = FTopBtn(1), b2 = FTopBtn(2), b3 = FTopBtn(3);
-    if (GBtn(b0, "!", fErrFlash ? (Color) { 150 + (int)(70 * pulse), 50, 50, 255 } : (Color) { 70, 74, 90, 255 }, 20)) { FToggle(W_OUT); fErrFlash = false; }
-    if (GBtn(b1, "+", FAnyUpgrade() ? (Color) { 170 + (int)(50 * pulse), 130, 30, 255 } : (Color) { 70, 74, 90, 255 }, 22)) FToggle(W_UPG);
-    if (GBtn(b2, "i", (Color) { 70, 74, 90, 255 }, 20)) FToggle(W_HELP);
-    if (GBtn(b3, "", fMenu ? (Color) { 100, 106, 130, 255 } : (Color) { 70, 74, 90, 255 }, 20)) { fMenu = !fMenu; fResetArm = false; }
+    if (GBtn(b0, "!", fErrFlash ? (Color) { 150 + (int)(70 * pulse), 50, 50, 255 } : (Color) { 76, 80, 67, 255 }, 20)) { FToggle(W_OUT); fErrFlash = false; }
+    if (GBtn(b1, "+", FAnyUpgrade() ? (Color) { 170 + (int)(50 * pulse), 130, 30, 255 } : (Color) { 76, 80, 67, 255 }, 22)) FToggle(W_UPG);
+    if (GBtn(b2, "i", (Color) { 76, 80, 67, 255 }, 20)) FToggle(W_HELP);
+    if (GBtn(b3, "", fMenu ? (Color) { 110, 115, 96, 255 } : (Color) { 76, 80, 67, 255 }, 20)) { fMenu = !fMenu; fResetArm = false; }
     for (int a = 0; a < 2; a++) for (int b = 0; b < 2; b++) DrawRectangle((int)(b3.x + 8 + a * 11), (int)(b3.y + 8 + b * 11), 9, 9, WHITE);
 }
 static void FMenu(Vector2 m)
@@ -8311,7 +8396,7 @@ static void FMenu(Vector2 m)
     float h = 12 + W_N * 30 + 8 + 4 * 32 + 8;
     Rectangle pop = { x, y, w, h };
     DrawRectangle((int)x + 4, (int)y + 5, (int)w, (int)h, Fade(BLACK, 0.3f));
-    DrawRectangleRec(pop, (Color) { 24, 26, 34, 250 }); DrawRectangleLines((int)x, (int)y, (int)w, (int)h, GB_EDGE);
+    DrawRectangleRec(pop, (Color) { 22, 32, 21, 250 }); DrawRectangleLines((int)x, (int)y, (int)w, (int)h, GB_EDGE);
     float yy = y + 10;
     for (int i = 0; i < W_N; i++) {
         Rectangle row = { x + 6, yy, w - 12, 28 };
@@ -8323,9 +8408,9 @@ static void FMenu(Vector2 m)
         yy += 30;
     }
     DrawLine((int)x + 8, (int)yy + 2, (int)(x + w - 8), (int)yy + 2, GB_EDGE); yy += 8;
-    if (GBtn((Rectangle) { x + 8, yy, w - 16, 28 }, "Arrange windows", (Color) { 58, 62, 78, 255 }, 14)) { FArrange(); fMenu = false; } yy += 32;
-    if (GBtn((Rectangle) { x + 8, yy, w - 16, 28 }, IsWindowFullscreen() ? "Leave fullscreen (F11)" : "Fullscreen (F11)", (Color) { 58, 62, 78, 255 }, 14)) ToggleFull(); yy += 32;
-    if (GBtn((Rectangle) { x + 8, yy, w - 16, 28 }, "Stop program", (Color) { 58, 62, 78, 255 }, 14)) { FarmStop(); fMenu = false; } yy += 32;
+    if (GBtn((Rectangle) { x + 8, yy, w - 16, 28 }, "Arrange windows", (Color) { 53, 70, 50, 255 }, 14)) { FArrange(); fMenu = false; } yy += 32;
+    if (GBtn((Rectangle) { x + 8, yy, w - 16, 28 }, IsWindowFullscreen() ? "Leave fullscreen (F11)" : "Fullscreen (F11)", (Color) { 53, 70, 50, 255 }, 14)) ToggleFull(); yy += 32;
+    if (GBtn((Rectangle) { x + 8, yy, w - 16, 28 }, "Stop program", (Color) { 53, 70, 50, 255 }, 14)) { FarmStop(); fMenu = false; } yy += 32;
     if (GBtn((Rectangle) { x + 8, yy, w - 16, 28 }, fResetArm ? "Click again to erase" : "Reset all progress", fResetArm ? (Color) { 190, 60, 60, 255 } : (Color) { 110, 52, 56, 255 }, 14)) {
         if (!fResetArm) fResetArm = true;
         else { FarmStop(); FarmReset(); SaveFarm(); fPtN = 0; fResetArm = false; fMenu = false; Notify("Farm progress reset", BAD); }
@@ -8364,7 +8449,7 @@ static void DrawFarm(void)
     FWinInput(m);
 
     /* the farm */
-    DrawRectangleGradientV(0, 0, W, H, (Color) { 34, 40, 50, 255 }, (Color) { 22, 26, 34, 255 });
+    DrawRectangleGradientV(0, 0, W, H, (Color) { 33, 45, 31, 255 }, (Color) { 22, 31, 21, 255 });
     FFit((Rectangle) { 470, FTB + 6, W - 470, H - FTB - 12 });
     FDrawFarm(fRunning);
 
@@ -8384,7 +8469,7 @@ static void DrawFarm(void)
         float bx = fminf(m.x + 16, W - tw - 6), by = fminf(m.y + 18, H - th - 6);
         DrawRectangle((int)bx, (int)by, (int)tw, (int)th, Fade(GB_DARK, 0.94f)); DrawRectangleLines((int)bx, (int)by, (int)tw, (int)th, GB_EDGE);
         Txt(fBold, l1, bx + 10, by + 5, 15, WHITE);
-        if (l2[0]) Txt(fReg, l2, bx + 10, by + 27, 13, (Color) { 190, 196, 212, 255 });
+        if (l2[0]) Txt(fReg, l2, bx + 10, by + 27, 13, (Color) { 215, 207, 185, 255 });
     }
 
     FTopBar();
@@ -9628,37 +9713,70 @@ static void MemBlockOf(const char* name, char* out, int cap)
     out[i] = 0;
 }
 
-/* a rounded box with a 1.5px edge (drawn as two filled boxes, so it works on any raylib version) */
-static void MemBox(Rectangle r, float rd, Color fill, Color edge)
+/* ---- Code Breakdown: the stack is a pile of wooden crates, the heap is a barn of hay bales,
+   pointers are lengths of rope, and a helper runs about pressing the buttons for you ---- */
+static const Color CB_WOOD = { 66, 47, 32, 255 }, CB_WOOD_L = { 138, 100, 60, 255 };
+static const Color CB_TAG = { 238, 228, 198, 255 }, CB_INK = { 52, 38, 26, 255 };
+static const Color CB_HAY = { 204, 164, 72, 255 }, CB_HAY_D = { 152, 114, 46, 255 };
+
+static Rectangle memCellBox;            /* the first cell that changed this step, for the helper to visit */
+static bool memCellOK = false, memCellHeap = false;
+
+/* a crate: wood with plank lines and a nail in each corner */
+static void CbCrate(Rectangle r)
 {
-    DrawRectangleRounded(r, rd, 8, edge);
-    DrawRectangleRounded((Rectangle) { r.x + 1.5f, r.y + 1.5f, r.width - 3, r.height - 3 }, rd, 8, fill);
+    DrawRectangleRounded(r, 0.05f, 8, CB_WOOD_L);
+    DrawRectangleRounded((Rectangle) { r.x + 2, r.y + 2, r.width - 4, r.height - 4 }, 0.05f, 8, CB_WOOD);
+    for (float yy = r.y + 20; yy < r.y + r.height - 6; yy += 20) DrawRectangle((int)r.x + 4, (int)yy, (int)r.width - 8, 1, Fade(BLACK, 0.28f));
+    float nx[2] = { r.x + 7, r.x + r.width - 7 }, ny[2] = { r.y + 7, r.y + r.height - 7 };
+    for (int a = 0; a < 2; a++) for (int b = 0; b < 2; b++) DrawCircle((int)nx[a], (int)ny[b], 1.8f, Fade(CB_WOOD_L, 0.9f));
+}
+
+/* a paper tag with a hole in it: where a value is written */
+static void CbTag(Rectangle r, Color paper, Color edge)
+{
+    DrawRectangleRounded(r, 0.25f, 8, edge);
+    DrawRectangleRounded((Rectangle) { r.x + 1.5f, r.y + 1.5f, r.width - 3, r.height - 3 }, 0.25f, 8, paper);
+    DrawCircle((int)r.x + 9, (int)(r.y + r.height / 2), 2.6f, edge);
 }
 
 static bool MemIsPtr(const MCell* c) { return c->val[0] == '-' && c->val[1] == '>' && c->val[2]; }
 
 typedef struct { Rectangle box; bool placed; } MPlaced;
 
+/* a length of rope: dashed, with a knot where it starts and an arrowhead where it ends */
 static void MemArrow(Vector2* pts, int n, Color col)
 {
-    for (int i = 0; i + 1 < n; i++) DrawLineEx(pts[i], pts[i + 1], 2.2f, col);
+    for (int i = 0; i + 1 < n; i++) {
+        Vector2 a = pts[i], b = pts[i + 1];
+        float dx = b.x - a.x, dy = b.y - a.y, len = sqrtf(dx * dx + dy * dy);
+        if (len < 0.5f) continue;
+        float ux = dx / len, uy = dy / len;
+        for (float s = 0; s < len; s += 13) {
+            float e = s + 8 < len ? s + 8 : len;
+            DrawLineEx((Vector2) { a.x + ux * s, a.y + uy * s }, (Vector2) { a.x + ux * e, a.y + uy * e }, 3.0f, col);
+        }
+    }
+    DrawCircleV(pts[0], 5.0f, col);
+    DrawCircleV(pts[0], 2.2f, CB_INK);
     Vector2 tip = pts[n - 1], from = pts[n - 2];
     float d = tip.x < from.x ? 1.0f : -1.0f;
-    DrawTriangle(tip, (Vector2) { tip.x + d * 10, tip.y + 6 }, (Vector2) { tip.x + d * 10, tip.y - 6 }, col);
-    DrawTriangle(tip, (Vector2) { tip.x + d * 10, tip.y - 6 }, (Vector2) { tip.x + d * 10, tip.y + 6 }, col);
+    DrawTriangle(tip, (Vector2) { tip.x + d * 11, tip.y + 7 }, (Vector2) { tip.x + d * 11, tip.y - 7 }, col);
+    DrawTriangle(tip, (Vector2) { tip.x + d * 11, tip.y - 7 }, (Vector2) { tip.x + d * 11, tip.y + 7 }, col);
 }
 
 static void DrawMemView(const MStep* st, Rectangle area, bool started)
 {
+    memCellOK = false;
     Panel(area, 0.03f, SURF, BORDER);
     float pad = 16, heapW = 176, gutter = 64;
     float stackX = area.x + pad, stackW = area.width - 2 * pad - heapW - gutter;
     float heapX = stackX + stackW + gutter;
-    Txt(fCode, "STACK  (newest on top)", stackX, area.y + 12, 13, DIM);
-    Txt(fCode, "HEAP", heapX, area.y + 12, 13, DIM);
+    Txt(fBold, "CALL STACK  -  newest crate on top", stackX, area.y + 11, 13, CB_HAY);
+    Txt(fBold, "THE BARN  (heap)", heapX, area.y + 11, 13, CB_HAY);
     if (!started || !st) {
         CenterTxt(fReg, "Nothing has run yet.", area.x + area.width / 2, area.y + area.height / 2 - 24, 20, DIM);
-        CenterTxt(fReg, "Press Next (or the Right arrow) to run the first line.", area.x + area.width / 2, area.y + area.height / 2 + 6, 15, DIM);
+        CenterTxt(fReg, "Press \"Run next line\" and your helper will do it.", area.x + area.width / 2, area.y + area.height / 2 + 6, 15, DIM);
         return;
     }
     const MCell* cells = st->cells;
@@ -9677,7 +9795,7 @@ static void DrawMemView(const MStep* st, Rectangle area, bool started)
     }
     int rows = 0;
     for (int i = 0; i < n; i++) if (strcmp(cells[i].area, "heap")) rows++;
-    float rowH = 42, headH = 28, fgap = 12;
+    float rowH = 42, headH = 30, fgap = 12;
     float need = rows * rowH + nf * (headH + fgap);
     float availH = area.height - 56;
     if (need > availH) rowH *= availH / need;
@@ -9686,22 +9804,26 @@ static void DrawMemView(const MStep* st, Rectangle area, bool started)
         int cnt = 0;
         for (int i = 0; i < n; i++) if (!strcmp(cells[i].area, frames[fi])) cnt++;
         Rectangle fr = { stackX, y, stackW, headH + cnt * rowH + 6 };
-        MemBox(fr, 0.06f, (Color) { 26, 31, 46, 255 }, Fade(ACCENTS[lang], 0.55f));
+        CbCrate(fr);
         char lab[96];
         snprintf(lab, sizeof lab, strpbrk(frames[fi], "( ") ? "%s" : "%s()", frames[fi]);
-        Txt(fBold, lab, fr.x + 12, y + 4, 16, TXT);
+        float lw = TxtW(fBold, lab, 15) + 24;
+        DrawRectangleRounded((Rectangle) { fr.x + 12, y + 5, lw, 22 }, 0.3f, 6, CB_TAG);
+        Txt(fBold, lab, fr.x + 24, y + 7, 15, CB_INK);
         float ry = y + headH;
         for (int i = 0; i < n; i++) {
             if (strcmp(cells[i].area, frames[fi])) continue;
             const MCell* c = &cells[i];
-            Txt(fBold, c->name, fr.x + 14, ry + 2, 15, TXT);
+            Txt(fBold, c->name, fr.x + 16, ry + 2, 15, TXT);
             char meta[96]; snprintf(meta, sizeof meta, "%s  @%s", c->type, c->addr);
-            TxtFit(fCode, meta, fr.x + 14, ry + 20, 11, stackW - 150, DIM);
+            TxtFit(fCode, meta, fr.x + 16, ry + 20, 11, stackW - 150, (Color) { 196, 176, 144, 255 });
             Rectangle vb = { fr.x + fr.width - 118, ry + 3, 104, rowH - 8 };
-            MemBox(vb, 0.25f, c->changed ? (Color) { 70, 52, 30, 255 } : SURF2, c->changed ? COL_AMBER_M : BORDER);
-            if (MemIsPtr(c)) CenterTxt(fCode, "pointer", vb.x + vb.width / 2, vb.y + vb.height / 2 - 8, 14, DIM);
-            else CenterFit(fCode, c->val, vb.x + vb.width / 2, vb.y + vb.height / 2 - 8, 15, vb.width - 10, TXT);
+            if (c->changed) { DrawRectangleRounded((Rectangle) { vb.x - 3, vb.y - 3, vb.width + 6, vb.height + 6 }, 0.3f, 8, Fade(COL_AMBER_M, 0.35f)); }
+            CbTag(vb, c->changed ? (Color) { 255, 220, 120, 255 } : CB_TAG, c->changed ? COL_AMBER_M : CB_WOOD_L);
+            if (MemIsPtr(c)) CenterTxt(fCode, "pointer", vb.x + vb.width / 2 + 5, vb.y + vb.height / 2 - 8, 14, (Color) { 110, 90, 64, 255 });
+            else CenterFit(fCode, c->val, vb.x + vb.width / 2 + 5, vb.y + vb.height / 2 - 8, 15, vb.width - 24, CB_INK);
             pl[i].box = vb; pl[i].placed = true;
+            if (c->changed && !memCellOK) { memCellBox = vb; memCellOK = true; memCellHeap = false; }
             ry += rowH;
         }
         y += fr.height + fgap;
@@ -9730,18 +9852,27 @@ static void DrawMemView(const MStep* st, Rectangle area, bool started)
         if (strcmp(cells[i].area, "heap")) continue;
         const MCell* c = &cells[i];
         char meta[96]; snprintf(meta, sizeof meta, "%s  %s  @%s", c->name, c->type, c->addr);
-        TxtFit(fCode, meta, heapX, hy, 11, heapW, leaked[i] ? BAD : DIM);
+        TxtFit(fCode, meta, heapX, hy, 11, leaked[i] ? heapW - 58 : heapW, leaked[i] ? BAD : DIM);
+        if (leaked[i]) Txt(fBold, "LEAKED", heapX + heapW - TxtW(fBold, "LEAKED", 11), hy, 11, BAD);
         Rectangle b = { heapX, hy + 17, heapW, hrow - 26 };
-        Color edge = leaked[i] ? BAD : (c->changed ? COL_AMBER_M : BORDER);
-        MemBox(b, 0.25f, leaked[i] ? (Color) { 62, 28, 36, 255 } : (c->changed ? (Color) { 70, 52, 30, 255 } : SURF2), edge);
-        CenterFit(fCode, c->val, b.x + b.width / 2 - (leaked[i] ? 22 : 0), b.y + b.height / 2 - 8, 15, b.width - (leaked[i] ? 66 : 14), TXT);
-        if (leaked[i]) Txt(fBold, "LEAKED", b.x + b.width - 62, b.y + b.height / 2 - 7, 12, BAD);
+        Color fill = leaked[i] ? (Color) { 150, 66, 58, 255 } : (c->changed ? (Color) { 232, 190, 90, 255 } : CB_HAY);
+        Color edge = leaked[i] ? BAD : (c->changed ? COL_AMBER_M : CB_HAY_D);
+        DrawRectangleRounded(b, 0.3f, 8, edge);
+        DrawRectangleRounded((Rectangle) { b.x + 2, b.y + 2, b.width - 4, b.height - 4 }, 0.3f, 8, fill);
+        for (float yy = b.y + 8; yy < b.y + b.height - 6; yy += 7) DrawLine((int)b.x + 10, (int)yy, (int)(b.x + b.width - 10), (int)yy + 1, Fade(edge, 0.30f));
+        DrawRectangle((int)(b.x + b.width * 0.22f), (int)b.y + 3, 3, (int)b.height - 6, Fade(CB_INK, 0.55f));     /* twine */
+        DrawRectangle((int)(b.x + b.width * 0.78f), (int)b.y + 3, 3, (int)b.height - 6, Fade(CB_INK, 0.55f));
+        Color ink = leaked[i] ? TXT : CB_INK;
+        Rectangle lab = { b.x + b.width * 0.30f, b.y + b.height / 2 - 11, b.width * 0.40f, 22 };
+        DrawRectangleRounded(lab, 0.3f, 6, Fade(leaked[i] ? BLACK : CB_TAG, leaked[i] ? 0.25f : 0.85f));
+        CenterFit(fCode, c->val, lab.x + lab.width / 2, lab.y + 3, 15, lab.width - 8, ink);
         pl[i].box = b; pl[i].placed = true;
+        if (c->changed && !memCellOK) { memCellBox = b; memCellOK = true; memCellHeap = true; }
         hy += hrow;
     }
 
-    /* arrows: one colour per pointer */
-    static const Color AC[4] = { { 52, 199, 120, 255 }, { 100, 170, 255, 255 }, { 190, 140, 255, 255 }, { 255, 180, 84, 255 } };
+    /* ropes: one colour per pointer */
+    static const Color AC[4] = { { 120, 206, 106, 255 }, { 128, 192, 208, 255 }, { 214, 148, 170, 255 }, { 228, 170, 74, 255 } };
     int ai = 0, lane = 0;
     for (int i = 0; i < n; i++) {
         if (!MemIsPtr(&cells[i]) || !pl[i].placed) continue;
@@ -9754,7 +9885,7 @@ static void DrawMemView(const MStep* st, Rectangle area, bool started)
         Color col = AC[ai++ % 4];
         if (t < 0 || !pl[t].placed) {       /* null, or points at something not on screen */
             Vector2 a = { pl[i].box.x + pl[i].box.width, pl[i].box.y + pl[i].box.height / 2 };
-            Txt(fCode, strcmp(cells[i].val + 2, "null") && strcmp(cells[i].val + 2, "NULL") ? "?" : "NULL", a.x - 86, a.y - 8, 13, Fade(col, 0.9f));
+            Txt(fBold, strcmp(cells[i].val + 2, "null") && strcmp(cells[i].val + 2, "NULL") ? "?" : "NULL", a.x + 8, a.y - 8, 13, col);
             continue;
         }
         Vector2 a = { pl[i].box.x + pl[i].box.width, pl[i].box.y + pl[i].box.height / 2 };
@@ -9769,17 +9900,110 @@ static void DrawMemView(const MStep* st, Rectangle area, bool started)
             Vector2 b = { pl[t].box.x + pl[t].box.width, pl[t].box.y + pl[t].box.height / 2 };
             float mx = a.x + 8 + (lane++ % 3) * 9;
             Vector2 pts[4] = { a, { mx, a.y }, { mx, b.y }, b };
-            if (fabsf(a.y - b.y) < 2) { pts[1] = (Vector2){ a.x, a.y }; { Vector2 lp[4] = { { a.x + 14, a.y + 14 }, { mx, a.y + 14 }, { mx, b.y }, b }; MemArrow(lp, 4, col); } }
+            if (fabsf(a.y - b.y) < 2) { Vector2 lp[4] = { { a.x + 14, a.y + 14 }, { mx, a.y + 14 }, { mx, b.y }, b }; MemArrow(lp, 4, col); }
             else MemArrow(pts, 4, col);
         }
     }
 }
 
+/* ---- the helper: runs to the button, presses it, then runs to the line and the cell that changed ---- */
+enum { CB_IDLE, CB_TO_BTN, CB_PRESS, CB_TO_LINE, CB_AT_LINE, CB_TO_CELL, CB_AT_CELL, CB_HOME };
+typedef struct { float x, y, ph, t; int mode, dir, pend; bool pressed; } CbHelper;
+static CbHelper cb = { 1140, 746, 0, 0, CB_IDLE, 0, 0, false };
+static float cbHlY = -100;              /* the highlight bar slides between lines */
+
+static void CbReset(void) { cb.x = 1140; cb.y = H - 14.0f; cb.ph = 0; cb.t = 0; cb.mode = CB_IDLE; cb.dir = 0; cb.pend = 0; cb.pressed = false; cbHlY = -100; }
+static void CbAskNext(void) { if (cb.pend < 3) cb.pend++; if (cb.mode != CB_TO_BTN && cb.mode != CB_PRESS) { cb.mode = CB_TO_BTN; cb.t = 0; cb.pressed = false; } }
+
+static void CbBubble(float cx, float topY, const char* s)
+{
+    float fs = 13, w = TxtW(fBold, s, fs) + 22, h = 26;
+    float bx = cx - w / 2;
+    if (bx < 8) bx = 8;
+    if (bx + w > W - 8) bx = W - 8 - w;
+    float by = topY - h - 10;
+    if (by < 76) by = 76;
+    DrawRectangleRounded((Rectangle) { bx, by + 3, w, h }, 0.35f, 8, Fade(BLACK, 0.3f));
+    DrawRectangleRounded((Rectangle) { bx, by, w, h }, 0.35f, 8, CB_TAG);
+    DrawTriangle((Vector2) { cx - 6, by + h - 1 }, (Vector2) { cx, by + h + 8 }, (Vector2) { cx + 6, by + h - 1 }, CB_TAG);
+    Txt(fBold, s, bx + 11, by + 5, fs, CB_INK);
+}
+
+/* moves and draws the helper. nb = the "run next line" button, cp = the code panel, hl = the line being run */
+static void CbUpdate(float dt, Rectangle nb, Rectangle cp, float lh, int hl, int ns)
+{
+    Vector2 tgt = { cb.x, cb.y };
+    bool run = false;
+    float sc = 1.0f;
+    switch (cb.mode) {
+    case CB_TO_BTN:  tgt = (Vector2){ nb.x + nb.width / 2, nb.y + 14 }; run = true; break;
+    case CB_TO_LINE: if (hl > 0) { tgt = (Vector2){ cp.x + cp.width - 34, cp.y + 14 + (hl - 1) * lh + lh - 1 }; run = true; }
+                   else cb.mode = CB_HOME; break;
+    case CB_TO_CELL: if (memCellOK) { tgt = memCellHeap ? (Vector2) { memCellBox.x - 26, memCellBox.y + memCellBox.height } : (Vector2) { memCellBox.x + memCellBox.width + 28, memCellBox.y + memCellBox.height }; run = true; }
+                   else cb.mode = CB_IDLE; break;
+    case CB_HOME:    tgt = (Vector2){ 1140, H - 14.0f }; run = true; break;
+    default: break;
+    }
+    if (run) {
+        float dx = tgt.x - cb.x, dy = tgt.y - cb.y, d = sqrtf(dx * dx + dy * dy);
+        float step = (260.0f + 520.0f * (d > 90 ? 1.0f : d / 90.0f)) * dt;
+        if (d <= step + 1.5f) {
+            cb.x = tgt.x; cb.y = tgt.y; cb.ph = 0; cb.t = 0;
+            if (cb.mode == CB_TO_BTN) { cb.mode = CB_PRESS; cb.pressed = false; cb.dir = 0; }
+            else if (cb.mode == CB_TO_LINE) { cb.mode = CB_AT_LINE; cb.dir = 1; CompBurst(cb.x - 40, cb.y - 22, 8); }
+            else if (cb.mode == CB_TO_CELL) { cb.mode = CB_AT_CELL; cb.dir = memCellHeap ? 2 : 1; CompBurst(memCellBox.x + memCellBox.width / 2, memCellBox.y + memCellBox.height / 2, 8); }
+            else cb.mode = CB_IDLE;
+        }
+        else {
+            cb.x += dx / d * step; cb.y += dy / d * step; cb.ph += dt * 17.0f;
+            cb.dir = dx > 8 ? 2 : (dx < -8 ? 1 : 0);
+        }
+    }
+    float hop = 0;
+    if (cb.mode == CB_PRESS) {                           /* jump onto the button; the step runs when the feet land */
+        cb.t += dt;
+        float u = cb.t / 0.24f;
+        hop = u < 1.0f ? sinf(u * PI) * 20.0f : 0.0f;
+        if (u >= 1.0f && !cb.pressed) {
+            cb.pressed = true;
+            CompBurst(cb.x, cb.y - 6, 6);
+            if (cb.pend > 0) cb.pend--;
+            if (memStep < ns) memStep++;
+        }
+        if (cb.t >= 0.40f) {
+            if (cb.pend > 0 && memStep < ns) { cb.t = 0; cb.pressed = false; }
+            else { cb.pend = 0; cb.mode = CB_TO_LINE; cb.t = 0; }
+        }
+    }
+    else if (cb.mode == CB_AT_LINE) {
+        cb.t += dt;
+        hop = fabsf(sinf(cb.t * 9.0f)) * 5.0f * (cb.t < 0.7f ? 1.0f : 0.0f);
+        if (cb.t > 0.95f) {
+            if (memStep >= ns) { CompBurst(cb.x, cb.y - 40, 22); cb.mode = CB_IDLE; }
+            else if (memCellOK) { cb.mode = CB_TO_CELL; cb.t = 0; }
+            else cb.mode = CB_IDLE;
+        }
+    }
+    else if (cb.mode == CB_AT_CELL) {
+        cb.t += dt;
+        hop = fabsf(sinf(cb.t * 9.0f)) * 5.0f * (cb.t < 0.7f ? 1.0f : 0.0f);
+        if (cb.t > 1.1f) cb.mode = CB_IDLE;
+    }
+    else if (cb.mode == CB_IDLE && memStep == 0 && (fabsf(cb.x - 1140) > 2 || fabsf(cb.y - (H - 14.0f)) > 2)) cb.mode = CB_HOME;
+
+    float breathe = (cb.mode == CB_IDLE) ? sinf((float)GetTime() * 2.2f) * 1.2f : 0.0f;
+    DrawPlayer(cb.x, cb.y - hop + breathe, cb.dir, sc, run ? cb.ph : 0);
+    float headY = cb.y - hop - 54 * sc;
+    if (cb.mode == CB_AT_LINE) CbBubble(cb.x, headY, memStep >= ns ? "That's the lot!" : TextFormat("line %d", hl));
+    else if (cb.mode == CB_AT_CELL) CbBubble(cb.x, headY, memLeakNow ? "this one leaked!" : "this changed");
+    CompDrawBits(dt);
+}
+
 static void DrawMemList(void)
 {
     TopBar();
-    Txt(fBold, "Memory Lab", 40, 14, 32, TXT);
-    Txt(fReg, "Watch the stack, the heap and every pointer change, one line of code at a time.", 40, 46, 15, DIM);
+    Txt(fBold, "Code Breakdown", 40, 14, 32, TXT);
+    Txt(fReg, "Pick a program and watch it run one line at a time: what lands on the stack, what goes in the barn (heap), and who points where.", 40, 46, 15, DIM);
     if (Button((Rectangle) { W - 140, 16, 110, 40 }, "Menu", SURF2, 17)) GoMenu();
     float wheel = GetMouseWheelMove();
     memListScroll -= wheel * 50;
@@ -9796,7 +10020,7 @@ static void DrawMemList(void)
     for (int i = 0; i < NMLESSONS; ) {
         if (strcmp(lastTrack, MLESSONS[i].track)) {
             lastTrack = MLESSONS[i].track;
-            Txt(fBold, MLESSONS[i].track, 40, y, 14, ACCENTS[lang]);
+            Txt(fBold, MLESSONS[i].track, 40, y, 14, CB_HAY);
             y += 26;
         }
         int j = i, c = 0;
@@ -9804,12 +10028,13 @@ static void DrawMemList(void)
             Rectangle r = { 40 + c * (cw + 20), y, cw, chh };
             bool hov = CheckCollisionPointRec(GetMousePosition(), r) && r.y + r.height > 73;
             if (hov) hand = true;
-            Panel(r, 0.12f, hov ? SURF2 : SURF, hov ? ACCENTS[lang] : BORDER);
-            TxtFit(fBold, MLESSONS[j].topic, r.x + 18, r.y + 12, 19, cw - 36, TXT);
-            TxtFit(fReg, MLESSONS[j].title, r.x + 18, r.y + 40, 14, cw - 120, DIM);
-            char info[48]; snprintf(info, sizeof info, "%d steps", MLESSONS[j].ns);
+            Panel(r, 0.12f, hov ? SURF2 : SURF, hov ? CB_HAY : BORDER);
+            DrawRectangleRounded((Rectangle) { r.x, r.y + 10, 5, r.height - 20 }, 0.5f, 4, hov ? CB_HAY : CB_WOOD_L);
+            TxtFit(fBold, MLESSONS[j].topic, r.x + 20, r.y + 12, 19, cw - 40, TXT);
+            TxtFit(fReg, MLESSONS[j].title, r.x + 20, r.y + 40, 14, cw - 130, DIM);
+            char info[48]; snprintf(info, sizeof info, "%d lines run", MLESSONS[j].ns);
             Txt(fCode, info, r.x + r.width - 18 - TxtW(fCode, info, 12), r.y + 44, 12, DIM);
-            if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { memLesson = j; memStep = 0; }
+            if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { memLesson = j; memStep = 0; CbReset(); }
             c++;
             if (c == cols) { c = 0; y += chh + 12; }
             j++;
@@ -9825,12 +10050,13 @@ static void DrawMem(void)
 {
     if (memLesson < 0) { DrawMemList(); return; }
     const MLesson* L = &MLESSONS[memLesson];
+    float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
     TopBar();
-    if (Button((Rectangle) { 24, 16, 110, 40 }, "< Lessons", SURF2, 16)) { memLesson = -1; return; }
+    if (Button((Rectangle) { 24, 16, 110, 40 }, "< Programs", SURF2, 16)) { memLesson = -1; return; }
     TxtFit(fBold, L->topic, 152, 12, 26, 600, TXT);
     TxtFit(fReg, L->title, 152, 44, 14, 700, DIM);
-    char sc[48]; snprintf(sc, sizeof sc, "Step %d / %d", memStep, L->ns);
-    Txt(fBold, sc, W - 24 - TxtW(fBold, sc, 20), 22, 20, ACCENTS[lang]);
+    char sc[48]; snprintf(sc, sizeof sc, "Line %d of %d", memStep, L->ns);
+    Txt(fBold, sc, W - 24 - TxtW(fBold, sc, 20), 22, 20, CB_HAY);
 
     /* code panel */
     float fs = 15, cwid = MeasureTextEx(fCode, "M", fs, 0).x, lh = 24;
@@ -9838,22 +10064,27 @@ static void DrawMem(void)
     if (cp.height < 200) cp.height = 200;
     Panel(cp, 0.03f, CODEBG, BORDER);
     int hl = memStep > 0 ? L->steps[memStep - 1].line : 0;
+    if (hl > 0) {                                           /* the highlight bar slides down to the line being run */
+        float ty = cp.y + 14 + (hl - 1) * lh - 2;
+        if (cbHlY < 0) cbHlY = ty;
+        cbHlY += (ty - cbHlY) * (dt * 14 > 1 ? 1 : dt * 14);
+        DrawRectangle((int)cp.x + 4, (int)cbHlY, (int)cp.width - 8, (int)lh, Fade(CB_HAY, 0.20f));
+        DrawRectangle((int)cp.x + 4, (int)cbHlY, 3, (int)lh, CB_HAY);
+        DrawTriangle((Vector2) { cp.x + 9, cbHlY + 5 }, (Vector2) { cp.x + 9, cbHlY + lh - 7 }, (Vector2) { cp.x + 17, cbHlY + lh / 2 - 2 }, CB_HAY);
+    }
+    else cbHlY = -100;
     for (int i = 0; i < L->nlines; i++) {
         float ly = cp.y + 14 + i * lh;
-        if (i + 1 == hl) {
-            DrawRectangle((int)cp.x + 4, (int)ly - 2, (int)cp.width - 8, (int)lh, Fade(ACCENTS[lang], 0.22f));
-            DrawRectangle((int)cp.x + 4, (int)ly - 2, 3, (int)lh, ACCENTS[lang]);
-        }
         char num[8]; snprintf(num, sizeof num, "%2d", i + 1);
-        DrawTextEx(fCode, num, (Vector2) { cp.x + 14, ly + 1 }, fs - 2, 0, (Color) { 90, 98, 122, 255 });
-        HighlightLine(L->code[i], cp.x + 46, ly, fs, cwid);
+        DrawTextEx(fCode, num, (Vector2) { cp.x + 20, ly + 1 }, fs - 2, 0, (Color) { 112, 118, 92, 255 });
+        HighlightLine(L->code[i], cp.x + 50, ly, fs, cwid);
     }
 
     /* what just happened */
     float ey = cp.y + cp.height + 14;
     Rectangle ep = { 24, ey, 520, H - ey - 84 };
     Panel(ep, 0.05f, SURF, BORDER);
-    Txt(fBold, memStep ? "What just happened" : "About this lesson", ep.x + 18, ep.y + 12, 14, ACCENTS[lang]);
+    Txt(fBold, memStep ? "What that line did" : "About this program", ep.x + 18, ep.y + 12, 14, CB_HAY);
     const char* msg = memStep ? L->steps[memStep - 1].explain : L->text;
     ScissorT((int)ep.x, (int)ep.y, (int)ep.width, (int)ep.height);
     Wrapped(fReg, msg, ep.x + 18, ep.y + 38, ep.width - 36, 15, TXT);
@@ -9865,16 +10096,28 @@ static void DrawMem(void)
     /* controls */
     float by = H - 66;
     bool prev = memStep > 0, next = memStep < L->ns;
-    if (Button((Rectangle) { 24, by, 120, 46 }, "Restart", SURF2, 17)) memStep = 0;
-    if (Button((Rectangle) { 160, by, 120, 46 }, "< Prev", prev ? (Color) { 60, 70, 100, 255 } : (Color) { 36, 40, 56, 255 }, 18) && prev) memStep--;
-    if (Button((Rectangle) { 296, by, 150, 46 }, next ? "Next >" : "Done", next ? ACCENTS[lang] : GOOD, 18)) { if (next) memStep++; else memLesson = -1; }
-    if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_SPACE)) { if (next) memStep++; }
-    if (IsKeyPressed(KEY_LEFT) && prev) memStep--;
-    if (IsKeyPressed(KEY_HOME)) memStep = 0;
-    Txt(fReg, "Left / Right arrow keys step through the code.   Amber = changed this step.   Red = leaked.", 470, by + 14, 13, DIM);
-    DrawCompanion(1146, H - 16, 1.1f, memStep == 0 ? MOOD_IDLE : (memLeakNow ? MOOD_SAD : (memStep == L->ns ? MOOD_CHEER : MOOD_THINK)), false);
+    Rectangle nb = { 296, by, 176, 46 };
+    if (Button((Rectangle) { 24, by, 120, 46 }, "Rewind", SURF2, 17)) { memStep = 0; cb.pend = 0; cb.mode = CB_HOME; }
+    if (Button((Rectangle) { 160, by, 120, 46 }, "< Back", prev ? (Color) { 75, 79, 66, 255 } : (Color) { 35, 48, 33, 255 }, 18) && prev) { memStep--; cb.pend = 0; cb.mode = CB_TO_LINE; cb.t = 0; }
+    bool pressedNow = cb.mode == CB_PRESS && cb.pressed;
+    Rectangle drawNb = nb; if (pressedNow) drawNb.y += 3;
+    if (next) {
+        /* the helper presses this button; you can also just click it and watch them run over */
+        DrawRectangleRounded((Rectangle) { drawNb.x, drawNb.y + (pressedNow ? 0 : 3), drawNb.width, drawNb.height }, 0.28f, 10, Fade(BLACK, 0.35f));
+        bool hov = CheckCollisionPointRec(GetMousePosition(), nb);
+        if (hov) hand = true;
+        DrawRectangleRounded(drawNb, 0.28f, 10, (hov || pressedNow) ? ColorBrightness(ACCENTS[lang], 0.18f) : ACCENTS[lang]);
+        DrawRectangleRounded((Rectangle) { drawNb.x + 2, drawNb.y + 2, drawNb.width - 4, drawNb.height * 0.42f }, 0.5f, 8, Fade(WHITE, 0.09f));
+        CenterTxt(fBold, "Run next line >", drawNb.x + drawNb.width / 2, drawNb.y + 11, 18, WHITE);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) CbAskNext();
+    }
+    else if (Button(nb, "Finish", GOOD, 18)) memLesson = -1;
+    if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_SPACE)) { if (next) CbAskNext(); }
+    if (IsKeyPressed(KEY_LEFT) && prev) { memStep--; cb.pend = 0; cb.mode = CB_TO_LINE; cb.t = 0; }
+    if (IsKeyPressed(KEY_HOME)) { memStep = 0; cb.pend = 0; cb.mode = CB_HOME; }
+    Txt(fReg, "Right arrow or Space runs the next line.   Gold = changed.   Red = leaked.", 490, by + 14, 13, DIM);
+    CbUpdate(dt, nb, cp, lh, hl, L->ns);
 }
-
 
 /* ======================================================================
    YOUR CHARACTER AS A COMPANION, THE LOADING SCREEN, AND SCREEN TRANSITIONS
@@ -9897,7 +10140,7 @@ static const char* COMP_TIPS[] = {
     "Read the code one line at a time, like the computer does.",
     "= assigns, == compares. Mixing them up is a classic bug.",
     "Strings in C end with a hidden \\0.",
-    "Stuck? Try the Memory Lab and watch it happen.",
+    "Stuck? Try Code Breakdown and watch it happen.",
     "Compile often. Small steps find bugs fast.",
     "Name things so you can read them next week.",
     "A function gets a copy of its arguments, unless you pass a pointer.",
@@ -9909,12 +10152,22 @@ static void CompSay(const char* s, float secs) { snprintf(compSay, sizeof compSa
 
 static void CompBurst(float x, float y, int n)
 {
-    static const Color pal[5] = { { 255, 214, 90, 255 }, { 120, 220, 255, 255 }, { 190, 140, 255, 255 }, { 120, 235, 150, 255 }, { 255, 130, 150, 255 } };
+    static const Color pal[5] = { { 255, 214, 90, 255 }, { 150, 214, 236, 255 }, { 232, 236, 242, 255 }, { 120, 235, 150, 255 }, { 255, 130, 150, 255 } };
     for (int i = 0, made = 0; i < 48 && made < n; i++) {
         if (compBits[i].life > 0) continue;
         float a = -PI / 2 + ((float)GetRandomValue(-100, 100) / 100.0f) * 1.1f, sp = 90 + GetRandomValue(0, 150);
         compBits[i] = (CompBit){ x, y, cosf(a) * sp, sinf(a) * sp, 0.8f + GetRandomValue(0, 50) / 100.0f, pal[GetRandomValue(0, 4)] };
         made++;
+    }
+}
+
+static void CompDrawBits(float dt)
+{
+    for (int i = 0; i < 48; i++) {
+        CompBit* b = &compBits[i];
+        if (b->life <= 0) continue;
+        b->life -= dt; b->vy += 320 * dt; b->x += b->vx * dt; b->y += b->vy * dt;
+        DrawRectangle((int)b->x, (int)b->y, 5, 5, Fade(b->c, b->life > 0.4f ? 1.0f : b->life / 0.4f));
     }
 }
 
@@ -9962,16 +10215,11 @@ static void DrawCompanion(float cx, float footY, float sc, int mood, bool below)
         DrawCircleV((Vector2) { cx + 14 * sc, headY - 2 + bob }, 3, Fade(WHITE, 0.7f));
         DrawCircleV((Vector2) { cx + 20 * sc, headY - 12 + bob }, 5, Fade(WHITE, 0.8f));
         DrawEllipse((int)(cx + 30 * sc), (int)(headY - 30 + bob), 17, 14, Fade(WHITE, 0.92f));
-        CenterTxt(fBold, "?", cx + 30 * sc, headY - 42 + bob, 20, (Color) { 40, 46, 70, 255 });
+        CenterTxt(fBold, "?", cx + 30 * sc, headY - 42 + bob, 20, (Color) { 42, 56, 40, 255 });
     }
 
     /* confetti */
-    for (int i = 0; i < 48; i++) {
-        CompBit* b = &compBits[i];
-        if (b->life <= 0) continue;
-        b->life -= dt; b->vy += 320 * dt; b->x += b->vx * dt; b->y += b->vy * dt;
-        DrawRectangle((int)b->x, (int)b->y, 5, 5, Fade(b->c, b->life > 0.4f ? 1.0f : b->life / 0.4f));
-    }
+    CompDrawBits(dt);
 
     /* click it */
     Rectangle hit = { cx - 24 * sc, fy - 62 * sc, 48 * sc, 66 * sc };
@@ -9999,7 +10247,7 @@ static void DrawCompanion(float cx, float footY, float sc, int mood, bool below)
         DrawRectangleRounded((Rectangle) { bx, by, bw, bh }, 0.25f, 8, Fade((Color) { 245, 247, 252, 255 }, a));
         if (below) DrawTriangle((Vector2) { cx - 7, by + 1 }, (Vector2) { cx + 7, by + 1 }, (Vector2) { cx, by - 9 }, Fade((Color) { 245, 247, 252, 255 }, a));
         else       DrawTriangle((Vector2) { cx - 7, by + bh - 1 }, (Vector2) { cx, by + bh + 9 }, (Vector2) { cx + 7, by + bh - 1 }, Fade((Color) { 245, 247, 252, 255 }, a));
-        Wrapped(fReg, compSay, bx + 11, by + 8, bw - 22, fs, Fade((Color) { 30, 34, 54, 255 }, a));
+        Wrapped(fReg, compSay, bx + 11, by + 8, bw - 22, fs, Fade((Color) { 31, 43, 30, 255 }, a));
     }
 }
 
@@ -10020,7 +10268,7 @@ static void DrawBoot(void)
     Color accent = ACCENTS[lang];
     float t = bootT;
 
-    DrawRectangleGradientV(0, 0, W, H, (Color) { 9, 11, 24, 255 }, (Color) { 24, 17, 46, 255 });
+    DrawRectangleGradientV(0, 0, W, H, (Color) { 8, 22, 18, 255 }, (Color) { 30, 22, 16, 255 });
 
     /* falling code */
     static const char GL[] = "01{}();<>#*&=+[]/\\|";
@@ -10032,7 +10280,7 @@ static void DrawBoot(void)
             DrawTextEx(fCode, g, (Vector2) { x, y - k * 18 }, 16, 0, Fade(accent, 0.30f * (1.0f - k / 7.0f)));
         }
     }
-    DrawRectangleGradientV(0, 0, W, 130, Fade((Color) { 9, 11, 24, 255 }, 0.9f), Fade((Color) { 9, 11, 24, 255 }, 0));
+    DrawRectangleGradientV(0, 0, W, 130, Fade((Color) { 8, 22, 18, 255 }, 0.9f), Fade((Color) { 8, 22, 18, 255 }, 0));
 
     /* logo: a badge, then the name popping in letter by letter */
     const char* name = "CodeQuest";
@@ -10060,8 +10308,8 @@ static void DrawBoot(void)
     float p = BootClamp(t / RUN);
     float prog = BootEase(p);
     Rectangle bar = { W / 2.0f - 300, 458, 600, 18 };
-    DrawRectangleRounded((Rectangle) { bar.x - 3, bar.y - 3, bar.width + 6, bar.height + 6 }, 0.6f, 10, (Color) { 40, 46, 70, 255 });
-    DrawRectangleRounded(bar, 0.6f, 10, (Color) { 14, 17, 30, 255 });
+    DrawRectangleRounded((Rectangle) { bar.x - 3, bar.y - 3, bar.width + 6, bar.height + 6 }, 0.6f, 10, (Color) { 42, 56, 40, 255 });
+    DrawRectangleRounded(bar, 0.6f, 10, (Color) { 16, 24, 15, 255 });
     float runX = bar.x + 12 + prog * (bar.width - 24);
     if (prog > 0.01f) DrawRectangleRounded((Rectangle) { bar.x, bar.y, runX - bar.x + 6, bar.height }, 0.6f, 10, accent);
     static const float semi[3] = { 0.22f, 0.50f, 0.76f };
@@ -10090,7 +10338,7 @@ static void DrawBoot(void)
     Txt(fCode, pct, bar.x + bar.width - TxtW(fCode, pct, 17), bar.y + 34, 17, accent);
 
     CenterTxt(fReg, "Tip: click your character on any screen. It has advice.", W / 2.0f, H - 96, 15, Fade(DIM, BootEase((t - 0.8f) / 0.6f)));
-    CenterTxt(fReg, "Click or press any key to skip", W / 2.0f, H - 52, 13, Fade((Color) { 90, 98, 122, 255 }, 0.5f + 0.5f * sinf(t * 3)));
+    CenterTxt(fReg, "Click or press any key to skip", W / 2.0f, H - 52, 13, Fade((Color) { 101, 106, 89, 255 }, 0.5f + 0.5f * sinf(t * 3)));
 
     /* fade in from black at the start */
     if (t < 0.45f) DrawRectangle(0, 0, W, H, Fade(BLACK, 1.0f - t / 0.45f));
@@ -10115,7 +10363,7 @@ static void DrawTransition(float dt, Color accent)
         float ww = sw * (1.0f - e);
         if (ww < 0.5f) continue;
         float x = i * sw + (sw - ww) / 2;
-        DrawRectangle((int)x, 0, (int)ww + 1, H, (Color) { 10, 12, 26, 255 });
+        DrawRectangle((int)x, 0, (int)ww + 1, H, (Color) { 13, 19, 12, 255 });
         DrawRectangle((int)x, 0, 2, H, Fade(accent, 0.65f * (1.0f - e)));
         DrawRectangle((int)(x + ww - 2), 0, 2, H, Fade(accent, 0.65f * (1.0f - e)));
     }
@@ -10147,7 +10395,7 @@ typedef struct {
     unsigned char mark[2][NLESSONS];            /* bookmarked lessons */
     unsigned char gold[2][NLESSONS];            /* speed round cleared */
     int bestStreak[2][NLESSONS];
-    int bg;                                     /* 0 off, 1 code rain, 2 pointers, 3 circuit */
+    int bg;                                     /* 0 off, 1 winter farm, 2 code rain, 3 pointers, 4 circuit */
 } StudyData;
 static StudyData sd;
 static char notes[2][NLESSONS][640];
@@ -10216,7 +10464,7 @@ static const char* SkillName(int s)
 }
 static Color SkillCol(int s)
 {
-    static const Color pal[6] = { { 64, 156, 255, 255 }, { 160, 112, 255, 255 }, { 52, 199, 120, 255 }, { 255, 184, 64, 255 }, { 240, 92, 104, 255 }, { 40, 190, 180, 255 } };
+    static const Color pal[6] = { { 228, 170, 74, 255 }, { 128, 192, 208, 255 }, { 120, 206, 106, 255 }, { 255, 184, 64, 255 }, { 240, 92, 104, 255 }, { 40, 190, 180, 255 } };
     return pal[s % 6];
 }
 
@@ -10288,7 +10536,70 @@ static const char* ContainsCI(const char* hay, const char* needle)
 
 /* ---- living backgrounds: faint, in the accent colour, drawn behind the menus ---- */
 static float bgBoost = 0;                       /* speed rounds turn this up as the clock runs out */
-static const char* const BG_NAMES[4] = { "Off", "Code rain", "Pointers", "Circuit" };
+static const char* const BG_NAMES[5] = { "Off", "Winter farm", "Code rain", "Pointers", "Circuit" };
+
+/* snowfall over a little winter farm: pines, a fence, and a cabin with a lit window and a smoking chimney */
+static void DrawWinterFarm(float boost)
+{
+    float t = (float)GetTime();
+    Color snow = { 238, 244, 247, 255 };
+    /* moon with a soft halo */
+    for (int k = 0; k < 6; k++) DrawCircle(W - 150, 118, 92 - k * 13.0f, Fade((Color) { 200, 226, 220, 255 }, 0.020f));
+    DrawCircle(W - 150, 118, 30, Fade((Color) { 236, 242, 226, 255 }, 0.22f));
+    /* two rows of pines, far then near */
+    for (int row = 0; row < 2; row++) {
+        float base = H - 38.0f - row * 20.0f, step = row ? 64.0f : 50.0f;
+        Color tc = row ? (Color) { 16, 36, 28, 255 } : (Color) { 21, 48, 36, 255 };
+        for (int i = 0; i * step < W + step; i++) {
+            unsigned h = WoodHash(i, 40 + row);
+            float x = i * step + (float)(h % 24), ht = (row ? 70.0f : 96.0f) + (float)(h % 40), wd = ht * 0.46f;
+            DrawRectangle((int)x - 3, (int)base - 8, 6, 12, (Color) { 52, 36, 24, 255 });
+            for (int k = 0; k < 3; k++) {
+                float ty = base - 8 - k * ht * 0.27f, tw = wd * (1.0f - k * 0.26f), th = ht * 0.46f;
+                DrawTriangle((Vector2) { x, ty - th }, (Vector2) { x - tw / 2, ty }, (Vector2) { x + tw / 2, ty }, tc);
+                DrawTriangle((Vector2) { x, ty - th }, (Vector2) { x - tw * 0.22f, ty - th * 0.62f }, (Vector2) { x + tw * 0.22f, ty - th * 0.62f }, Fade(snow, row ? 0.55f : 0.75f));
+            }
+        }
+    }
+    /* snowy ground and a wooden fence */
+    DrawRectangle(0, H - 24, W, 24, Fade(snow, 0.20f));
+    for (int i = 0; i * 18 < W; i++) DrawCircle(i * 18 + 9, H - 24, 6.0f + (float)(WoodHash(i, 3) % 4), Fade(snow, 0.20f));
+    for (int i = 0; i * 70 < W + 70; i++) {
+        float x = i * 70.0f + 20.0f;
+        DrawRectangle((int)x, H - 66, 8, 44, (Color) { 74, 52, 34, 255 });
+        DrawRectangle((int)x, H - 68, 8, 4, Fade(snow, 0.9f));
+    }
+    DrawRectangle(0, H - 56, W, 6, (Color) { 84, 60, 38, 255 });
+    DrawRectangle(0, H - 40, W, 6, (Color) { 84, 60, 38, 255 });
+    DrawRectangle(0, H - 57, W, 2, Fade(snow, 0.7f));
+    /* the cabin, bottom right */
+    float cx = W - 250, cy = H - 128;
+    DrawRectangle((int)cx + 70, (int)cy - 40, 16, 40, (Color) { 70, 54, 46, 255 });          /* chimney */
+    DrawRectangle((int)cx, (int)cy, 120, 74, (Color) { 96, 66, 40, 255 });
+    for (int k = 1; k < 5; k++) DrawRectangle((int)cx, (int)cy + k * 15, 120, 2, Fade(BLACK, 0.22f));
+    DrawTriangle((Vector2) { cx + 60, cy - 42 }, (Vector2) { cx - 14, cy + 2 }, (Vector2) { cx + 134, cy + 2 }, (Color) { 52, 38, 30, 255 });
+    DrawTriangle((Vector2) { cx + 60, cy - 42 }, (Vector2) { cx + 8, cy - 8 }, (Vector2) { cx + 112, cy - 8 }, Fade(snow, 0.92f));
+    float flick = 0.85f + 0.15f * sinf(t * 7.0f + sinf(t * 3.1f) * 2.0f);
+    DrawRectangle((int)cx + 20, (int)cy + 24, 30, 28, Fade((Color) { 255, 200, 90, 255 }, 0.80f * flick));
+    DrawRectangle((int)cx + 34, (int)cy + 24, 2, 28, (Color) { 70, 48, 30, 255 });
+    DrawRectangle((int)cx + 20, (int)cy + 36, 30, 2, (Color) { 70, 48, 30, 255 });
+    DrawRectangle((int)cx + 76, (int)cy + 26, 26, 48, (Color) { 62, 42, 28, 255 });         /* door */
+    for (int k = 0; k < 6; k++) {                                                           /* chimney smoke */
+        float u = fmodf(t * 0.35f + k / 6.0f, 1.0f);
+        DrawCircle((int)(cx + 78 + sinf(t + k) * 6 + u * 26), (int)(cy - 46 - u * 70), 5 + u * 9, Fade((Color) { 210, 216, 214, 255 }, 0.18f * (1.0f - u)));
+    }
+    /* snowflakes in three depths */
+    for (int layer = 0; layer < 3; layer++) {
+        int count = 26 + layer * 6;
+        float sp = (20.0f + layer * 22.0f) * (1.0f + boost * 3.0f), rad = 1.3f + layer * 0.9f;
+        for (int i = 0; i < count; i++) {
+            unsigned h = WoodHash(i, 500 + layer);
+            float x = fmodf((float)(h % (unsigned)W) + sinf(t * 0.6f + i) * (10.0f + layer * 6.0f) + W, (float)W);
+            float y = fmodf(t * sp + (float)((h >> 8) % (unsigned)(H + 40)), (float)H + 20.0f) - 10.0f;
+            DrawCircle((int)x, (int)y, rad, Fade(snow, 0.30f + layer * 0.16f));
+        }
+    }
+}
 
 static void DrawLiveBg(Color accent)
 {
@@ -10296,7 +10607,8 @@ static void DrawLiveBg(Color accent)
     if (bgBoost > 0.05f && style == 0) style = 1;
     if (style == 0) return;
     float t = (float)GetTime(), boost = bgBoost;
-    if (style == 1) {                           /* columns of code falling, like a terminal waking up */
+    if (style == 1) { DrawWinterFarm(boost); return; }
+    if (style == 2) {                           /* columns of code falling, like a terminal waking up */
         static const char GL[] = "01{}();<>#*&=+[]->%x";
         const int gl = (int)sizeof GL - 1;
         for (int i = 0; i < W / 30; i++) {
@@ -10311,7 +10623,7 @@ static void DrawLiveBg(Color accent)
             }
         }
     }
-    else if (style == 2) {                    /* memory cells drifting about, with pointers between them */
+    else if (style == 3) {                    /* memory cells drifting about, with pointers between them */
         enum { N = 12 };
         Vector2 p[N];
         for (int i = 0; i < N; i++) {
@@ -10750,7 +11062,7 @@ static void DrawStudyRun(Color accent)
         Panel((Rectangle) { x0, fy, cw, ph }, 0.12f, Fade(col, 0.10f), col);
         Txt(fBold, srPick == -2 ? "Time's up" : (ok ? "Correct!" : "Not quite"), x0 + 22, fy + 12, 20, col);
         Txt(fReg, when, x0 + cw - 22 - TxtW(fReg, when, 14), fy + 16, 14, DIM);
-        Wrapped(fReg, Q.expl, x0 + 22, fy + 44, cw - 44, 16, (Color) { 205, 211, 228, 255 });
+        Wrapped(fReg, Q.expl, x0 + 22, fy + 44, cw - 44, 16, (Color) { 231, 223, 201, 255 });
         bool last = srPos == srN - 1;
         if (Button((Rectangle) { W - 196, 698, 160, 48 }, last ? "Finish" : "Next >", accent, 16) || IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)) {
             srPos++; srPick = -1; srScored = false; srTimer = SR_TIME;
@@ -10818,7 +11130,7 @@ static void DrawLessonExtras(Color accent)
     if (!on) StarShape(sx, sy + 1, 8, SURF);
     if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { sd.mark[lang][lessonIdx] ^= 1; SaveStudy(); Notify(sd.mark[lang][lessonIdx] ? "Lesson saved" : "Bookmark removed", sc); }
     bool has = notes[lang][lessonIdx][0] != 0;
-    if (Button((Rectangle) { 204, 704, 130, 44 }, has ? "Notes (1)" : "Notes", (Color) { 80, 90, 130, 255 }, 16)) StartNotes(lang, lessonIdx);
+    if (Button((Rectangle) { 204, 704, 130, 44 }, has ? "Notes (1)" : "Notes", (Color) { 98, 103, 86, 255 }, 16)) StartNotes(lang, lessonIdx);
 }
 
 /* ---- review the answers of the quiz you just took ---- */
@@ -10860,7 +11172,7 @@ static void DrawAnswerReview(Color accent)
         TxtFit(fReg, yours, card.x + 80, qy, 16, 760, ok ? GOOD : BAD);
         Txt(fBold, "Answer:", card.x + 22, qy + 28, 15, DIM);
         TxtFit(fReg, Q->opts[Q->correct], card.x + 100, qy + 28, 16, 740, GOOD);
-        Wrapped(fReg, Q->expl, card.x + 22, qy + 62, 860, 15, (Color) { 205, 211, 228, 255 });
+        Wrapped(fReg, Q->expl, card.x + 22, qy + 62, 860, 15, (Color) { 231, 223, 201, 255 });
         y += hs[i] + 14;
     }
     EndScissorMode();
@@ -10929,9 +11241,9 @@ static void DrawStudy(Color accent)
     if (Button((Rectangle) { 24, 14, 104, 44 }, BACKL, SURF2, 16)) { GoMenu(); return; }
     Txt(fBold, "Study hub", 150, 14, 30, TXT);
     /* background style chips */
-    Txt(fReg, "Background", W - 36 - 4 * 86 - TxtW(fReg, "Background", 13) - 10, 27, 13, DIM);
-    for (int i = 0; i < 4; i++) {
-        Rectangle r = { W - 36.0f - (4 - i) * 86, 18, 80, 36 };
+    Txt(fReg, "Background", W - 36 - 5 * 98 - TxtW(fReg, "Background", 13) - 10, 27, 13, DIM);
+    for (int i = 0; i < 5; i++) {
+        Rectangle r = { W - 36.0f - (5 - i) * 98, 18, 92, 36 };
         bool hov = CheckCollisionPointRec(mouse, r), on = sd.bg == i;
         if (hov) hand = true;
         Panel(r, 0.3f, on ? Fade(accent, 0.25f) : (hov ? SURF2 : SURF), on ? accent : BORDER);
@@ -10968,7 +11280,7 @@ static void DrawStudy(Color accent)
         HubStat((Rectangle) { 40, top, 210, 82 }, "DUE NOW", due, due ? (Color) { 255, 184, 64, 255 } : GOOD);
         HubStat((Rectangle) { 266, top, 210, 82 }, "NEW", fresh, accent);
         HubStat((Rectangle) { 492, top, 210, 82 }, "WELL KNOWN", learned, GOOD);
-        HubStat((Rectangle) { 718, top, 210, 82 }, "IN YOUR DECK", total - fresh, (Color) { 160, 112, 255, 255 });
+        HubStat((Rectangle) { 718, top, 210, 82 }, "IN YOUR DECK", total - fresh, (Color) { 128, 192, 208, 255 });
         Txt(fReg, "Questions you miss come back soon; ones you know wait longer.", 40, top + 98, 15, DIM);
         if (Button((Rectangle) { 40, top + 128, 260, 56 }, due ? TextFormat("Start review (%d due)", due) : "Start review", accent, 18)) StartReview(false);
         if (Button((Rectangle) { 316, top + 128, 300, 56 }, "Short challenge  (10 hardest, timed)", (Color) { 214, 140, 30, 255 }, 15)) StartReview(true);
@@ -10996,7 +11308,7 @@ static void DrawStudy(Color accent)
         }
     }
     else if (hubTab == 1) {                                   /* ---------------- speed rounds ---------------- */
-        Txt(fReg, "Ten snippets, ten seconds each. What is the variable at the end? One miss ends the run; ten in a row earns a gold star.", 40, top, 15, (Color) { 190, 198, 216, 255 });
+        Txt(fReg, "Ten snippets, ten seconds each. What is the variable at the end? One miss ends the run; ten in a row earns a gold star.", 40, top, 15, (Color) { 217, 209, 187, 255 });
         for (int l = 0; l < 2; l++) {
             Rectangle r = { W - 40.0f - (2 - l) * 100, top - 8, 94, 34 };
             bool hov = CheckCollisionPointRec(mouse, r);
@@ -11020,7 +11332,7 @@ static void DrawStudy(Color accent)
         Txt(fReg, TextFormat("%d of %d gold in %s", golds, NLESSONS, LANG_NAME[lang]), 40, top + 44 + NLESSONS * 86.0f + 6, 14, DIM);
     }
     else if (hubTab == 2) {                                   /* ---------------- skills ---------------- */
-        Txt(fReg, "Every right answer earns XP in the topic it came from (more for hard ones and speed rounds); wrong answers lose a little.", 40, top, 15, (Color) { 190, 198, 216, 255 });
+        Txt(fReg, "Every right answer earns XP in the topic it came from (more for hard ones and speed rounds); wrong answers lose a little.", 40, top, 15, (Color) { 217, 209, 187, 255 });
         for (int s = 0; s < NSKILL; s++) {
             Rectangle r = { 40, top + 32 + s * 48.0f, W - 80, 42 };
             Panel(r, 0.2f, SURF, BORDER);
@@ -11158,7 +11470,7 @@ int main(void)
         ClearBackground(BLACK);
         BeginMode2D((Camera2D) { { gOffX, gOffY }, { 0, 0 }, 0.0f, gScale });
         ClearBackground(BG);
-        if (screen != SCR_WORLD) DrawRectangleGradientV(0, 0, W, H, (Color) { 22, 27, 44, 255 }, (Color) { 12, 14, 22, 255 });
+        if (screen != SCR_WORLD) DrawRectangleGradientV(0, 0, W, H, (Color) { 22, 44, 38, 255 }, (Color) { 10, 22, 17, 255 });
         if (screen != SCR_SPEED) bgBoost = 0;
         if (screen == SCR_MENU || screen == SCR_LESSON || screen == SCR_QUIZ || screen == SCR_RESULT || screen == SCR_MEM ||
             screen == SCR_STUDY || screen == SCR_STUDYRUN || screen == SCR_SPEED || screen == SCR_NOTES || screen == SCR_ANSREV)

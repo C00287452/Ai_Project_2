@@ -1517,6 +1517,7 @@ typedef enum { MOOD_IDLE, MOOD_THINK, MOOD_CHEER, MOOD_SAD } Mood;
 
 static Screen screen = SCR_MENU;
 static int lang = 0, lessonIdx = 0, page = 0;
+static void SetLang(int l);   /* one language setting shared by every screen */
 static int qi = 0, sel = -1, score = 0;
 static float scroll = 0.0f;
 static bool quit = false;
@@ -2273,7 +2274,7 @@ static void MenuSidebar(Color accent)
         if (hov) hand = true;
         if (l == lang) DrawRectangleRounded(r, 0.3f, 10, ACCENTS[l]);
         CenterTxt(fMed, LANG_NAME[l], r.x + r.width / 2, r.y + 6, 19, l == lang ? WHITE : DIM);
-        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) lang = l;
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) SetLang(l);
     }
     /* level and streak */
     int xp = XpTotal(), lv = LevelOf(xp), lo = 30 * (lv - 1) * (lv - 1), hi = 30 * lv * lv;
@@ -5632,7 +5633,8 @@ static void StartLab(void)
 {
     LabOwn(0);
     labReturn = -1;
-    if (!labInit) { LabLoad(0, 0); labInit = true; }
+    if (!labInit) { LabLoad(lang, 0); labInit = true; }
+    else if (labLang != lang) LabLoad(lang, 0);
     screen = SCR_LAB;
     labPending = 0;
     if (labStatus == LAB_COMPILING) labStatus = LAB_READY;
@@ -5938,7 +5940,7 @@ static void DrawLab(void)
         if (hov) hand = true;
         if (l == labLang) DrawRectangleRounded(r, 0.3f, 8, ACCENTS[l]);
         CenterTxt(fBold, LANG_NAME[l], r.x + r.width / 2, r.y + 6, 18, l == labLang ? WHITE : DIM);
-        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && l != labLang) LabLoad(l, 0);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && l != labLang) { SetLang(l); LabLoad(l, 0); }
     }
     if (Button((Rectangle) { 216, 86, 44, 44 }, "<", SURF2, 20)) LabLoad(labLang, (labEx + LAB_NEX - 1) % LAB_NEX);
     Panel((Rectangle) { 266, 86, 330, 44 }, 0.3f, SURF, BORDER);
@@ -6336,7 +6338,7 @@ static void DrawProblem(Color accent)
         if (hov) hand = true;
         if (l == lang) DrawRectangleRounded(r, 0.3f, 8, ACCENTS[l]);
         CenterTxt(fMed, LANG_NAME[l], r.x + r.width / 2, r.y + 7, 17, l == lang ? WHITE : DIM);
-        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && l != lang) { ProbSync(); lang = l; ProbLoad(); }
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && l != lang) SetLang(l);
     }
     DrawCreditsChip(W - 12 - 150 - 14, 9);
 
@@ -10153,11 +10155,42 @@ static void DrawMowerRide(float x, float fy, int dir, float ph, bool cutting, fl
 #undef RF
 }
 
+/* ---- one language setting for the whole game: every toggle goes through here ---- */
+static void SetLang(int l)
+{
+    if (l == lang || l < 0 || l > 1) return;
+    if (screen == SCR_PROBLEM) { ProbSync(); lang = l; ProbLoad(); }
+    else lang = l;
+    memListScroll = 0; mw.ready = false; mw.launch = -1; mw.hover = 0; mw.stage = 0; mowTrailN = 0;
+}
+/* a C / C++ switch for a top bar; returns true when it changed the language */
+static bool LangToggle(float x, float y)
+{
+    bool changed = false;
+    Panel((Rectangle) { x, y, 150, 42 }, 0.3f, SURF2, BORDER);
+    for (int l = 0; l < 2; l++) {
+        Rectangle r = { x + 2.0f + l * 74, y + 2, 72, 38 };
+        bool hv = CheckCollisionPointRec(GetMousePosition(), r);
+        if (hv) hand = true;
+        if (l == lang) DrawRectangleRounded(r, 0.3f, 8, ACCENTS[l]);
+        CenterTxt(fMed, LANG_NAME[l], r.x + r.width / 2, r.y + 7, 17, l == lang ? WHITE : DIM);
+        if (hv && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && l != lang) { SetLang(l); changed = true; }
+    }
+    return changed;
+}
+/* programs that are plain C (the rest use new, nullptr, classes and so on, so they only show in C++) */
+static bool MemShown(int i)
+{
+    static const unsigned char cOk[NMLESSONS] = { 1,1,1,1,1,1,1,1,1,0,0,1,0,0,0,0,0,0,0,0 };
+    return lang == 1 || cOk[i];
+}
+
 static void DrawMemList(void)
 {
     TopBar();
     Txt(fBold, "Code Breakdown", 40, 14, 32, TXT);
-    Txt(fReg, "Follow the trail: hover a program and the mower drives to it, click to ride in. Then watch it run one line at a time.", 40, 46, 15, DIM);
+    TxtFit(fReg, "Hover a program and the mower drives to it; click to ride in, then watch it run line by line.", 40, 46, 15, 640, DIM);
+    LangToggle(W - 300 - 166, 15);
     if (Button((Rectangle) { W - 140, 16, 110, 40 }, "Menu", SURF2, 17)) GoMenu();
     if (Button((Rectangle) { W - 300, 16, 140, 40 }, "Bug Hunt", (Color) { 168, 74, 54, 255 }, 17)) { StartBug(); return; }
     float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
@@ -10171,14 +10204,19 @@ static void DrawMemList(void)
     int nHead = 0;
     float cy = 44;
     const char* lastTrack = "";
+    static bool tright[NMLESSONS];
+    int vis = 0, first = -1;
     for (int i = 0; i < NMLESSONS; i++) {
+        if (!MemShown(i)) continue;
+        if (first < 0) first = i;
         if (strcmp(lastTrack, MLESSONS[i].track)) {
             lastTrack = MLESSONS[i].track;
             if (nHead < 8) { headY[nHead] = cy + 20; headName[nHead++] = lastTrack; }
             cy += 96;
         }
         float mid = cy + th / 2, px = CbPathX(mid);
-        tile[i] = (Rectangle){ (i & 1) ? px + off : px - off - tw, cy, tw, th };
+        tright[i] = (vis++ & 1) != 0;
+        tile[i] = (Rectangle){ tright[i] ? px + off : px - off - tw, cy, tw, th };
         cy += th + gap;
     }
     float contentH = cy + 30;
@@ -10208,8 +10246,9 @@ static void DrawMemList(void)
         if (((int)(yy / 8)) % 4 < 2) DrawLineEx(a, b, 3, Fade((Color) { 196, 170, 126, 255 }, 0.55f));
     }
     for (int i = 0; i < NMLESSONS; i++) {
+        if (!MemShown(i)) continue;
         float mid = tile[i].y + th / 2, px = CbPathX(mid);
-        float ex = (i & 1) ? tile[i].x : tile[i].x + tile[i].width;
+        float ex = tright[i] ? tile[i].x : tile[i].x + tile[i].width;
         DrawLineEx((Vector2) { px, sy + mid }, (Vector2) { ex, sy + mid }, 14, (Color) { 100, 74, 48, 255 });
     }
 
@@ -10228,14 +10267,15 @@ static void DrawMemList(void)
     /* which tile is the mouse over? (not while a ride is under way) */
     int hov = -1;
     for (int i = 0; i < NMLESSONS; i++) {
+        if (!MemShown(i)) continue;
         Rectangle r = { tile[i].x, sy + tile[i].y, tile[i].width, tile[i].height };
         if (CheckCollisionPointRec(mouse, r) && mouse.y > 73) hov = i;
     }
     if (mw.launch < 0 && hov >= 0) { mw.hover = hov; hand = true; }
-    if (!mw.ready) { mw.py = tile[0].y + th / 2; mw.x = CbPathX(mw.py); mw.y = mw.py; mw.ready = true; mw.hover = 0; mw.stage = 0; }
+    if (!mw.ready) { mw.py = tile[first].y + th / 2; mw.x = CbPathX(mw.py); mw.y = mw.py; mw.ready = true; mw.hover = first; mw.stage = 0; }
 
     /* drive: along the trail to the program's depth; once clicked, off the trail and onto the tile */
-    int goal = mw.launch >= 0 ? mw.launch : (mw.hover >= 0 ? mw.hover : 0);
+    int goal = mw.launch >= 0 ? mw.launch : (mw.hover >= 0 && MemShown(mw.hover) ? mw.hover : first);
     float gy = tile[goal].y + th / 2;
     bool moving = false;
     if (mw.stage == 0) {
@@ -10276,7 +10316,10 @@ static void DrawMemList(void)
     for (int i = 0; i < mowTrailN; i++) DrawCircle((int)mowTrail[i].x, (int)(sy + mowTrail[i].y - 4), 9, Fade((Color) { 170, 230, 120, 255 }, 0.16f * mowTrail[i].life));
 
     /* tiles */
+    int rank = 0;
     for (int i = 0; i < NMLESSONS; i++) {
+        if (!MemShown(i)) continue;
+        rank++;
         Rectangle r = { tile[i].x, sy + tile[i].y, tile[i].width, tile[i].height };
         if (r.y + r.height < 73 || r.y > H) continue;
         bool on = (mw.launch < 0 && hov == i) || mw.launch == i;
@@ -10284,7 +10327,7 @@ static void DrawMemList(void)
         Panel(r, 0.10f, on ? SURF2 : SURF, on ? CB_HAY : BORDER);
         DrawRectangleRounded((Rectangle) { r.x, r.y + 10, 5, r.height - 20 }, 0.5f, 4, on ? CB_HAY : CB_WOOD_L);
         DrawCircle((int)r.x + 34, (int)r.y + 30, 15, on ? CB_HAY : CB_WOOD);
-        CenterTxt(fBold, TextFormat("%d", i + 1), r.x + 34, r.y + 20, 17, on ? CB_INK : TXT);
+        CenterTxt(fBold, TextFormat("%d", rank), r.x + 34, r.y + 20, 17, on ? CB_INK : TXT);
         TxtFit(fBold, MLESSONS[i].topic, r.x + 62, r.y + 14, 19, r.width - 80, TXT);
         TxtFit(fReg, MLESSONS[i].title, r.x + 62, r.y + 42, 13, r.width - 80, DIM);
         char info[48]; snprintf(info, sizeof info, "%d lines run", MLESSONS[i].ns);
@@ -10558,6 +10601,7 @@ static void DrawBug(void)
     TopBar();
     if (Button((Rectangle) { 24, 16, 124, 40 }, "< Programs", SURF2, 16)) { screen = SCR_MEM; return; }
     Txt(fBold, "Bug Hunt", 168, 12, 30, TXT);
+    if (LangToggle(W - 60 - bugN * 22.0f - 160, 15)) { StartBug(); return; }
     Txt(fReg, TextFormat("%s  -  one line in each program is wrong", LANG_NAME[lang]), 170, 46, 14, DIM);
     /* progress dots */
     for (int i = 0; i < bugN; i++) {
@@ -11890,7 +11934,7 @@ static void DrawStudy(Color accent)
             if (hov) hand = true;
             Panel(r, 0.3f, l == lang ? ACCENTS[l] : SURF, l == lang ? ACCENTS[l] : BORDER);
             CenterTxt(fMed, LANG_NAME[l], r.x + r.width / 2, r.y + 7, 16, l == lang ? WHITE : DIM);
-            if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) lang = l;
+            if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) SetLang(l);
         }
         int golds = 0; for (int i = 0; i < NLESSONS; i++) golds += sd.gold[lang][i];
         for (int i = 0; i < NLESSONS; i++) {

@@ -1,220 +1,105 @@
-# Ai_Project_2
+# Coding Valley 
 
-# 🎓 CodeQuest – Interactive C & C++ Learning App
+**Learn C and C++ by exploring a snowy campus, writing real code and watching it run.**
 
-**CodeQuest** is an interactive programming education application designed to make learning C and C++ more engaging and enjoyable. Built using the C programming language and the [raylib](https://www.raylib.com/) graphics library, CodeQuest combines structured lessons, interactive quizzes and a virtual campus environment to create an immersive learning experience.
+Coding Valley is a desktop learning game written in C with [raylib](https://www.raylib.com/). You walk around a campus, take lessons from teachers in the C Hall and C++ Hall, and practise in a built-in coding lab that compiles and runs your own programs. It is one source file (about 16,400 lines) and it compiles as both C99 and C++.
 
-Instead of simply reading programming tutorials, users can explore a virtual campus, attend lessons, test their knowledge and challenge coding rivals in a Battle Arena.
+## What you can do
 
----
+| Space | What it is |
+| --- | --- |
+| **Learn** | 5 lessons per language with syntax-highlighted code, a quiz after each lesson (multiple choice or type the answer), explanations, mastery levels and your own notes. A "Try this code in the Lab" button opens the example in the editor. |
+| **Practice** | 58 auto-graded problems (Easy, Medium, Hard). Two kinds: write a solution, or fix a broken program. Every submission is compiled and run against test cases. Three progressive hints and a worked solution with an explanation. |
+| **Coding Lab** | A free editor with line numbers and syntax highlighting. Press Run (F5 or Ctrl+Enter) to compile and run your C or C++ with a real compiler. Shows output, compiler errors and warnings, takes keyboard input, and has 9 starter examples. |
+| **Code Breakdown** | 20 programs you step through line by line, with the stack and heap drawn as crates and hay bales, plus a predict-the-next-step mode. |
+| **Code Stepper** | The same step-by-step view for your own code, from the Lab or from a Practice problem. |
+| **Bug Hunt** | Find the one wrong line in a short program. 37 bugs (19 in C, 18 in C++) in 6 topic tunnels (Loops, Conditions, Numbers, Arrays and strings, Memory and pointers, Functions), reached by mine cart. Each bug comes with an explanation. |
+| **Valley Jobs** | 15 longer coding jobs with several tests each. |
+| **Mower Farm** | A programming game: write C or C++ to drive a ride-on mower, grow crops and buy upgrades. Has its own C/C++ compiler and virtual machine, 10 examples per language, and a tutorial. |
+| **Study hub** | Spaced review of questions you missed, timed speed rounds, a skills page, saved questions and notes, search, a skill map and a glossary. |
+| **Campus and Arena** | A walkable campus with the C Hall, C++ Hall (5 teachers each), a shop, a daily quest hut and a Battle Arena where you duel rivals with timed questions. |
+| **Progress** | XP, levels, a day streak, mastery names, credits and a shop for cosmetics. |
 
-## ✨ Features
+Everything with code follows the **C / C++ toggle** in the sidebar.
 
-### 📚 Interactive Programming Lessons
-- Dedicated learning sections for C and C++.
-- Structured lessons covering fundamental and advanced programming concepts.
-- Syntax-highlighted code examples.
-- Explanations accompanying programming examples.
-- Multiple pages within each lesson.
+## Requirements
 
-### 📝 Interactive Quizzes
-- Test your understanding with programming quizzes.
-- Switch between multiple-choice questions and typed answers.
-- Receive explanations after answering questions.
-- View quiz results and scores.
-- Retry quizzes or revisit lessons to improve your understanding.
+- **raylib 4.x or 5.x** and a C compiler (gcc / MinGW-w64 on Windows).
+- **To use the Coding Lab, Practice, Jobs and Farm checks you also need `gcc` and `g++` on your PATH.** The app compiles your code with them. If they are missing, it tells you so instead of crashing.
+- Fonts (Liberation Serif and DejaVu Sans Mono) are embedded in the source, so no asset files are needed.
 
-### 🏫 Virtual Campus
-- Explore an interactive campus environment.
-- Visit the dedicated C Hall and C++ Hall.
-- Interact with virtual teachers.
-- Enter classrooms to access lessons and quizzes.
-- Experience a more engaging approach to programming education.
+## Build
 
-### ⚔️ Coding Battle Arena
-- Challenge virtual coding rivals.
-- Compete in head-to-head programming duels.
-- Face three different opponents with varying difficulty levels.
-- Test your programming knowledge in a competitive environment.
+Put the source file where you build it and run one of these.
 
-### 📊 Progress Tracking
-- Automatically save learning progress.
-- Track completed lessons.
-- Store best quiz scores.
-- Keep track of defeated Battle Arena opponents.
-- Progress is saved locally in `progress.dat`.
+**Windows (w64devkit with raylib, as in `build_c.bat`)**
 
-### 🎨 User Interface
-- Graphical interface powered by raylib.
-- Embedded fonts, meaning no external font files are required.
-- Mouse and keyboard navigation.
-- Scrollable lesson content.
-- Syntax-highlighted programming examples.
-
----
-
-## 🛠️ Technologies Used
-
-| Technology | Purpose |
-|---|---|
-| C | Main programming language |
-| raylib | Graphics and user interface |
-| OpenGL | Graphics rendering |
-| GCC | Compilation |
-| Embedded Fonts | Application typography |
-
-**Fonts included:**
-- Liberation Serif
-- DejaVu Sans Mono
-
-Both fonts are embedded directly into the source code.
-
----
-
-## 🚀 Installation and Setup
-
-### Prerequisites
-
-Before running CodeQuest, make sure you have:
-
-- GCC compiler
-- raylib graphics library
-- A supported operating system (Windows, macOS or Linux)
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/YOUR-USERNAME/CodeQuest.git
+```bat
+set PATH=C:\raylib\w64devkit\bin;%PATH%
+gcc -o codequest.exe main.c -O2 -std=c99 -static -lraylib -lopengl32 -lgdi32 -lwinmm -lshcore
 ```
 
-Navigate into the project directory:
-
-```bash
-cd CodeQuest
-```
-
-### 2. Compile the application
+`build_c.bat` does exactly this for `codequest.c`; `main.c` is an identical copy.
 
 **Linux**
 
-```bash
-gcc main.c -o codequest -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
+```sh
+gcc main.c -o codequest -O2 -std=c99 -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
 ```
 
 **macOS**
 
-```bash
-gcc main.c -o codequest -lraylib -framework OpenGL -framework Cocoa -framework IOKit
+```sh
+gcc main.c -o codequest -O2 -std=c99 -lraylib -framework OpenGL -framework Cocoa -framework IOKit
 ```
 
-**Windows**
+To check that it still compiles as both languages:
 
-```bash
-gcc main.c -o codequest.exe -lraylib -lopengl32 -lgdi32 -lwinmm
+```sh
+gcc -std=c99 -Wall -fsyntax-only -I<raylib include dir> main.c
+g++ -x c++ -fsyntax-only -I<raylib include dir> main.c
 ```
 
-Make sure raylib is correctly installed and configured for your compiler.
+## Controls
 
-### 3. Run CodeQuest
+| Where | Keys |
+| --- | --- |
+| Campus | Arrows or WASD to move, Shift to run, Space to talk or enter, Esc for the study menu |
+| Menus | Mouse to click, mouse wheel to scroll, Esc to go back |
+| Lessons | Left and Right arrows change page |
+| Coding Lab | F5 or Ctrl+Enter run, Ctrl+A / C / X / V, Tab inserts 4 spaces, Esc leaves (your code is kept) |
+| Anywhere | F11 or Alt+Enter toggles fullscreen; the window can be resized (minimum 600x380) |
 
-**Linux / macOS**
+## Saved data
 
-```bash
-./codequest
+The game saves next to where it is run, in the current folder:
+
+`progress.dat`, `profile.dat`, `quest.dat`, `game.dat`, `problems.dat`, `jobs.dat`, `jobs_code.dat`, `study.dat`, `notes.dat`, `settings.dat`, `farm2.dat`, `farm_c.txt`, `farm_cpp.txt`
+
+Delete a file to reset that part of your progress. Run the game from the same folder each time. The farm saves C and C++ programs separately; an old `farm2_code.txt` from the earlier Python-style farm is ignored.
+
+## Known limits
+
+- The Coding Lab runs your program with the machine's own compiler and a 3-second time limit. **It is not a sandbox**, so only run code you wrote, on your own computer.
+- Compiling and running happens on the main thread, so the window pauses briefly while code builds.
+- The Code Stepper does not yet handle structs, classes, enums, `malloc`/`new`, 2-D arrays or `vector<string>`.
+- The Mower Farm language is a subset of C/C++: no pointers, structs, `switch`, `malloc`/`new`, 2-D arrays or input. Programs need `int main(void)` (C) or `int main()` (C++).
+- Save files are raw structs written directly; there is no versioned backup for `progress.dat`.
+- There is no audio, no first-run tutorial for the main game, and no accessibility options beyond fullscreen yet.
+- There are no automated tests in the repository.
+
+## Project layout
+
+```
+main.c        the whole game (also kept as codequest.c)
+build_c.bat   Windows build and run script
+README.md     this file
 ```
 
-**Windows**
+## Roadmap
 
-```bash
-codequest.exe
-```
+A written audit lists the priorities: safe saves, a first-run tutorial and Continue card, tasks on every lesson page, linking failed tests to the matching lesson, practice problems for pointers, structs and recursion, coding duels in the Arena, achievements, and accessibility options (text size, reduce motion, colour-blind palette, keyboard navigation).
 
----
+## Credits
 
-## 🎮 Controls and Navigation
-
-| Control | Action |
-|---|---|
-| Mouse click | Select buttons and interact with the interface |
-| Mouse wheel | Scroll through lesson content |
-| Left Arrow | Previous lesson page |
-| Right Arrow | Next lesson page |
-| Space | Interact with teachers when nearby in campus mode |
-| ESC | Go back or exit from the main menu |
-
-In campus mode, explore the environment and enter the C Hall or C++ Hall through their doors. Approach a teacher and press Space to interact.
-
-In the Battle Arena, challenge one of the available rivals to a coding duel.
-
----
-
-## 💾 Progress Storage
-
-CodeQuest automatically saves progress locally using a file called:
-
-```text
-progress.dat
-```
-
-This file stores:
-- Lesson completion information.
-- Best quiz scores.
-- Battle Arena victories.
-
-The progress file is created automatically when progress is saved.
-
----
-
-## 📁 Project Structure
-
-```text
-CodeQuest/
-│
-├── main.c          # Main application source code
-├── progress.dat    # Automatically generated progress data
-└── README.md       # Project documentation
-```
-
----
-
-## 🎯 Project Goals
-
-The main goal of CodeQuest is to make programming education more interactive and accessible.
-
-By combining traditional programming lessons with gamification, quizzes and an explorable virtual environment, the application aims to encourage users to practise programming concepts while making the learning process more enjoyable.
-
----
-
-## 🔮 Future Improvements
-
-Potential future enhancements include:
-
-- Additional C and C++ lessons.
-- More advanced programming challenges.
-- Additional Battle Arena opponents.
-- Expanded quiz question banks.
-- More campus environments and interactive features.
-- Further progress statistics and achievements.
-
----
-
-## 👥 Contributors
-
-Contributions, suggestions and feedback are welcome.
-
-If you would like to contribute:
-
-1. Fork the repository.
-2. Create a new branch.
-3. Make your changes.
-4. Submit a Pull Request for review.
-
----
-
-## 📄 License
-
-No licence has currently been specified for this project.
-
----
-
-**CodeQuest – Learn. Practise. Compete. Level Up!** 🎓💻
+Written in C with [raylib](https://www.raylib.com/). Fonts: Liberation Serif (SIL Open Font License) and DejaVu Sans Mono (free licence).

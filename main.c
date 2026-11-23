@@ -1,5 +1,5 @@
 /*
- * CodeQuest - an interactive C / C++ learning app
+ * Coding Valley - an interactive C / C++ learning app
  * Written in C with raylib.
  *
  * Features: lessons with syntax-highlighted code, quizzes with explanations,
@@ -1512,7 +1512,7 @@ static const Color ACCENTS[2] = { { 228, 170, 74, 255 }, { 128, 192, 208, 255 } 
 #define SPC 0.2f          /* letter spacing for the UI font */
 #define UI_SCALE 1.14f    /* serif fonts look smaller than sans at the same size */
 
-typedef enum { SCR_MENU, SCR_LESSON, SCR_QUIZ, SCR_RESULT, SCR_WORLD, SCR_BATTLE, SCR_QUEST, SCR_LAB, SCR_SHOP, SCR_FARM, SCR_PROBLEM, SCR_MEM, SCR_BOOT, SCR_STUDY, SCR_STUDYRUN, SCR_SPEED, SCR_NOTES, SCR_ANSREV } Screen;
+typedef enum { SCR_MENU, SCR_LESSON, SCR_QUIZ, SCR_RESULT, SCR_WORLD, SCR_BATTLE, SCR_QUEST, SCR_LAB, SCR_SHOP, SCR_FARM, SCR_PROBLEM, SCR_MEM, SCR_BOOT, SCR_STUDY, SCR_STUDYRUN, SCR_SPEED, SCR_NOTES, SCR_ANSREV, SCR_BUG } Screen;
 typedef enum { MOOD_IDLE, MOOD_THINK, MOOD_CHEER, MOOD_SAD } Mood;
 
 static Screen screen = SCR_MENU;
@@ -1542,6 +1542,8 @@ static void DrawAnswerReview(Color accent);
 static void DrawCompanion(float cx, float footY, float sc, int mood, bool below);
 static void DrawBoot(void);
 static void CompBurst(float x, float y, int n);
+static void StartBug(void);
+static void DrawBug(void);
 static void CompDrawBits(float dt);
 static void DrawTransition(float dt, Color accent);
 static void DrawMem(void);
@@ -2036,6 +2038,33 @@ static void DrawSnowRim(float x, float y, float w)
     }
 }
 
+/* the Coding Valley badge: a snowy valley at night, two peaks, a pine, a cabin with a lit window, in a wooden frame */
+static void DrawValleyLogo(Rectangle r, float a)
+{
+    float u = r.width / 100.0f, x = r.x, y = r.y;
+#define LP(px, py) ((Vector2){ x + (px) * u, y + (py) * u })
+    Color snow = { 238, 244, 247, 255 };
+    DrawRectangleRounded(r, 0.24f, 10, Fade((Color) { 140, 100, 60, 255 }, a));                                 /* wooden frame */
+    DrawRectangleRounded((Rectangle) { x + 4 * u, y + 4 * u, 92 * u, 92 * u }, 0.20f, 10, Fade((Color) { 20, 46, 44, 255 }, a));   /* night */
+    DrawCircleV(LP(74, 25), 9 * u, Fade((Color) { 240, 242, 222, 255 }, a));                                    /* moon (a crescent) */
+    DrawCircleV(LP(78, 22), 8 * u, Fade((Color) { 20, 46, 44, 255 }, a));
+    DrawTriangle(LP(36, 22), LP(6, 70), LP(70, 70), Fade((Color) { 58, 100, 84, 255 }, a));                    /* peaks */
+    DrawTriangle(LP(36, 22), LP(26, 38), LP(46, 38), Fade(snow, a));
+    DrawTriangle(LP(70, 36), LP(44, 70), LP(94, 70), Fade((Color) { 42, 80, 66, 255 }, a));
+    DrawTriangle(LP(70, 36), LP(62, 48), LP(78, 48), Fade(snow, a));
+    DrawRectangleRounded((Rectangle) { x + 4 * u, y + 64 * u, 92 * u, 32 * u }, 0.45f, 8, Fade(snow, a));      /* the snowy valley floor */
+    DrawRectangle((int)(x + 66 * u), (int)(y + 62 * u), (int)(20 * u), (int)(16 * u), Fade((Color) { 150, 104, 62, 255 }, a));   /* cabin */
+    DrawTriangle(LP(76, 52), LP(62, 63), LP(90, 63), Fade((Color) { 90, 60, 40, 255 }, a));
+    DrawTriangle(LP(76, 54), LP(66, 63), LP(86, 63), Fade(snow, a));
+    DrawRectangle((int)(x + 72 * u), (int)(y + 67 * u), (int)(7 * u), (int)(7 * u), Fade((Color) { 255, 204, 96, 255 }, a));      /* lit window */
+    DrawRectangle((int)(x + 29 * u), (int)(y + 78 * u), (int)(5 * u), (int)(9 * u), Fade((Color) { 84, 58, 38, 255 }, a));       /* the pine */
+    DrawTriangle(LP(31.5f, 44), LP(20, 66), LP(43, 66), Fade((Color) { 28, 86, 58, 255 }, a));
+    DrawTriangle(LP(31.5f, 56), LP(17, 80), LP(46, 80), Fade((Color) { 24, 74, 50, 255 }, a));
+    DrawTriangle(LP(31.5f, 44), LP(27, 52), LP(36, 52), Fade(snow, a));
+    DrawTriangle(LP(31.5f, 58), LP(26, 66), LP(37, 66), Fade(snow, a));
+#undef LP
+}
+
 static void TopBar(void)
 {
     DrawWood(0, 0, W, 72, false, 21);
@@ -2211,10 +2240,9 @@ static void MenuSidebar(Color accent)
     DrawWood(0, 0, 236, H, true, 7);
     DrawRectangle(0, 0, 236, H, Fade(BLACK, 0.12f));
     DrawRectangle(233, 0, 3, H, (Color) { 40, 26, 16, 255 });
-    DrawRectangleRounded((Rectangle) { 22, 31, 21, 42 }, 0.3f, 10, accent);
-    CenterTxt(fCode, "</>", 41, 31, 16, WHITE);
-    Txt(fBold, "CodeQuest", 72, 14, 25, TXT);
-    Txt(fReg, "C & C++ academy", 74, 44, 12, DIM);
+    DrawValleyLogo((Rectangle) { 20, 14, 46, 46 }, 1.0f);
+    TxtFit(fBold, "Coding Valley", 74, 15, 24, 150, TXT);
+    Txt(fReg, "C & C++ in the snow", 76, 44, 12, DIM);
 
     static const char* nm[8] = { "Learn", "Practice", "Coding Lab", "Campus & Arena", "Mower Farm", "Shop", "Code Breakdown", "Study hub" };
     for (int i = 0; i < 8; i++) {
@@ -4584,7 +4612,7 @@ static const QQuestion QBANK[3][QPOOL] = {
       "<iostream> provides the standard stream objects cin, cout and cerr." }
   },
   { /* ---------- MEDIUM ---------- */
-    { "What does this print?", "int a[] = { 7, 12, 7, 16 };\nprintf(\"%d\", a[1] + a[3]);", { "12", "20", "24", "31" }, 2, NULL,
+    { "What does this print?", "int a[] = {4, 8, 15, 16};\nprintf(\"%d\", a[1] + a[3]);", { "12", "20", "24", "31" }, 2, NULL,
       "a[1] is 8 and a[3] is 16, so the sum is 24." },
     { "What does this print?", "int x = 10;\nint *p = &x;\nint **q = &p;\nprintf(\"%d\", **q);", { "The address of x", "10", "0", "It will not compile" }, 1, NULL,
       "q points to p and p points to x. Dereferencing twice gives x, which is 10." },
@@ -8011,7 +8039,7 @@ static int fEx = 0;
 static bool fRunning = false, fInit = false, fErrFlash = false;
 static double fRt = 0;
 static const int F_SPEEDS[4] = { 1, 3, 8, 25 };
-#define F_BASE_SPEED 0.3          /* what "1x" really means: about a third of the old pace */
+#define F_BASE_SPEED 0.12         /* what "1x" really means: roughly an eighth of the original pace */
 static float fSaveT = 0;
 static char fCodeSaved[LAB_CAP + 1];
 
@@ -9713,7 +9741,8 @@ static int memStep = 0;         /* 0 = nothing has run yet, k = after step k */
 static float memListScroll = 0;
 static bool memLeakNow = false;       /* does the step on screen have a leaked block? */
 
-static void StartMem(void) { screen = SCR_MEM; memLesson = -1; memStep = 0; memListScroll = 0; }
+static void MowerStart(void);
+static void StartMem(void) { screen = SCR_MEM; memLesson = -1; memStep = 0; memListScroll = 0; MowerStart(); }
 
 /* the part of a cell's name before any '.' or '[': "n1.next" belongs to block "n1" */
 static void MemBlockOf(const char* name, char* out, int cap)
@@ -9916,13 +9945,79 @@ static void DrawMemView(const MStep* st, Rectangle area, bool started)
     }
 }
 
+/* ---- predict, then reveal: before a line runs you guess what it will do ---- */
+static bool predOn = true, predPaid = false;
+typedef struct { bool active; int step, n, correct; char q[120]; char opt[4][40]; } PredQ;
+static PredQ pq;
+static int predRight = 0, predTotal = 0, predStreak = 0;
+typedef struct { bool valid, right; int forStep; char text[100]; } PredLast;
+static PredLast predLast;
+
+static void PredAdd(char list[][40], int* n, const char* s)
+{
+    if (!s || !s[0] || *n >= 8) return;
+    for (int i = 0; i < *n; i++) if (!strcmp(list[i], s)) return;
+    snprintf(list[*n], 40, "%s", s);
+    (*n)++;
+}
+
+/* builds a question about the cell that changes on this step; false if the step changes nothing to ask about */
+static bool PredBuild(const MStep* st, int stepIdx)
+{
+    int n = st->n > 32 ? 32 : st->n;
+    const MCell* c = NULL;
+    for (int i = 0; i < n && !c; i++) if (st->cells[i].changed) c = &st->cells[i];
+    if (!c) return false;
+    char list[8][40];
+    int nl = 0;
+    char q[120];
+    bool ptr = MemIsPtr(c), num = false;
+    long v = 0;
+    if (!ptr) { char* e = NULL; v = strtol(c->val, &e, 10); num = c->val[0] && e && *e == 0; }
+    if (ptr) {
+        snprintf(q, sizeof q, "After line %d runs, where does %s point?", st->line, c->name);
+        PredAdd(list, &nl, TextFormat("-> %s", c->val + 2));
+        for (int i = 0; i < n; i++) if (&st->cells[i] != c) PredAdd(list, &nl, TextFormat("-> %s", st->cells[i].name));
+        PredAdd(list, &nl, "-> null");
+        PredAdd(list, &nl, "-> nothing yet");
+    }
+    else if (num) {
+        snprintf(q, sizeof q, "After line %d runs, what is %s?", st->line, c->name);
+        PredAdd(list, &nl, TextFormat("%ld", v));
+        PredAdd(list, &nl, TextFormat("%ld", v + 1));
+        PredAdd(list, &nl, TextFormat("%ld", v - 1));
+        if (v != 0) PredAdd(list, &nl, TextFormat("%ld", v * 2));
+        PredAdd(list, &nl, TextFormat("%ld", v + 10));
+        for (int i = 0; i < n; i++) { char* e = NULL; long o = strtol(st->cells[i].val, &e, 10); if (&st->cells[i] != c && e && e != st->cells[i].val && *e == 0) PredAdd(list, &nl, TextFormat("%ld", o)); }
+        PredAdd(list, &nl, "0");
+    }
+    else {
+        snprintf(q, sizeof q, "Which one changes on line %d?", st->line);
+        PredAdd(list, &nl, c->name);
+        for (int i = 0; i < n; i++) if (&st->cells[i] != c) PredAdd(list, &nl, st->cells[i].name);
+    }
+    if (nl < 3) return false;
+    int total = nl < 4 ? nl : 4;
+    int pos = (int)(Hash(stepIdx * 7 + memLesson, 3) % (unsigned)total);
+    memset(&pq, 0, sizeof pq);
+    snprintf(pq.q, sizeof pq.q, "%s", q);
+    int src = 1;
+    for (int i = 0; i < total; i++) {
+        if (i == pos) { snprintf(pq.opt[i], 40, "%s", list[0]); pq.correct = i; }
+        else snprintf(pq.opt[i], 40, "%s", list[src++]);
+    }
+    pq.n = total;
+    pq.step = stepIdx;
+    return true;
+}
+
 /* ---- the helper: runs to the button, presses it, then runs to the line and the cell that changed ---- */
 enum { CB_IDLE, CB_TO_BTN, CB_PRESS, CB_TO_LINE, CB_AT_LINE, CB_TO_CELL, CB_AT_CELL, CB_HOME };
 typedef struct { float x, y, ph, t; int mode, dir, pend; bool pressed; } CbHelper;
 static CbHelper cb = { 1140, 746, 0, 0, CB_IDLE, 0, 0, false };
 static float cbHlY = -100;              /* the highlight bar slides between lines */
 
-static void CbReset(void) { cb.x = 1140; cb.y = H - 14.0f; cb.ph = 0; cb.t = 0; cb.mode = CB_IDLE; cb.dir = 0; cb.pend = 0; cb.pressed = false; cbHlY = -100; }
+static void CbReset(void) { pq.active = false; predRight = predTotal = predStreak = 0; predLast.valid = false; predPaid = false; cb.x = 1140; cb.y = H - 14.0f; cb.ph = 0; cb.t = 0; cb.mode = CB_IDLE; cb.dir = 0; cb.pend = 0; cb.pressed = false; cbHlY = -100; }
 static void CbAskNext(void) { if (cb.pend < 3) cb.pend++; if (cb.mode != CB_TO_BTN && cb.mode != CB_PRESS) { cb.mode = CB_TO_BTN; cb.t = 0; cb.pressed = false; } }
 
 static void CbBubble(float cx, float topY, const char* s)
@@ -10009,51 +10104,252 @@ static void CbUpdate(float dt, Rectangle nb, Rectangle cp, float lh, int hl, int
     CompDrawBits(dt);
 }
 
+/* ---- the program picker: the groups hang along a winding trail, spaced well apart, and you ride a mower along it ---- */
+typedef struct { float x, y, py, ph, t; int dir, hover, launch, stage; bool ready; } CbMower;
+static CbMower mw = { 0, 0, 0, 0, 0, 2, -1, -1, 0, false };
+typedef struct { float x, y, life; } MowTrail;
+static MowTrail mowTrail[48];
+static int mowTrailN = 0;
+
+static void MowerStart(void) { mw.ready = false; mw.launch = -1; mw.hover = -1; mw.t = 0; mw.stage = 0; mowTrailN = 0; }
+
+/* where the trail is, sideways, at a given depth down the page */
+static float CbPathX(float cy) { return W / 2.0f + 158.0f * sinf(cy / 175.0f); }
+
+/* the character on a little ride-on mower. dir 1 = facing left, 2 = facing right; fy = ground under the wheels */
+static void DrawMowerRide(float x, float fy, int dir, float ph, bool cutting, float t)
+{
+    float s = dir == 1 ? -1.0f : 1.0f;
+    Color red = { 206, 72, 52, 255 }, redD = { 150, 48, 38, 255 }, dark = { 46, 34, 30, 255 }, steel = { 170, 176, 170, 255 };
+#define RF(ox, oy, w, h) ((Rectangle){ s > 0 ? x + (ox) : x - (ox) - (w), fy + (oy), (w), (h) })
+    DrawEllipse((int)x, (int)fy + 1, 46, 7, Fade(BLACK, 0.28f));
+    DrawRectangleRounded(RF(-30, -48, 11, 28), 0.4f, 4, dark);                         /* seat back */
+    if (cutting) {                                                                     /* grass flying out of the deck */
+        for (int i = 0; i < 6; i++) {
+            float u = fmodf(t * 3.0f + i * 0.17f, 1.0f);
+            DrawCircle((int)(x + s * (36 + u * 22)), (int)(fy - 6 - sinf(u * PI) * (10 + i * 3)), 2.2f, Fade((Color) { 140, 210, 90, 255 }, 1.0f - u));
+        }
+    }
+    DrawPlayer(x - s * 3, fy - 21, dir, 0.78f, 0);
+    DrawRectangleRounded(RF(-36, -32, 72, 20), 0.4f, 6, red);                          /* body */
+    DrawRectangleRounded(RF(2, -38, 36, 16), 0.4f, 6, redD);                            /* hood */
+    DrawRectangleRounded(RF(34, -33, 5, 7), 0.4f, 3, (Color) { 255, 226, 130, 255 });    /* headlamp */
+    DrawLineEx((Vector2) { x + s * 8, fy - 36 }, (Vector2) { x + s * 14, fy - 52 }, 3, dark);          /* steering */
+    DrawEllipse((int)(x + s * 15), (int)(fy - 53), 7, 3, dark);
+    DrawRectangleRounded(RF(14, -9, 46, 8), 0.4f, 4, steel);                            /* the cutting deck */
+    if (cutting) {                                                                     /* spinning blade */
+        float a = t * 40.0f, cx = x + s * 37;
+        DrawLineEx((Vector2) { cx + cosf(a) * 18, fy - 5 + sinf(a) * 1.5f }, (Vector2) { cx - cosf(a) * 18, fy - 5 - sinf(a) * 1.5f }, 2.5f, Fade(WHITE, 0.7f));
+    }
+    float wx[2] = { x - s * 24, x + s * 30 }, wr[2] = { 13, 8 };
+    for (int i = 0; i < 2; i++) {                                                      /* wheels, with turning spokes */
+        DrawCircle((int)wx[i], (int)(fy - wr[i]), wr[i], dark);
+        DrawCircle((int)wx[i], (int)(fy - wr[i]), wr[i] * 0.5f, steel);
+        for (int k = 0; k < 3; k++) {
+            float a = ph * (i ? 1.6f : 1.0f) * s + k * 2.094f;
+            DrawLineEx((Vector2) { wx[i], fy - wr[i] }, (Vector2) { wx[i] + cosf(a) * wr[i] * 0.5f, fy - wr[i] + sinf(a) * wr[i] * 0.5f }, 1.5f, dark);
+        }
+    }
+#undef RF
+}
+
 static void DrawMemList(void)
 {
     TopBar();
     Txt(fBold, "Code Breakdown", 40, 14, 32, TXT);
-    Txt(fReg, "Pick a program and watch it run one line at a time: what lands on the stack, what goes in the barn (heap), and who points where.", 40, 46, 15, DIM);
+    Txt(fReg, "Follow the trail: hover a program and the mower drives to it, click to ride in. Then watch it run one line at a time.", 40, 46, 15, DIM);
     if (Button((Rectangle) { W - 140, 16, 110, 40 }, "Menu", SURF2, 17)) GoMenu();
-    float wheel = GetMouseWheelMove();
-    memListScroll -= wheel * 50;
-    int cols = 2;
-    float cw = (W - 80 - 20) / (float)cols, chh = 78, top = 92;
-    int rowsN = (NMLESSONS + cols - 1) / cols;
-    float maxScroll = top + rowsN * (chh + 12) - H + 30;
-    if (maxScroll < 0) maxScroll = 0;
-    if (memListScroll > maxScroll) memListScroll = maxScroll;
-    if (memListScroll < 0) memListScroll = 0;
-    ScissorT(0, 73, W, H - 73);
+    if (Button((Rectangle) { W - 300, 16, 140, 40 }, "Bug Hunt", (Color) { 168, 74, 54, 255 }, 17)) { StartBug(); return; }
+    float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
+    Vector2 mouse = GetMousePosition();
+
+    /* lay out: a signpost for each group, then its programs alternating left and right of the trail */
+    const float tw = 350, th = 96, gap = 46, off = 66;
+    static Rectangle tile[NMLESSONS];
+    static float headY[8];
+    static const char* headName[8];
+    int nHead = 0;
+    float cy = 44;
     const char* lastTrack = "";
-    float y = top - memListScroll;
-    for (int i = 0; i < NMLESSONS; ) {
+    for (int i = 0; i < NMLESSONS; i++) {
         if (strcmp(lastTrack, MLESSONS[i].track)) {
             lastTrack = MLESSONS[i].track;
-            Txt(fBold, MLESSONS[i].track, 40, y, 14, CB_HAY);
-            y += 26;
+            if (nHead < 8) { headY[nHead] = cy + 20; headName[nHead++] = lastTrack; }
+            cy += 96;
         }
-        int j = i, c = 0;
-        while (j < NMLESSONS && !strcmp(MLESSONS[j].track, lastTrack)) {
-            Rectangle r = { 40 + c * (cw + 20), y, cw, chh };
-            bool hov = CheckCollisionPointRec(GetMousePosition(), r) && r.y + r.height > 73;
-            if (hov) hand = true;
-            Panel(r, 0.12f, hov ? SURF2 : SURF, hov ? CB_HAY : BORDER);
-            DrawRectangleRounded((Rectangle) { r.x, r.y + 10, 5, r.height - 20 }, 0.5f, 4, hov ? CB_HAY : CB_WOOD_L);
-            TxtFit(fBold, MLESSONS[j].topic, r.x + 20, r.y + 12, 19, cw - 40, TXT);
-            TxtFit(fReg, MLESSONS[j].title, r.x + 20, r.y + 40, 14, cw - 130, DIM);
-            char info[48]; snprintf(info, sizeof info, "%d lines run", MLESSONS[j].ns);
-            Txt(fCode, info, r.x + r.width - 18 - TxtW(fCode, info, 12), r.y + 44, 12, DIM);
-            if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { memLesson = j; memStep = 0; CbReset(); }
-            c++;
-            if (c == cols) { c = 0; y += chh + 12; }
-            j++;
-        }
-        if (c) y += chh + 12;
-        y += 10;
-        i = j;
+        float mid = cy + th / 2, px = CbPathX(mid);
+        tile[i] = (Rectangle){ (i & 1) ? px + off : px - off - tw, cy, tw, th };
+        cy += th + gap;
     }
+    float contentH = cy + 30;
+    const float top = 80, viewH = H - top;
+    float maxScroll = contentH - viewH; if (maxScroll < 0) maxScroll = 0;
+    memListScroll -= GetMouseWheelMove() * 70;
+    if (memListScroll > maxScroll) memListScroll = maxScroll;
+    if (memListScroll < 0) memListScroll = 0;
+    float sy = top - memListScroll;                 /* content y -> screen y */
+
+    ScissorT(0, 73, W, H - 73);
+    /* soft lawn stripes that scroll with the content */
+    for (int k = (int)(memListScroll / 26); k * 26 < memListScroll + viewH + 26; k++)
+        if (k & 1) DrawRectangle(0, (int)(sy + k * 26), W, 26, Fade(GOOD, 0.04f));
+
+    /* the trail: a dirt track with a pale dashed middle, and a short branch to every program */
+    float y0 = memListScroll - 20, y1 = memListScroll + viewH + 20;
+    if (y0 < 0) y0 = 0;
+    if (y1 > contentH) y1 = contentH;
+    for (float yy = y0; yy < y1; yy += 8) {
+        Vector2 a = { CbPathX(yy), sy + yy }, b = { CbPathX(yy + 8), sy + yy + 8 };
+        DrawLineEx(a, b, 46, (Color) { 74, 54, 36, 255 });
+    }
+    for (float yy = y0; yy < y1; yy += 8) {
+        Vector2 a = { CbPathX(yy), sy + yy }, b = { CbPathX(yy + 8), sy + yy + 8 };
+        DrawLineEx(a, b, 38, (Color) { 118, 88, 58, 255 });
+        if (((int)(yy / 8)) % 4 < 2) DrawLineEx(a, b, 3, Fade((Color) { 196, 170, 126, 255 }, 0.55f));
+    }
+    for (int i = 0; i < NMLESSONS; i++) {
+        float mid = tile[i].y + th / 2, px = CbPathX(mid);
+        float ex = (i & 1) ? tile[i].x : tile[i].x + tile[i].width;
+        DrawLineEx((Vector2) { px, sy + mid }, (Vector2) { ex, sy + mid }, 14, (Color) { 100, 74, 48, 255 });
+    }
+
+    /* signposts for the groups, sitting on the trail */
+    for (int h = 0; h < nHead; h++) {
+        float px = CbPathX(headY[h]), w = TxtW(fBold, headName[h], 20) + 48, bx = px - w / 2, by = sy + headY[h] - 20;
+        DrawRectangle((int)px - 20, (int)by + 36, 6, 18, CB_WOOD);
+        DrawRectangle((int)px + 14, (int)by + 36, 6, 18, CB_WOOD);
+        DrawRectangleRounded((Rectangle) { bx, by + 3, w, 40 }, 0.3f, 8, Fade(BLACK, 0.3f));
+        DrawRectangleRounded((Rectangle) { bx, by, w, 40 }, 0.3f, 8, CB_WOOD_L);
+        DrawRectangleRounded((Rectangle) { bx + 3, by + 3, w - 6, 34 }, 0.3f, 8, CB_WOOD);
+        CenterTxt(fBold, headName[h], px, by + 9, 20, CB_TAG);
+        DrawRectangle((int)bx + 6, (int)by - 2, (int)w - 12, 4, Fade((Color) { 238, 244, 247, 255 }, 0.95f));
+    }
+
+    /* which tile is the mouse over? (not while a ride is under way) */
+    int hov = -1;
+    for (int i = 0; i < NMLESSONS; i++) {
+        Rectangle r = { tile[i].x, sy + tile[i].y, tile[i].width, tile[i].height };
+        if (CheckCollisionPointRec(mouse, r) && mouse.y > 73) hov = i;
+    }
+    if (mw.launch < 0 && hov >= 0) { mw.hover = hov; hand = true; }
+    if (!mw.ready) { mw.py = tile[0].y + th / 2; mw.x = CbPathX(mw.py); mw.y = mw.py; mw.ready = true; mw.hover = 0; mw.stage = 0; }
+
+    /* drive: along the trail to the program's depth; once clicked, off the trail and onto the tile */
+    int goal = mw.launch >= 0 ? mw.launch : (mw.hover >= 0 ? mw.hover : 0);
+    float gy = tile[goal].y + th / 2;
+    bool moving = false;
+    if (mw.stage == 0) {
+        float d = gy - mw.py;
+        if (fabsf(d) > 1.5f) {
+            float step = (170.0f + 650.0f * (fabsf(d) > 160 ? 1.0f : fabsf(d) / 160)) * dt;
+            if (step > fabsf(d)) step = fabsf(d);
+            float ox = CbPathX(mw.py);
+            mw.py += d > 0 ? step : -step;
+            float nx = CbPathX(mw.py);
+            if (fabsf(nx - ox) > 0.08f) mw.dir = nx > ox ? 2 : 1;
+            mw.ph += step * 0.14f;
+            moving = true;
+        }
+        mw.x = CbPathX(mw.py); mw.y = mw.py;
+        if (!moving && mw.launch >= 0) mw.stage = 1;
+    }
+    else if (mw.stage == 1) {
+        float tx = tile[goal].x + tile[goal].width * 0.5f, dx = tx - mw.x;
+        if (fabsf(dx) > 2.0f) {
+            float step = (260.0f + 300.0f * (fabsf(dx) > 120 ? 1.0f : fabsf(dx) / 120)) * dt;
+            if (step > fabsf(dx)) step = fabsf(dx);
+            mw.x += dx > 0 ? step : -step; mw.dir = dx > 0 ? 2 : 1; mw.ph += step * 0.14f;
+            moving = true;
+        }
+        else { mw.stage = 2; mw.t = 0; }
+    }
+    else {                                            /* on the tile: a moment of mowing, then open it */
+        mw.t += dt;
+        if (mw.t > 0.55f) { memLesson = mw.launch; memStep = 0; CbReset(); MowerStart(); EndScissorMode(); return; }
+    }
+    if (moving) {
+        if (mowTrailN < 48) mowTrail[mowTrailN++] = (MowTrail){ mw.x, mw.y, 1.0f };
+        else { memmove(mowTrail, mowTrail + 1, sizeof(MowTrail) * 47); mowTrail[47] = (MowTrail){ mw.x, mw.y, 1.0f }; }
+    }
+    for (int i = 0; i < mowTrailN; i++) mowTrail[i].life -= dt * 1.4f;
+    while (mowTrailN > 0 && mowTrail[0].life <= 0) { memmove(mowTrail, mowTrail + 1, sizeof(MowTrail) * (size_t)(mowTrailN - 1)); mowTrailN--; }
+    for (int i = 0; i < mowTrailN; i++) DrawCircle((int)mowTrail[i].x, (int)(sy + mowTrail[i].y - 4), 9, Fade((Color) { 170, 230, 120, 255 }, 0.16f * mowTrail[i].life));
+
+    /* tiles */
+    for (int i = 0; i < NMLESSONS; i++) {
+        Rectangle r = { tile[i].x, sy + tile[i].y, tile[i].width, tile[i].height };
+        if (r.y + r.height < 73 || r.y > H) continue;
+        bool on = (mw.launch < 0 && hov == i) || mw.launch == i;
+        if (on) r.y -= 3;
+        Panel(r, 0.10f, on ? SURF2 : SURF, on ? CB_HAY : BORDER);
+        DrawRectangleRounded((Rectangle) { r.x, r.y + 10, 5, r.height - 20 }, 0.5f, 4, on ? CB_HAY : CB_WOOD_L);
+        DrawCircle((int)r.x + 34, (int)r.y + 30, 15, on ? CB_HAY : CB_WOOD);
+        CenterTxt(fBold, TextFormat("%d", i + 1), r.x + 34, r.y + 20, 17, on ? CB_INK : TXT);
+        TxtFit(fBold, MLESSONS[i].topic, r.x + 62, r.y + 14, 19, r.width - 80, TXT);
+        TxtFit(fReg, MLESSONS[i].title, r.x + 62, r.y + 42, 13, r.width - 80, DIM);
+        char info[48]; snprintf(info, sizeof info, "%d lines run", MLESSONS[i].ns);
+        Txt(fCode, info, r.x + 62, r.y + r.height - 26, 12, CB_HAY);
+        for (int g = 0; g < 14; g++) {                                         /* grass tufts along the bottom edge */
+            float gx = r.x + 14 + g * ((r.width - 28) / 13.0f), gh = 5.0f + (float)(WoodHash(i, g) % 5);
+            DrawTriangle((Vector2) { gx - 2.5f, r.y + r.height - 1 }, (Vector2) { gx + 2.5f, r.y + r.height - 1 }, (Vector2) { gx + (g & 1 ? 2.0f : -2.0f), r.y + r.height - 1 - gh }, Fade(GOOD, on ? 0.9f : 0.5f));
+        }
+        if (mw.launch == i && mw.stage == 2) DrawRectangleRounded(r, 0.10f, 8, Fade((Color) { 190, 255, 150, 255 }, 0.18f));
+        if (mouse.y > 73 && CheckCollisionPointRec(mouse, r) && mw.launch < 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { mw.launch = i; mw.t = 0; }
+    }
+
+    /* the mower, drawn on top */
+    DrawMowerRide(mw.x, sy + mw.y + 8, mw.dir, mw.ph, moving || mw.stage == 2, (float)GetTime());
+    CompDrawBits(dt);
     EndScissorMode();
+}
+
+static void PredChoose(int i)
+{
+    if (i >= 0) {
+        bool ok = i == pq.correct;
+        predTotal++;
+        if (ok) { predRight++; predStreak++; }
+        else predStreak = 0;
+        predLast.valid = true; predLast.right = ok; predLast.forStep = pq.step + 1;
+        if (ok) snprintf(predLast.text, sizeof predLast.text, "You called it.");
+        else snprintf(predLast.text, sizeof predLast.text, "It ends up as %s.", pq.opt[pq.correct]);
+    }
+    pq.active = false;
+    CbAskNext();
+}
+
+/* the question panel (drawn where the explanation normally sits) */
+static void PredDraw(Rectangle ep)
+{
+    Txt(fBold, "PREDICT FIRST", ep.x + 18, ep.y + 12, 14, CB_HAY);
+    char sc[64]; snprintf(sc, sizeof sc, "%d / %d right   streak %d", predRight, predTotal, predStreak);
+    Txt(fReg, sc, ep.x + ep.width - 18 - TxtW(fReg, sc, 13), ep.y + 13, 13, DIM);
+    int yy = Wrapped(fBold, pq.q, ep.x + 18, ep.y + 38, ep.width - 36, 17, TXT);
+    float bw = (ep.width - 36 - 12) / 2, bh = 44;
+    float by0 = ep.y + ep.height - 2 * bh - 10 - 40;
+    if (by0 < yy + 8) by0 = (float)yy + 8;
+    for (int i = 0; i < pq.n; i++) {
+        Rectangle r = { ep.x + 18 + (i % 2) * (bw + 12), by0 + (i / 2) * (bh + 10), bw, bh };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+        if (hov) hand = true;
+        Panel(r, 0.2f, hov ? SURF2 : SURF, hov ? CB_HAY : BORDER);
+        DrawCircle((int)r.x + 22, (int)(r.y + r.height / 2), 11, hov ? CB_HAY : CB_WOOD);
+        CenterTxt(fBold, TextFormat("%d", i + 1), r.x + 22, r.y + r.height / 2 - 9, 14, hov ? CB_INK : TXT);
+        TxtFit(fCode, pq.opt[i], r.x + 42, r.y + r.height / 2 - 9, 16, r.width - 54, TXT);
+        if ((hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) || IsKeyPressed(KEY_ONE + i)) { PredChoose(i); return; }
+    }
+    Rectangle sk = { ep.x + 18, ep.y + ep.height - 30, 150, 22 };
+    bool sh = CheckCollisionPointRec(GetMousePosition(), sk);
+    if (sh) hand = true;
+    Txt(fReg, "Skip, just run it", sk.x, sk.y + 2, 13, sh ? TXT : DIM);
+    if (sh && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) PredChoose(-1);
+}
+
+static void CbRequestNext(const MLesson* L)
+{
+    if (pq.active) return;
+    if (predOn && memStep < L->ns && cb.mode != CB_TO_BTN && cb.mode != CB_PRESS && PredBuild(&L->steps[memStep], memStep)) { pq.active = true; return; }
+    CbAskNext();
 }
 
 static void DrawMem(void)
@@ -10067,6 +10363,7 @@ static void DrawMem(void)
     TxtFit(fReg, L->title, 152, 44, 14, 700, DIM);
     char sc[48]; snprintf(sc, sizeof sc, "Line %d of %d", memStep, L->ns);
     Txt(fBold, sc, W - 24 - TxtW(fBold, sc, 20), 22, 20, CB_HAY);
+    if (Button((Rectangle) { 880, 16, 140, 40 }, predOn ? "Predict: on" : "Predict: off", predOn ? (Color) { 56, 120, 70, 255 } : SURF2, 15)) { predOn = !predOn; if (!predOn) pq.active = false; }
 
     /* code panel */
     float fs = 15, cwid = MeasureTextEx(fCode, "M", fs, 0).x, lh = 24;
@@ -10083,6 +10380,10 @@ static void DrawMem(void)
         DrawTriangle((Vector2) { cp.x + 9, cbHlY + 5 }, (Vector2) { cp.x + 9, cbHlY + lh - 7 }, (Vector2) { cp.x + 17, cbHlY + lh / 2 - 2 }, CB_HAY);
     }
     else cbHlY = -100;
+    if (pq.active) {                                         /* outline the line that is about to run */
+        float ty = cp.y + 14 + (L->steps[pq.step].line - 1) * lh - 2;
+        DrawRectangleLinesEx((Rectangle) { cp.x + 4, ty, cp.width - 8, lh }, 2, Fade(CB_HAY, 0.55f + 0.35f * sinf((float)GetTime() * 5.0f)));
+    }
     for (int i = 0; i < L->nlines; i++) {
         float ly = cp.y + 14 + i * lh;
         char num[8]; snprintf(num, sizeof num, "%2d", i + 1);
@@ -10094,11 +10395,20 @@ static void DrawMem(void)
     float ey = cp.y + cp.height + 14;
     Rectangle ep = { 24, ey, 520, H - ey - 84 };
     Panel(ep, 0.05f, SURF, BORDER);
-    Txt(fBold, memStep ? "What that line did" : "About this program", ep.x + 18, ep.y + 12, 14, CB_HAY);
-    const char* msg = memStep ? L->steps[memStep - 1].explain : L->text;
-    ScissorT((int)ep.x, (int)ep.y, (int)ep.width, (int)ep.height);
-    Wrapped(fReg, msg, ep.x + 18, ep.y + 38, ep.width - 36, 15, TXT);
-    EndScissorMode();
+    if (pq.active) PredDraw(ep);
+    else {
+        Txt(fBold, memStep ? "What that line did" : "About this program", ep.x + 18, ep.y + 12, 14, CB_HAY);
+        if (predTotal > 0) {
+            const char* ps = TextFormat("Predictions %d / %d", predRight, predTotal);
+            Txt(fReg, ps, ep.x + ep.width - 18 - TxtW(fReg, ps, 13), ep.y + 13, 13, predStreak >= 2 ? CB_HAY : DIM);
+        }
+        const char* msg = memStep ? L->steps[memStep - 1].explain : L->text;
+        ScissorT((int)ep.x, (int)ep.y, (int)ep.width, (int)ep.height);
+        int ty = Wrapped(fReg, msg, ep.x + 18, ep.y + 38, ep.width - 36, 15, TXT);
+        if (predLast.valid && predLast.forStep == memStep)
+            Txt(fBold, TextFormat("%s  %s", predLast.right ? "Right!" : "Not quite.", predLast.text), ep.x + 18, (float)ty + 8, 16, predLast.right ? GOOD : (Color) { 228, 170, 74, 255 });
+        EndScissorMode();
+    }
 
     /* memory */
     DrawMemView(memStep ? &L->steps[memStep - 1] : NULL, (Rectangle) { 560, 88, W - 560 - 24, H - 88 - 84 }, memStep > 0);
@@ -10107,8 +10417,8 @@ static void DrawMem(void)
     float by = H - 66;
     bool prev = memStep > 0, next = memStep < L->ns;
     Rectangle nb = { 296, by, 176, 46 };
-    if (Button((Rectangle) { 24, by, 120, 46 }, "Rewind", SURF2, 17)) { memStep = 0; cb.pend = 0; cb.mode = CB_HOME; }
-    if (Button((Rectangle) { 160, by, 120, 46 }, "< Back", prev ? (Color) { 75, 79, 66, 255 } : (Color) { 35, 48, 33, 255 }, 18) && prev) { memStep--; cb.pend = 0; cb.mode = CB_TO_LINE; cb.t = 0; }
+    if (Button((Rectangle) { 24, by, 120, 46 }, "Rewind", SURF2, 17)) { memStep = 0; cb.pend = 0; cb.mode = CB_HOME; pq.active = false; predLast.valid = false; }
+    if (Button((Rectangle) { 160, by, 120, 46 }, "< Back", prev ? (Color) { 75, 79, 66, 255 } : (Color) { 35, 48, 33, 255 }, 18) && prev) { memStep--; cb.pend = 0; cb.mode = CB_TO_LINE; cb.t = 0; pq.active = false; predLast.valid = false; }
     bool pressedNow = cb.mode == CB_PRESS && cb.pressed;
     Rectangle drawNb = nb; if (pressedNow) drawNb.y += 3;
     if (next) {
@@ -10119,14 +10429,270 @@ static void DrawMem(void)
         DrawRectangleRounded(drawNb, 0.28f, 10, (hov || pressedNow) ? ColorBrightness(ACCENTS[lang], 0.18f) : ACCENTS[lang]);
         DrawRectangleRounded((Rectangle) { drawNb.x + 2, drawNb.y + 2, drawNb.width - 4, drawNb.height * 0.42f }, 0.5f, 8, Fade(WHITE, 0.09f));
         CenterTxt(fBold, "Run next line >", drawNb.x + drawNb.width / 2, drawNb.y + 11, 18, WHITE);
-        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) CbAskNext();
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) CbRequestNext(L);
     }
     else if (Button(nb, "Finish", GOOD, 18)) memLesson = -1;
-    if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_SPACE)) { if (next) CbAskNext(); }
-    if (IsKeyPressed(KEY_LEFT) && prev) { memStep--; cb.pend = 0; cb.mode = CB_TO_LINE; cb.t = 0; }
-    if (IsKeyPressed(KEY_HOME)) { memStep = 0; cb.pend = 0; cb.mode = CB_HOME; }
-    Txt(fReg, "Right arrow or Space runs the next line.   Gold = changed.   Red = leaked.", 490, by + 14, 13, DIM);
+    if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_SPACE)) { if (next) CbRequestNext(L); }
+    if (IsKeyPressed(KEY_LEFT) && prev) { memStep--; cb.pend = 0; cb.mode = CB_TO_LINE; cb.t = 0; pq.active = false; predLast.valid = false; }
+    if (IsKeyPressed(KEY_HOME)) { memStep = 0; cb.pend = 0; cb.mode = CB_HOME; pq.active = false; predLast.valid = false; }
+    Txt(fReg, "Right arrow or Space runs the next line (in predict mode, answer with 1-4).   Gold = changed.   Red = leaked.", 484, by + 14, 13, DIM);
+    if (memStep >= L->ns && !predPaid) { predPaid = true; if (predRight > 0) GainCredits(predRight * 2, "Right predictions"); }
     CbUpdate(dt, nb, cp, lh, hl, L->ns);
+}
+
+/* ======================================================================
+   BUG HUNT: each program has exactly one wrong line. Click it.
+   ====================================================================== */
+typedef struct {
+    const char* title, * goal, * kind, * why, * fix;
+    int lang, nlines, bug;                 /* bug = the wrong line, counting from 0 */
+    const char* code[13];
+} BugProg;
+
+static const BugProg BUGS[] = {
+  { "Sum to n", "add up 1 + 2 + 3 + 4 + 5 and print 15", "Off by one",
+    "i < n stops one short, so the last number (5) is never added. The program prints 10, not 15. The loop has to run while i <= n.",
+    "for (int i = 1; i <= n; i++) {", 0, 9, 3,
+    { "#include <stdio.h>", "int main(void) {", "    int n = 5, sum = 0;", "    for (int i = 1; i < n; i++) {", "        sum += i;", "    }", "    printf(\"%d\\n\", sum);", "    return 0;", "}" } },
+  { "Lives left", "print how many lives are left (3)", "Assignment vs comparison",
+    "A single = assigns. This sets lives to 0, and the if is false, so the program wipes out your lives instead of checking them. == is the one that compares.",
+    "if (lives == 0) {", 0, 9, 3,
+    { "#include <stdio.h>", "int main(void) {", "    int lives = 3;", "    if (lives = 0) {", "        printf(\"game over\\n\");", "    }", "    printf(\"lives left: %d\\n\", lives);", "    return 0;", "}" } },
+  { "Average of two", "print the average of 7 and 2, which is 4.5", "Integer division",
+    "Both sides of the / are ints, so C divides as whole numbers: 9 / 2 is 4, and the .5 is thrown away before it is stored in the double. Making one side a double (2.0) fixes it.",
+    "double avg = (a + b) / 2.0;", 0, 7, 3,
+    { "#include <stdio.h>", "int main(void) {", "    int a = 7, b = 2;", "    double avg = (a + b) / 2;", "    printf(\"%.1f\\n\", avg);", "    return 0;", "}" } },
+  { "Ask for an age", "read an age from the keyboard and print it", "Missing &",
+    "scanf has to be given the address of age so it can write into it. Passing age itself hands it the (garbage) value as if it were an address, which usually crashes. You need &age.",
+    "scanf(\"%d\", &age);", 0, 8, 4,
+    { "#include <stdio.h>", "int main(void) {", "    int age;", "    printf(\"Age? \");", "    scanf(\"%d\", age);", "    printf(\"%d\\n\", age);", "    return 0;", "}" } },
+  { "Add up an array", "add the 5 numbers in the array and print 15", "Out of bounds",
+    "An array of 5 has indexes 0 to 4. With i <= 5 the loop also reads a[5], which is past the end of the array: whatever happens to be in memory next gets added in. The test must be i < 5.",
+    "for (int i = 0; i < 5; i++) {", 0, 9, 4,
+    { "#include <stdio.h>", "int main(void) {", "    int a[5] = {1, 2, 3, 4, 5};", "    int total = 0;", "    for (int i = 0; i <= 5; i++) {", "        total += a[i];", "    }", "    printf(\"%d\\n\", total);", "}" } },
+  { "Copy a name", "copy \"Alexander\" into name and print it", "Buffer too small",
+    "\"Alexander\" is 9 letters plus the hidden '\\0' at the end, 10 chars. name only has room for 5, so strcpy writes right past the end of the array and corrupts whatever is next to it.",
+    "char name[10];", 0, 8, 3,
+    { "#include <stdio.h>", "#include <string.h>", "int main(void) {", "    char name[5];", "    strcpy(name, \"Alexander\");", "    printf(\"%s\\n\", name);", "    return 0;", "}" } },
+  { "Use after free", "store 42 on the heap and print it", "Use after free",
+    "free(p) gives the memory back. After that the pointer still holds the old address, but the memory isn't yours any more, so reading *p is undefined. Print the value before calling free.",
+    "Print *p first, then call free(p).", 0, 9, 6,
+    { "#include <stdio.h>", "#include <stdlib.h>", "int main(void) {", "    int *p = malloc(sizeof *p);", "    *p = 42;", "    free(p);", "    printf(\"%d\\n\", *p);", "    return 0;", "}" } },
+  { "Make a number", "return a pointer to the number 5", "Dangling pointer",
+    "x lives in make's stack frame, and that frame is gone the moment make returns. The pointer it hands back points at memory that is about to be reused. Return the value, or use malloc.",
+    "Return the value (int make) or malloc the int.", 0, 9, 3,
+    { "#include <stdio.h>", "int *make(void) {", "    int x = 5;", "    return &x;", "}", "int main(void) {", "    int *p = make();", "    printf(\"%d\\n\", *p);", "}" } },
+  { "Free it once", "allocate a number and free it", "Double free",
+    "The second free(p) frees memory that was already given back. That is undefined behaviour and often crashes with a heap corruption error. Each malloc gets exactly one free.",
+    "Delete the second free(p).", 0, 8, 5,
+    { "#include <stdlib.h>", "int main(void) {", "    int *p = malloc(sizeof *p);", "    *p = 7;", "    free(p);", "    free(p);", "    return 0;", "}" } },
+  { "Day names", "print Mon for day 1 and Tue for day 2", "Missing break",
+    "With no break, case 1 doesn't stop: it carries on into case 2, so day 1 prints both Mon and Tue. Every case that should end needs a break.",
+    "case 1: printf(\"Mon\\n\"); break;", 0, 9, 4,
+    { "#include <stdio.h>", "int main(void) {", "    int day = 1;", "    switch (day) {", "        case 1: printf(\"Mon\\n\");", "        case 2: printf(\"Tue\\n\"); break;", "    }", "    return 0;", "}" } },
+  { "Same word?", "print same when the word is hello", "Comparing strings with ==",
+    "In C, == on two strings compares where they live in memory, not what they say, so it is almost never true. strcmp(word, \"hello\") == 0 is how to compare the letters.",
+    "if (strcmp(word, \"hello\") == 0) {", 0, 9, 4,
+    { "#include <stdio.h>", "#include <string.h>", "int main(void) {", "    char word[] = \"hello\";", "    if (word == \"hello\") {", "        printf(\"same\\n\");", "    }", "    return 0;", "}" } },
+  { "Free the array", "make an array of 3 ints on the heap and free it", "delete vs delete[]",
+    "Memory from new[] must be given back with delete[]. A plain delete frees it as if it were a single object, which is undefined behaviour.",
+    "delete[] a;", 1, 7, 4,
+    { "#include <iostream>", "int main() {", "    int *a = new int[3]{1, 2, 3};", "    std::cout << a[0] << \"\\n\";", "    delete a;", "    return 0;", "}" } },
+  { "Running total", "add 1 + 2 + 3 and print 6", "Uninitialised variable",
+    "total starts with whatever junk was in that memory, so the answer is junk + 6. Local variables are not set to 0 for you; give it a starting value.",
+    "int total = 0;", 1, 7, 2,
+    { "#include <iostream>", "int main() {", "    int total;", "    for (int i = 1; i <= 3; i++) total += i;", "    std::cout << total << \"\\n\";", "    return 0;", "}" } },
+  { "Add one", "make n go from 1 to 2", "Pass by value",
+    "addOne gets a copy of n, adds one to the copy, and the copy is thrown away. The original n is still 1. Taking a reference (int &x) lets the function change the caller's variable.",
+    "void addOne(int &x) {", 1, 9, 1,
+    { "#include <iostream>", "void addOne(int x) {", "    x = x + 1;", "}", "int main() {", "    int n = 1;", "    addOne(n);", "    std::cout << n << \"\\n\";", "}" } },
+  { "Print a vector", "print 4, 8 and 15", "Off by one",
+    "A vector of 3 has indexes 0, 1, 2. i <= v.size() makes one extra pass with i = 3, which reads past the end. The condition has to be i < v.size().",
+    "for (size_t i = 0; i < v.size(); i++) {", 1, 9, 4,
+    { "#include <iostream>", "#include <vector>", "int main() {", "    std::vector<int> v = {4, 8, 15};", "    for (size_t i = 0; i <= v.size(); i++) {", "        std::cout << v[i] << \"\\n\";", "    }", "    return 0;", "}" } },
+  { "A reference to what?", "return a reference to the number 5", "Reference to a local",
+    "x is a local of get(), destroyed when get returns. The reference now refers to a variable that no longer exists, exactly like a dangling pointer.",
+    "Return by value (int get()) instead.", 1, 9, 3,
+    { "#include <iostream>", "int &get() {", "    int x = 5;", "    return x;", "}", "int main() {", "    int &r = get();", "    std::cout << r << \"\\n\";", "}" } },
+  { "Grow a vector", "add a 9 to the vector when you see a 2", "Changing a vector while looping over it",
+    "push_back can move the vector's storage to a new place, which invalidates the loop's hidden iterators. The loop is then using dangling ones. Collect changes first, apply them after the loop.",
+    "Add after the loop, not inside it.", 1, 8, 4,
+    { "#include <vector>", "int main() {", "    std::vector<int> v = {1, 2, 3};", "    for (int x : v) {", "        if (x == 2) v.push_back(9);", "    }", "    return 0;", "}" } },
+};
+#define NBUGS ((int)(sizeof BUGS / sizeof BUGS[0]))
+
+typedef struct { float x, y, ph, t, sayT, hop, shake; int dir; char say[48]; } BugHelper;
+static BugHelper bh;
+static int bugOrder[24], bugN = 0, bugIdx = 0;
+static int bugState = 0;                      /* 0 hunting, 1 found it, 2 gave up / revealed */
+static int bugTries = 0, bugFocus = -1;       /* wrong guesses so far; the line the helper is looking at */
+static bool bugHint = false, bugWrong[16];
+static int bugFound = 0, bugFirst = 0, bugGaveUp = 0;
+static unsigned char bugResult[24];           /* 0 not yet, 1 found, 2 revealed */
+
+static void BugLoad(int k)
+{
+    bugIdx = k; bugState = 0; bugTries = 0; bugFocus = -1; bugHint = false;
+    memset(bugWrong, 0, sizeof bugWrong);
+    bh.x = 600; bh.y = 520; bh.sayT = 0; bh.hop = 0; bh.shake = 0; bh.dir = 1;
+}
+
+static void StartBug(void)
+{
+    bugN = 0;
+    for (int i = 0; i < NBUGS; i++) if (BUGS[i].lang == lang) bugOrder[bugN++] = i;
+    for (int i = bugN - 1; i > 0; i--) { int j = GetRandomValue(0, i), t = bugOrder[i]; bugOrder[i] = bugOrder[j]; bugOrder[j] = t; }
+    memset(bugResult, 0, sizeof bugResult);
+    bugFound = bugFirst = bugGaveUp = 0;
+    screen = SCR_BUG;
+    BugLoad(0);
+    bh.x = 600; bh.y = 160;
+}
+
+static void BugSay(const char* s, float secs) { snprintf(bh.say, sizeof bh.say, "%s", s); bh.sayT = secs; }
+
+static void DrawBug(void)
+{
+    float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
+    Vector2 mouse = GetMousePosition();
+    TopBar();
+    if (Button((Rectangle) { 24, 16, 124, 40 }, "< Programs", SURF2, 16)) { screen = SCR_MEM; return; }
+    Txt(fBold, "Bug Hunt", 168, 12, 30, TXT);
+    Txt(fReg, TextFormat("%s  -  one line in each program is wrong", LANG_NAME[lang]), 170, 46, 14, DIM);
+    /* progress dots */
+    for (int i = 0; i < bugN; i++) {
+        float dx = W - 36 - (bugN - i) * 22.0f;
+        Color c = bugResult[i] == 1 ? GOOD : (bugResult[i] == 2 ? (Color) { 228, 170, 74, 255 } : SURF2);
+        DrawCircle((int)dx, 36, i == bugIdx && bugIdx < bugN ? 8.0f : 6.0f, c);
+        if (i == bugIdx && bugIdx < bugN) DrawRing((Vector2) { dx, 36 }, 9, 11, 0, 360, 20, CB_HAY);
+    }
+
+    if (bugIdx >= bugN) {                                   /* ---- finished all of them ---- */
+        Rectangle r = { W / 2.0f - 270, 150, 540, 360 };
+        Panel(r, 0.05f, SURF, BORDER);
+        CenterTxt(fBold, "Hunt finished!", W / 2.0f, r.y + 28, 34, CB_HAY);
+        CenterTxt(fReg, TextFormat("You found %d of %d bugs.", bugFound, bugN), W / 2.0f, r.y + 90, 22, TXT);
+        CenterTxt(fReg, TextFormat("%d on the first try", bugFirst), W / 2.0f, r.y + 128, 17, DIM);
+        CenterTxt(fReg, bugGaveUp ? TextFormat("%d had to be shown to you. Try them again!", bugGaveUp) : "Not one needed showing. Nicely done.", W / 2.0f, r.y + 158, 16, DIM);
+        if (Button((Rectangle) { r.x + 60, r.y + 270, 200, 54 }, "Hunt again", ACCENTS[lang], 20)) StartBug();
+        if (Button((Rectangle) { r.x + r.width - 260, r.y + 270, 200, 54 }, "Back", SURF2, 20)) screen = SCR_MEM;
+        DrawPlayer(W / 2.0f, r.y + 250, 0, 1.2f, 0);
+        CompDrawBits(dt);
+        return;
+    }
+
+    const BugProg* P = &BUGS[bugOrder[bugIdx]];
+    float fs = 16, cwid = MeasureTextEx(fCode, "M", fs, 0).x, lh = 29;
+    Rectangle cp = { 24, 92, 640, 30 + P->nlines * lh };
+    Panel(cp, 0.03f, CODEBG, BORDER);
+    Txt(fCode, P->lang ? "main.cpp" : "main.c", cp.x + cp.width - 14 - TxtW(fCode, P->lang ? "main.cpp" : "main.c", 12), cp.y + 6, 12, DIM);
+
+    /* which line is the mouse over? */
+    int hl = -1;
+    for (int i = 0; i < P->nlines; i++) {
+        Rectangle lr = { cp.x + 4, cp.y + 16 + i * lh - 2, cp.width - 8, lh };
+        if (CheckCollisionPointRec(mouse, lr)) hl = i;
+    }
+    if (bugState == 0 && hl >= 0) hand = true;
+    if (bugState == 0 && hl >= 0) bugFocus = hl;
+
+    /* the lines */
+    for (int i = 0; i < P->nlines; i++) {
+        float ly = cp.y + 16 + i * lh;
+        Rectangle lr = { cp.x + 4, ly - 2, cp.width - 8, lh };
+        if (bugState == 0 && i == hl) DrawRectangleRec(lr, Fade(CB_HAY, 0.13f));
+        if (bugWrong[i]) { DrawRectangleRec(lr, Fade(BAD, 0.16f)); DrawRectangle((int)lr.x, (int)lr.y, 3, (int)lr.height, BAD); }
+        if (bugState != 0 && i == P->bug) { DrawRectangleRec(lr, Fade(bugState == 1 ? GOOD : (Color) { 228, 170, 74, 255 }, 0.20f)); DrawRectangle((int)lr.x, (int)lr.y, 3, (int)lr.height, bugState == 1 ? GOOD : (Color) { 228, 170, 74, 255 }); }
+        DrawTextEx(fCode, TextFormat("%2d", i + 1), (Vector2) { cp.x + 20, ly + 2 }, fs - 3, 0, (Color) { 112, 118, 92, 255 });
+        HighlightLine(P->code[i], cp.x + 56, ly, fs, cwid);
+        if (bugWrong[i]) CenterTxt(fBold, "x", cp.x + cp.width - 26, ly - 1, 18, BAD);
+        if (bugState != 0 && i == P->bug) CenterTxt(fBold, bugState == 1 ? "ok" : "!", cp.x + cp.width - 26, ly, 15, bugState == 1 ? GOOD : (Color) { 228, 170, 74, 255 });
+    }
+
+    /* clicking a line */
+    if (bugState == 0 && hl >= 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !bugWrong[hl]) {
+        bugFocus = hl;
+        if (hl == P->bug || !strcmp(P->code[hl], P->code[P->bug])) {          /* an identical line (like a repeated free) counts too */
+            bugFocus = P->bug;
+            bugState = 1; bugResult[bugIdx] = 1; bugFound++;
+            if (bugTries == 0 && !bugHint) { bugFirst++; GainCredits(8, "Bug found first try"); }
+            else GainCredits(4, "Bug found");
+            bh.hop = 1.0f; BugSay("Found it!", 2.6f);
+            CompBurst(bh.x, bh.y - 40, 22);
+        }
+        else {
+            bugWrong[hl] = true; bugTries++; bh.shake = 0.5f;
+            BugSay(bugTries == 1 ? "That one looks fine to me." : "Hmm, not that one either.", 2.2f);
+            if (bugTries >= 3) { bugState = 2; bugResult[bugIdx] = 2; bugGaveUp++; BugSay("Here, I'll show you.", 3.0f); bugFocus = P->bug; }
+        }
+    }
+
+    /* the helper: walks along the right-hand edge of the code to whichever line you are looking at */
+    {
+        int line = bugFocus >= 0 ? bugFocus : 0;
+        float tx = cp.x + cp.width - 62, ty = cp.y + 16 + line * lh + lh - 3;
+        float dx = tx - bh.x, dy = ty - bh.y, d = sqrtf(dx * dx + dy * dy);
+        bool run = d > 3;
+        if (run) {
+            float step = (240.0f + 520.0f * (d > 80 ? 1.0f : d / 80.0f)) * dt;
+            if (step > d) step = d;
+            bh.x += dx / d * step; bh.y += dy / d * step; bh.ph += dt * 17.0f;
+            bh.dir = dx > 4 ? 2 : (dx < -4 ? 1 : bh.dir);
+        }
+        else bh.dir = 1;
+        if (bh.hop > 0) bh.hop -= dt * 1.6f;
+        if (bh.shake > 0) bh.shake -= dt;
+        if (bh.sayT > 0) bh.sayT -= dt;
+        float hopY = bh.hop > 0 ? sinf((1.0f - bh.hop) * PI) * 22.0f : 0.0f;
+        float shx = bh.shake > 0 ? sinf(bh.shake * 60.0f) * 4.0f : 0.0f;
+        DrawPlayer(bh.x + shx, bh.y - hopY, bh.dir, 0.9f, run ? bh.ph : 0);
+        if (bh.sayT > 0) CbBubble(bh.x, bh.y - hopY - 52, bh.say);
+        else if (bugState == 0 && !run) CbBubble(bh.x, bh.y - 52, "look at this line...");
+        CompDrawBits(dt);
+    }
+
+    /* right-hand panel */
+    Rectangle rp = { cp.x + cp.width + 24, 92, W - (cp.x + cp.width + 24) - 24, H - 92 - 24 };
+    Panel(rp, 0.04f, SURF, BORDER);
+    float x = rp.x + 22, w = rp.width - 44, y = rp.y + 18;
+    if (bugState == 0) {
+        Txt(fBold, "FIND THE BUG", x, y, 13, CB_HAY);
+        TxtFit(fBold, P->title, x, y + 24, 26, w, TXT);
+        int ny = Wrapped(fReg, TextFormat("This program should %s, but one line is wrong.", P->goal), x, y + 66, w, 16, TXT);
+        Txt(fReg, "Click the line you think is the bug.", x, (float)ny + 10, 16, CB_HAY);
+        Txt(fBold, "TRIES LEFT", x, (float)ny + 56, 12, DIM);
+        for (int i = 0; i < 3; i++) {
+            bool used = i < bugTries;
+            DrawCircle((int)x + 10 + i * 30, (int)ny + 92, 10, used ? Fade(BAD, 0.5f) : CB_HAY);
+            if (used) CenterTxt(fBold, "x", x + 10 + i * 30, (float)ny + 83, 15, TXT);
+        }
+        float hy = (float)ny + 130;
+        if (bugHint) {
+            Rectangle hb = { x, hy, w, 72 };
+            DrawRectangleRounded(hb, 0.15f, 8, Fade(CB_HAY, 0.14f));
+            Txt(fBold, "HINT", hb.x + 14, hb.y + 10, 12, CB_HAY);
+            Txt(fBold, TextFormat("It is a \"%s\" bug.", P->kind), hb.x + 14, hb.y + 32, 17, TXT);
+        }
+        else if (Button((Rectangle) { x, hy, 190, 44 }, "Give me a hint", SURF2, 16)) { bugHint = true; BugSay("Think about the kind of bug.", 2.2f); }
+        if (Button((Rectangle) { x, rp.y + rp.height - 64, 150, 42 }, "Show me", SURF2, 15)) { bugState = 2; bugResult[bugIdx] = 2; bugGaveUp++; bugFocus = P->bug; BugSay("Here it is.", 2.4f); }
+    }
+    else {
+        bool found = bugState == 1;
+        Txt(fBold, found ? "FOUND IT" : "HERE IS THE BUG", x, y, 13, found ? GOOD : (Color) { 228, 170, 74, 255 });
+        TxtFit(fBold, P->kind, x, y + 24, 25, w, TXT);
+        Txt(fBold, "WHAT WAS WRONG", x, y + 70, 12, DIM);
+        int ny = Wrapped(fReg, P->why, x, y + 92, w, 16, TXT);
+        Txt(fBold, "THE FIX", x, (float)ny + 14, 12, DIM);
+        Rectangle fb = { x, (float)ny + 36, w, 46 };
+        DrawRectangleRounded(fb, 0.2f, 8, CODEBG);
+        if (strpbrk(P->fix, "{;")) HighlightLine(P->fix, fb.x + 14, fb.y + 12, 16, cwid);
+        else TxtFit(fReg, P->fix, fb.x + 14, fb.y + 13, 16, fb.width - 28, TXT);
+        bool last = bugIdx + 1 >= bugN;
+        if (Button((Rectangle) { rp.x + rp.width - 22 - 190, rp.y + rp.height - 64, 190, 46 }, last ? "See results" : "Next bug >", ACCENTS[lang], 18) || IsKeyPressed(KEY_ENTER)) {
+            if (last) bugIdx++; else BugLoad(bugIdx + 1);
+            if (bugIdx < bugN) { bh.x = 600; bh.y = 160; }
+        }
+    }
 }
 
 /* ======================================================================
@@ -10293,7 +10859,7 @@ static void DrawBoot(void)
     DrawRectangleGradientV(0, 0, W, 130, Fade((Color) { 8, 22, 18, 255 }, 0.9f), Fade((Color) { 8, 22, 18, 255 }, 0));
 
     /* logo: a badge, then the name popping in letter by letter */
-    const char* name = "CodeQuest";
+    const char* name = "Coding Valley";
     float fs = 68, badge = 86, gap = 24;
     float total = badge + gap + TxtW(fBold, name, fs);
     float lx = (W - total) / 2, ly = 168;
@@ -10301,18 +10867,17 @@ static void DrawBoot(void)
     Rectangle br = { lx + badge / 2 - badge * pulse / 2, ly + 8 + badge / 2 - badge * pulse / 2, badge * pulse, badge * pulse };
     float bin = BootEase(t / 0.5f);
     DrawRectangleRounded((Rectangle) { br.x - 10, br.y - 10, br.width + 20, br.height + 20 }, 0.3f, 10, Fade(accent, 0.12f * bin));
-    DrawRectangleRounded(br, 0.28f, 10, Fade(accent, bin));
-    CenterTxt(fCode, "</>", br.x + br.width / 2, br.y + br.height / 2 - 14, 28, Fade(WHITE, bin));
+    DrawValleyLogo(br, bin);
     int nl = (int)strlen(name);
     for (int i = 0; i < nl; i++) {
         float loc = BootEase((t - 0.25f - i * 0.07f) / 0.35f);
         char pre[16] = "", one[2] = { name[i], 0 };
         memcpy(pre, name, (size_t)i); pre[i] = 0;
         float x = lx + badge + gap + TxtW(fBold, pre, fs);
-        Txt(fBold, one, x, ly + (1.0f - loc) * 26, fs, Fade(i >= 4 ? accent : TXT, loc));
+        Txt(fBold, one, x, ly + (1.0f - loc) * 26, fs, Fade(i >= 7 ? accent : TXT, loc));
     }
     float sub = BootEase((t - 1.0f) / 0.5f);
-    CenterTxt(fReg, "C  &  C++  ACADEMY", W / 2.0f, 262, 17, Fade(DIM, sub));
+    CenterTxt(fReg, "LEARN  C  &  C++  IN  THE  VALLEY", W / 2.0f, 262, 17, Fade(DIM, sub));
 
     /* the progress bar and the runner */
     float p = BootClamp(t / RUN);
@@ -10387,7 +10952,7 @@ static void DrawTransition(float dt, Color accent)
      - skills and XP: each lesson topic is a skill that levels up
      - speed rounds: ten generated "what is x?" snippets, ten seconds each
      - notes and bookmarks per lesson, search across lessons, review answers
-     - living code backgrounds that match CodeQuest's look
+     - living backgrounds that match Coding Valley's look
    Saved in study.dat and notes.dat.
    ====================================================================== */
 #define NSKILL (2 * NLESSONS + 1)               /* one per lesson in each language, plus code tracing */
@@ -11433,7 +11998,7 @@ static void DrawStudy(Color accent)
 int main(void)
 {
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);      /* smoother rounded corners */
-    InitWindow(W, H, "CodeQuest - Learn C & C++");
+    InitWindow(W, H, "Coding Valley - Learn C & C++");
     SetWindowMinSize(600, 380);
     SetExitKey(KEY_NULL);                   /* we handle ESC ourselves */
     SetTargetFPS(60);
@@ -11458,6 +12023,7 @@ int main(void)
             else if (screen == SCR_STUDYRUN || screen == SCR_SPEED) { screen = SCR_STUDY; bgBoost = 0; }
             else if (screen == SCR_NOTES) screen = SCR_LESSON;
             else if (screen == SCR_ANSREV) screen = SCR_RESULT;
+            else if (screen == SCR_BUG) screen = SCR_MEM;
             else if (screen == SCR_LAB) LabBack();
             else if (screen == SCR_MENU) quit = true;
             else if (screen == SCR_WORLD) {
@@ -11484,7 +12050,7 @@ int main(void)
         if (screen != SCR_WORLD) DrawRectangleGradientV(0, 0, W, H, (Color) { 22, 44, 38, 255 }, (Color) { 10, 22, 17, 255 });
         if (screen != SCR_SPEED) bgBoost = 0;
         if (screen == SCR_MENU || screen == SCR_LESSON || screen == SCR_QUIZ || screen == SCR_RESULT || screen == SCR_MEM ||
-            screen == SCR_STUDY || screen == SCR_STUDYRUN || screen == SCR_SPEED || screen == SCR_NOTES || screen == SCR_ANSREV)
+            screen == SCR_STUDY || screen == SCR_STUDYRUN || screen == SCR_SPEED || screen == SCR_NOTES || screen == SCR_ANSREV || screen == SCR_BUG)
             DrawLiveBg(accent);                                  /* the faint living background */
         switch (screen) {
         case SCR_MENU:   DrawMenu(accent);   break;
@@ -11505,6 +12071,7 @@ int main(void)
         case SCR_SPEED:    DrawSpeed(accent);        break;
         case SCR_NOTES:    DrawNotes(accent);        break;
         case SCR_ANSREV:   DrawAnswerReview(accent); break;
+        case SCR_BUG:      DrawBug();         break;
         }
         {
             static int prevScreen = -1;

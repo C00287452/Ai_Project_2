@@ -2155,6 +2155,13 @@ static int DrawCode(const char* code, float x, float y, float w, float fs, const
 /*  Navigation helpers                                                 */
 /* ------------------------------------------------------------------ */
 static void GoMenu(void) { screen = fromWorld ? SCR_WORLD : SCR_MENU; scroll = 0; }
+/* "Try this code in the Lab" remembers the screen it came from, so Back / Esc return there */
+static int labReturn = -1;
+static void LabBack(void)
+{
+    if (labReturn >= 0) { screen = (Screen)labReturn; labReturn = -1; }
+    else GoMenu();
+}
 static int quizPick[3] = { -1, -1, -1 };      /* what was picked for each question of the quiz being taken */
 static char quizTypedTxt[3][64];
 static bool quizWasTyped[3];
@@ -5596,6 +5603,7 @@ static void LabOwn(int o)
 static void StartLab(void)
 {
     LabOwn(0);
+    labReturn = -1;
     if (!labInit) { LabLoad(0, 0); labInit = true; }
     screen = SCR_LAB;
     labPending = 0;
@@ -5889,7 +5897,7 @@ static void DrawLab(void)
 
     /* ---- top bar ---- */
     TopBar();
-    if (Button((Rectangle) { 24, 14, 124, 44 }, BACKL, SURF2, 16)) GoMenu();
+    if (Button((Rectangle) { 24, 14, 124, 44 }, labReturn == SCR_LESSON ? "< Lesson" : (labReturn >= 0 ? "< Back" : BACKL), SURF2, 16)) LabBack();
     Txt(fBold, "Coding Lab", 168, 17, 25, LABC);
     const char* cinfo = labLang == 0 ? "Compiles with gcc (C11)" : "Compiles with g++ (C++17)";
     Txt(fReg, cinfo, W - 36 - TxtW(fReg, cinfo, 15), 26, 15, DIM);
@@ -6025,6 +6033,7 @@ static void WrapSnippet(const char* code, int lg, char* out, int cap)
 static void TryIt(const char* code)
 {
     LabOwn(0);
+    labReturn = screen == SCR_LAB ? labReturn : (int)screen;
     labInit = true; labLang = lang;
     static char tmp[LAB_CAP];
     WrapSnippet(code, lang, tmp, (int)sizeof tmp);
@@ -8001,7 +8010,8 @@ static int fEx = 0;
 /* ---- runner ---- */
 static bool fRunning = false, fInit = false, fErrFlash = false;
 static double fRt = 0;
-static const int F_SPEEDS[4] = { 1, 2, 5, 10 };
+static const int F_SPEEDS[4] = { 1, 3, 8, 25 };
+#define F_BASE_SPEED 0.3          /* what "1x" really means: about a third of the old pace */
 static float fSaveT = 0;
 static char fCodeSaved[LAB_CAP + 1];
 
@@ -8033,7 +8043,7 @@ static void FarmStop(void) { if (fRunning) { fRunning = false; FarmOut("Stopped.
 static void FarmFrame(float dt)
 {
     if (labPending) { labPending = 0; FarmLaunch(); }
-    double mult = fRunning ? F_SPEEDS[fsv.speed & 3] : 1, target = fTime + dt * mult, t0 = GetTime();
+    double mult = (fRunning ? F_SPEEDS[fsv.speed & 3] : 1) * F_BASE_SPEED, target = fTime + dt * mult, t0 = GetTime();
     while (fTime < target - 1e-9) {
         double st = target - fTime; if (st > 0.05) st = 0.05;
         FarmAdvance(st);
@@ -11448,6 +11458,7 @@ int main(void)
             else if (screen == SCR_STUDYRUN || screen == SCR_SPEED) { screen = SCR_STUDY; bgBoost = 0; }
             else if (screen == SCR_NOTES) screen = SCR_LESSON;
             else if (screen == SCR_ANSREV) screen = SCR_RESULT;
+            else if (screen == SCR_LAB) LabBack();
             else if (screen == SCR_MENU) quit = true;
             else if (screen == SCR_WORLD) {
                 if (dlg != DLG_NONE) dlg = DLG_NONE;

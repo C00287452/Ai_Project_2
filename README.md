@@ -132,19 +132,7 @@ Want a fresh start? Delete a file to reset that part. (An old `farm2_code.txt` f
 
 ---
 
-## 🗺️ What's next
 
-A wishlist for the coming seasons:
-
-- 🎓 A gentle first-run tutorial and a "Continue where you left off" card
-- ✍️ A little task under every lesson page
-- 🧭 Hints that point you to the matching lesson
-- 🧠 Practice for pointers, structs and recursion
-- ⚔️ Coding duels in the Arena, achievements, and a creature for every concept
-- ♿ Text size, reduced motion, colour-blind colours and full keyboard play
-- 💾 Safer saves
-
----
 
 ## 📁 What's in the box
 

@@ -20,7 +20,7 @@
  *
  * Menu: sidebar dashboard (Learn path with Khan-style mastery, Practice list of 19 auto-graded coding problems, streak and levels).
  * Lessons have a 'Try this code in the Lab' button (W3Schools style). Practice problems are compiled with gcc/g++ and run against test cases.
- * Mower Farm: a 'The Farmer Was Replaced' style programming game - write Python-like code to drive your student's ride-on mower,
+ * Mower Farm: a 'The Farmer Was Replaced' style programming game - write C or C++ to drive your student's ride-on mower,
  *   grow crops, buy upgrades (red barn on campus or the Mower Farm button). Windows can be dragged, folded and resized; F11 = fullscreen.
  * Coding Lab: write real C / C++ code, press Run, see the output (needs gcc / g++ installed).
  *   Open it from the study menu or the teal Coding Lab building on campus.
@@ -1512,7 +1512,12 @@ static const Color ACCENTS[2] = { { 228, 170, 74, 255 }, { 128, 192, 208, 255 } 
 #define SPC 0.2f          /* letter spacing for the UI font */
 #define UI_SCALE 1.14f    /* serif fonts look smaller than sans at the same size */
 
-typedef enum { SCR_MENU, SCR_LESSON, SCR_QUIZ, SCR_RESULT, SCR_WORLD, SCR_BATTLE, SCR_QUEST, SCR_LAB, SCR_SHOP, SCR_FARM, SCR_PROBLEM, SCR_MEM, SCR_BOOT, SCR_STUDY, SCR_STUDYRUN, SCR_SPEED, SCR_NOTES, SCR_ANSREV, SCR_BUG } Screen;
+typedef enum { SCR_MENU, SCR_LESSON, SCR_QUIZ, SCR_RESULT, SCR_WORLD, SCR_BATTLE, SCR_QUEST, SCR_LAB, SCR_SHOP, SCR_FARM, SCR_PROBLEM, SCR_MEM, SCR_BOOT, SCR_STUDY, SCR_STUDYRUN, SCR_SPEED, SCR_NOTES, SCR_ANSREV, SCR_BUG, SCR_JOBS, SCR_JOB, SCR_SETTINGS, SCR_STEP } Screen;
+typedef struct { int magic, boot, trans, fx, fps; } Cfg;         /* settings.dat */
+static Cfg cfg = { 0x5E77, 1, 1, 1, 0 };
+static void OpenSettings(void);
+static void SettingsButton(float x, float y);
+static void StepOpen(const char* code, const char* input, int back);
 typedef enum { MOOD_IDLE, MOOD_THINK, MOOD_CHEER, MOOD_SAD } Mood;
 
 static Screen screen = SCR_MENU;
@@ -1536,6 +1541,9 @@ static void StudyRecord(int id, bool ok, int mult);
 static void StartStudy(void);
 static void DrawLessonExtras(Color accent);
 static void DrawStudy(Color accent);
+static void DrawSkillMap(float top, Color accent);
+static void DrawGlossary(float top, Color accent);
+static bool glFocus = false;
 static void DrawStudyRun(Color accent);
 static void DrawSpeed(Color accent);
 static void DrawNotes(Color accent);
@@ -1544,12 +1552,18 @@ static void DrawCompanion(float cx, float footY, float sc, int mood, bool below)
 static void DrawBoot(void);
 static void CompBurst(float x, float y, int n);
 static void StartBug(void);
+static void StartJobs(void);
+static void StartBug(void);
+static void JobSync(void);
+static void JobLoad(void);
+static bool LangToggle(float x, float y);
 static void DrawBug(void);
 static void CompDrawBits(float dt);
 static void DrawTransition(float dt, Color accent);
 static void DrawMem(void);
 static void TryIt(const char* code);
 static void GainCredits(int n, const char* why);
+static void FxCredits(int n);
 static void DrawCreditsChip(float rx, float y);
 static bool ibeam = false;                /* show text cursor this frame */
 static bool hand = false;                 /* show pointer cursor this frame */
@@ -1557,8 +1571,14 @@ static Font fReg, fMed, fBold, fCode;     /* Liberation Serif + DejaVu Sans Mono
 
 /* ---- practice problems (auto-graded against test cases) ---- */
 typedef struct { const char* in, * out; } PTest;
-typedef struct { const char* title, * topic; int diff, lesson, nt; const char* desc, * fmt; PTest t[4]; const char* hint[3]; const char* todo, * solC, * solCpp, * why; } Prob;
-#define NPROB 19
+typedef struct { const char* title, * topic; int diff, lesson, nt; const char* desc, * fmt; PTest t[6]; const char* hint[3]; const char* todo, * solC, * solCpp, * why; int kind; const char* brokenC, * brokenCpp; int rules; } Prob;   /* kind 0 = write it, 1 = fix the broken program */
+#define NPROB_STD 58   /* the standard Practice problems */
+#define NPROB 92       /* ...plus 34 lab tasks (Practice > Labs) */
+#define LR_CHARINT 1   /* lab rules checked on submit */
+#define LR_NOCOND 2
+#define LR_TWOFOR 4
+#define LR_ONEIF 8
+#define PROBMAX 96   /* room in the save files for future problems */
 static const Prob PROBS[NPROB] = {
   { "Hello, Name", "Input / Output", 0, 0, 4,
     "Read a first name (a single word) and greet the person.",
@@ -1731,6 +1751,664 @@ static const Prob PROBS[NPROB] = {
     "#include <stdio.h>\n\nint main(void) {\n    char s[200], st[200];\n    int top = 0, ok = 1;\n    scanf(\"%199s\", s);\n    for (int i = 0; s[i] && ok; i++) {\n        char c = s[i];\n        if (c == '(' || c == '[' || c == '{') st[top++] = c;\n        else {\n            char o = c == ')' ? '(' : c == ']' ? '[' : '{';\n            if (top == 0 || st[top - 1] != o) ok = 0;\n            else top--;\n        }\n    }\n    printf(ok && top == 0 ? \"yes\\n\" : \"no\\n\");\n    return 0;\n}\n",
     "#include <iostream>\n#include <string>\n#include <stack>\nusing namespace std;\n\nint main() {\n    string s;\n    cin >> s;\n    stack<char> st;\n    bool ok = true;\n    for (char c : s) {\n        if (c == '(' || c == '[' || c == '{') st.push(c);\n        else {\n            char o = c == ')' ? '(' : c == ']' ? '[' : '{';\n            if (st.empty() || st.top() != o) {\n                ok = false;\n                break;\n            }\n            st.pop();\n        }\n    }\n    cout << (ok && st.empty() ? \"yes\" : \"no\") << endl;\n    return 0;\n}\n",
     "A stack (last in, first out) matches nested structure perfectly - the same idea parsers use." },
+  { "Clock Time", "Input / Output", 0, 0, 6,
+    "Read a number of seconds (0 to 86399) and print it as a clock time, HH:MM:SS, with two digits in every part.",
+    "Input: an integer s.\nOutput: HH:MM:SS",
+    { { "3661", "01:01:01" },  { "0", "00:00:00" },  { "86399", "23:59:59" },  { "59", "00:00:59" },  { "3600", "01:00:00" },  { "754", "00:12:34" } },
+    { "Hours are s / 3600. What is left over after removing the hours is s % 3600.", "Minutes are (s % 3600) / 60 and seconds are s % 60.", "Pad with zeros using %02d in printf. In C++, print a '0' first when the number is below 10." },
+    "print the time as HH:MM:SS",
+    "#include <stdio.h>\n\nint main(void) {\n    int s;\n    scanf(\"%d\", &s);\n    printf(\"%02d:%02d:%02d\\n\", s / 3600, s % 3600 / 60, s % 60);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nvoid two(int v) {\n    if (v < 10) cout << \"0\";\n    cout << v;\n}\n\nint main() {\n    int s;\n    cin >> s;\n    two(s / 3600); cout << \":\";\n    two(s % 3600 / 60); cout << \":\";\n    two(s % 60); cout << endl;\n    return 0;\n}\n",
+    "Integer division and % split the seconds into hours, minutes and seconds. %02d (or printing a 0 first when the value is below 10) keeps the leading zero.", 0, NULL, NULL },
+  { "Leap Year", "Conditionals", 0, 1, 6,
+    "A year is a leap year if it divides by 4, except years that divide by 100, unless they also divide by 400. Read a year and say whether it is a leap year.",
+    "Input: one integer year.\nOutput: leap or not leap",
+    { { "2024", "leap" },  { "1900", "not leap" },  { "2000", "leap" },  { "2023", "not leap" },  { "2100", "not leap" },  { "1996", "leap" } },
+    { "Start with the simple rule: year % 4 == 0.", "1900 is divisible by 4 but is not a leap year. Add the exception for % 100.", "Combine with && and ||:  (y % 4 == 0 && y % 100 != 0) || y % 400 == 0" },
+    "print leap or not leap",
+    "#include <stdio.h>\n\nint main(void) {\n    int y;\n    scanf(\"%d\", &y);\n    if ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) puts(\"leap\");\n    else puts(\"not leap\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int y;\n    cin >> y;\n    if ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) cout << \"leap\" << endl;\n    else cout << \"not leap\" << endl;\n    return 0;\n}\n",
+    "The century rule is an exception to the 4-year rule, and the 400 rule is an exception to that exception. Two conditions joined with && and || express it exactly.", 0, NULL, NULL },
+  { "Grade Letter", "Conditionals", 0, 1, 6,
+    "Turn a score from 0 to 100 into a letter: 90 and above is A, 80 to 89 is B, 70 to 79 is C, 60 to 69 is D, anything lower is F.",
+    "Input: an integer score.\nOutput: one letter",
+    { { "95", "A" },  { "85", "B" },  { "70", "C" },  { "69", "D" },  { "59", "F" },  { "90", "A" } },
+    { "Use an if / else if chain so only one branch runs.", "Check from the highest band down: if (s >= 90) ... else if (s >= 80) ...", "The last band needs no condition: a plain else gives F." },
+    "print the letter grade",
+    "#include <stdio.h>\n\nint main(void) {\n    int s;\n    scanf(\"%d\", &s);\n    if (s >= 90) puts(\"A\");\n    else if (s >= 80) puts(\"B\");\n    else if (s >= 70) puts(\"C\");\n    else if (s >= 60) puts(\"D\");\n    else puts(\"F\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int s;\n    cin >> s;\n    if (s >= 90) cout << \"A\" << endl;\n    else if (s >= 80) cout << \"B\" << endl;\n    else if (s >= 70) cout << \"C\" << endl;\n    else if (s >= 60) cout << \"D\" << endl;\n    else cout << \"F\" << endl;\n    return 0;\n}\n",
+    "Because the chain stops at the first true condition, checking from the top means each later test only needs the lower bound.", 0, NULL, NULL },
+  { "Triangle Type", "Conditionals", 1, 1, 6,
+    "Read three side lengths. If they cannot form a triangle (a side is zero or negative, or two sides added together are not greater than the third) print invalid. Otherwise print equilateral, isosceles or scalene.",
+    "Input: three integers a b c.\nOutput: invalid, equilateral, isosceles or scalene",
+    { { "3 3 3", "equilateral" },  { "3 3 5", "isosceles" },  { "3 4 5", "scalene" },  { "1 2 3", "invalid" },  { "0 4 4", "invalid" },  { "7 10 5", "scalene" } },
+    { "Check validity first. A triangle needs a + b > c, a + c > b and b + c > a.", "All three sides equal: equilateral. Exactly two equal: isosceles.", "Test equilateral before isosceles, because three equal sides also have two equal sides." },
+    "classify the triangle",
+    "#include <stdio.h>\n\nint main(void) {\n    int a, b, c;\n    scanf(\"%d %d %d\", &a, &b, &c);\n    if (a <= 0 || b <= 0 || c <= 0 || a + b <= c || a + c <= b || b + c <= a) puts(\"invalid\");\n    else if (a == b && b == c) puts(\"equilateral\");\n    else if (a == b || b == c || a == c) puts(\"isosceles\");\n    else puts(\"scalene\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int a, b, c;\n    cin >> a >> b >> c;\n    if (a <= 0 || b <= 0 || c <= 0 || a + b <= c || a + c <= b || b + c <= a) cout << \"invalid\" << endl;\n    else if (a == b && b == c) cout << \"equilateral\" << endl;\n    else if (a == b || b == c || a == c) cout << \"isosceles\" << endl;\n    else cout << \"scalene\" << endl;\n    return 0;\n}\n",
+    "Order matters: rule out impossible triangles first, then check the most specific shape (equilateral) before the more general one (isosceles).", 0, NULL, NULL },
+  { "Digit Sum", "Loops", 0, 1, 6,
+    "Read a non-negative integer and print the sum of its digits.",
+    "Input: one integer n >= 0.\nOutput: the sum of its digits",
+    { { "123", "6" },  { "0", "0" },  { "9999", "36" },  { "1000", "1" },  { "58", "13" },  { "2147483647", "46" } },
+    { "n % 10 gives the last digit.", "n / 10 removes the last digit.", "Loop while (n > 0): add n % 10 to a total, then divide n by 10." },
+    "add up the digits",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, sum = 0;\n    scanf(\"%d\", &n);\n    while (n > 0) {\n        sum += n % 10;\n        n /= 10;\n    }\n    printf(\"%d\\n\", sum);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, sum = 0;\n    cin >> n;\n    while (n > 0) {\n        sum += n % 10;\n        n /= 10;\n    }\n    cout << sum << endl;\n    return 0;\n}\n",
+    "% 10 peels off the last digit and / 10 drops it. Repeating until nothing is left visits every digit once.", 0, NULL, NULL },
+  { "Times Table", "Loops", 0, 1, 6,
+    "Read a number n and print its times table from 1 to 10, one line per row, like  7 x 3 = 21.",
+    "Input: one integer n.\nOutput: 10 lines, each  n x i = product",
+    { { "7", "7 x 1 = 7\n7 x 2 = 14\n7 x 3 = 21\n7 x 4 = 28\n7 x 5 = 35\n7 x 6 = 42\n7 x 7 = 49\n7 x 8 = 56\n7 x 9 = 63\n7 x 10 = 70" },  { "1", "1 x 1 = 1\n1 x 2 = 2\n1 x 3 = 3\n1 x 4 = 4\n1 x 5 = 5\n1 x 6 = 6\n1 x 7 = 7\n1 x 8 = 8\n1 x 9 = 9\n1 x 10 = 10" },  { "12", "12 x 1 = 12\n12 x 2 = 24\n12 x 3 = 36\n12 x 4 = 48\n12 x 5 = 60\n12 x 6 = 72\n12 x 7 = 84\n12 x 8 = 96\n12 x 9 = 108\n12 x 10 = 120" },  { "-2", "-2 x 1 = -2\n-2 x 2 = -4\n-2 x 3 = -6\n-2 x 4 = -8\n-2 x 5 = -10\n-2 x 6 = -12\n-2 x 7 = -14\n-2 x 8 = -16\n-2 x 9 = -18\n-2 x 10 = -20" },  { "10", "10 x 1 = 10\n10 x 2 = 20\n10 x 3 = 30\n10 x 4 = 40\n10 x 5 = 50\n10 x 6 = 60\n10 x 7 = 70\n10 x 8 = 80\n10 x 9 = 90\n10 x 10 = 100" },  { "0", "0 x 1 = 0\n0 x 2 = 0\n0 x 3 = 0\n0 x 4 = 0\n0 x 5 = 0\n0 x 6 = 0\n0 x 7 = 0\n0 x 8 = 0\n0 x 9 = 0\n0 x 10 = 0" } },
+    { "A for loop from 1 to 10 gives you the second number in each row.", "Print three values per line: n, i and n * i.", "printf(\"%d x %d = %d\\n\", n, i, n * i);" },
+    "print the ten rows",
+    "#include <stdio.h>\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    for (int i = 1; i <= 10; i++) {\n        printf(\"%d x %d = %d\\n\", n, i, n * i);\n    }\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    for (int i = 1; i <= 10; i++) {\n        cout << n << \" x \" << i << \" = \" << n * i << endl;\n    }\n    return 0;\n}\n",
+    "A counted for loop is the right tool when you know how many times to repeat. The loop variable doubles as the second factor.", 0, NULL, NULL },
+  { "Power of Two", "Loops", 1, 1, 6,
+    "Read an integer n (at least 1) and say whether it is a power of two (1, 2, 4, 8, 16, ...).",
+    "Input: one integer n >= 1.\nOutput: yes or no",
+    { { "1", "yes" },  { "2", "yes" },  { "6", "no" },  { "64", "yes" },  { "100", "no" },  { "1024", "yes" } },
+    { "A power of two can be halved again and again until you reach 1.", "While n is even, divide it by 2.", "When the loop stops, n must be exactly 1 for the answer to be yes." },
+    "print yes or no",
+    "#include <stdio.h>\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    while (n % 2 == 0) n /= 2;\n    puts(n == 1 ? \"yes\" : \"no\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    while (n % 2 == 0) n /= 2;\n    cout << (n == 1 ? \"yes\" : \"no\") << endl;\n    return 0;\n}\n",
+    "Strip every factor of 2. A number made only of 2s ends at 1; anything else keeps an odd factor above 1.", 0, NULL, NULL },
+  { "Collatz Steps", "Loops", 1, 1, 6,
+    "Start with a positive number n. If it is even, halve it; if it is odd, multiply by 3 and add 1. Repeat until you reach 1. Print how many steps it took.",
+    "Input: one integer n >= 1.\nOutput: the number of steps",
+    { { "1", "0" },  { "6", "8" },  { "27", "111" },  { "7", "16" },  { "2", "1" },  { "97", "118" } },
+    { "Keep a counter starting at 0.", "Loop while n != 1. Inside, choose between n / 2 and 3 * n + 1 using n % 2.", "Count one step per pass through the loop. Use long long because the values can grow large." },
+    "count the steps to reach 1",
+    "#include <stdio.h>\n\nint main(void) {\n    long long n;\n    int steps = 0;\n    scanf(\"%lld\", &n);\n    while (n != 1) {\n        if (n % 2 == 0) n /= 2;\n        else n = 3 * n + 1;\n        steps++;\n    }\n    printf(\"%d\\n\", steps);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    long long n;\n    int steps = 0;\n    cin >> n;\n    while (n != 1) {\n        if (n % 2 == 0) n /= 2;\n        else n = 3 * n + 1;\n        steps++;\n    }\n    cout << steps << endl;\n    return 0;\n}\n",
+    "A while loop is right when you do not know the number of repeats in advance. long long keeps the climbing values from overflowing.", 0, NULL, NULL },
+  { "Reverse Digits", "Loops", 1, 1, 6,
+    "Read a non-negative integer and print its digits in reverse order as a number. Leading zeros disappear, so 120 becomes 21.",
+    "Input: one integer n >= 0.\nOutput: the reversed number",
+    { { "123", "321" },  { "120", "21" },  { "0", "0" },  { "5", "5" },  { "1000", "1" },  { "9081", "1809" } },
+    { "Build the answer in a variable that starts at 0.", "Each pass: take the last digit with n % 10 and attach it with  rev = rev * 10 + digit.", "Then drop the last digit of n with n / 10 and repeat while n > 0." },
+    "print the reversed number",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, rev = 0;\n    scanf(\"%d\", &n);\n    while (n > 0) {\n        rev = rev * 10 + n % 10;\n        n /= 10;\n    }\n    printf(\"%d\\n\", rev);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, rev = 0;\n    cin >> n;\n    while (n > 0) {\n        rev = rev * 10 + n % 10;\n        n /= 10;\n    }\n    cout << rev << endl;\n    return 0;\n}\n",
+    "Multiplying the answer by 10 shifts it left one place, then the next digit is added on the right. Treating the result as a number is what drops the leading zeros.", 0, NULL, NULL },
+  { "Prime Counter", "Functions", 1, 2, 6,
+    "Read n and print how many prime numbers are less than or equal to n. Write an isPrime function to keep the code tidy.",
+    "Input: one integer n >= 1.\nOutput: the number of primes up to n",
+    { { "1", "0" },  { "2", "1" },  { "10", "4" },  { "30", "10" },  { "100", "25" },  { "7", "4" } },
+    { "Write int isPrime(int n) that returns 1 or 0. Remember 1 is not prime.", "A number is prime if no i from 2 up to sqrt(n) divides it. i * i <= n is a simple way to test the limit.", "In main, loop from 2 to n and add 1 to a counter whenever isPrime says yes." },
+    "count the primes up to n",
+    "#include <stdio.h>\n\nint isPrime(int n) {\n    if (n < 2) return 0;\n    for (int i = 2; i * i <= n; i++)\n        if (n % i == 0) return 0;\n    return 1;\n}\n\nint main(void) {\n    int n, count = 0;\n    scanf(\"%d\", &n);\n    for (int i = 2; i <= n; i++)\n        if (isPrime(i)) count++;\n    printf(\"%d\\n\", count);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nbool isPrime(int n) {\n    if (n < 2) return false;\n    for (int i = 2; i * i <= n; i++)\n        if (n % i == 0) return false;\n    return true;\n}\n\nint main() {\n    int n, count = 0;\n    cin >> n;\n    for (int i = 2; i <= n; i++)\n        if (isPrime(i)) count++;\n    cout << count << endl;\n    return 0;\n}\n",
+    "Splitting the test into its own function lets main stay a simple counting loop. Stopping at i * i <= n is enough because factors come in pairs.", 0, NULL, NULL },
+  { "Perfect Number", "Functions", 1, 2, 6,
+    "A perfect number equals the sum of its proper divisors (the divisors smaller than itself). 6 is perfect because 1 + 2 + 3 = 6. Read n and say whether it is perfect.",
+    "Input: one integer n >= 1.\nOutput: perfect or not perfect",
+    { { "6", "perfect" },  { "28", "perfect" },  { "12", "not perfect" },  { "1", "not perfect" },  { "496", "perfect" },  { "100", "not perfect" } },
+    { "Add up every i from 1 to n - 1 that divides n evenly.", "n % i == 0 tells you that i divides n.", "Compare the total with n. Note that 1 has no proper divisors, so its total is 0." },
+    "print perfect or not perfect",
+    "#include <stdio.h>\n\nint divisorSum(int n) {\n    int sum = 0;\n    for (int i = 1; i < n; i++)\n        if (n % i == 0) sum += i;\n    return sum;\n}\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    puts(divisorSum(n) == n ? \"perfect\" : \"not perfect\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint divisorSum(int n) {\n    int sum = 0;\n    for (int i = 1; i < n; i++)\n        if (n % i == 0) sum += i;\n    return sum;\n}\n\nint main() {\n    int n;\n    cin >> n;\n    cout << (divisorSum(n) == n ? \"perfect\" : \"not perfect\") << endl;\n    return 0;\n}\n",
+    "A helper that returns the divisor total makes the final check one readable comparison. Looping only up to n - 1 excludes the number itself.", 0, NULL, NULL },
+  { "Binary Convert", "Functions", 1, 2, 6,
+    "Read a non-negative integer and print it in binary (base 2) with no leading zeros. 0 prints as 0.",
+    "Input: one integer n >= 0.\nOutput: the binary digits",
+    { { "5", "101" },  { "0", "0" },  { "8", "1000" },  { "255", "11111111" },  { "1", "1" },  { "100", "1100100" } },
+    { "Dividing by 2 repeatedly and taking the remainder gives the bits, but from right to left.", "Store the remainders in an array as you go, then print them backwards.", "Handle n == 0 separately, since the loop would produce nothing." },
+    "print n in binary",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, bits[40], count = 0;\n    scanf(\"%d\", &n);\n    if (n == 0) { puts(\"0\"); return 0; }\n    while (n > 0) {\n        bits[count++] = n % 2;\n        n /= 2;\n    }\n    for (int i = count - 1; i >= 0; i--) printf(\"%d\", bits[i]);\n    printf(\"\\n\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, bits[40], count = 0;\n    cin >> n;\n    if (n == 0) { cout << \"0\" << endl; return 0; }\n    while (n > 0) {\n        bits[count++] = n % 2;\n        n /= 2;\n    }\n    for (int i = count - 1; i >= 0; i--) cout << bits[i];\n    cout << endl;\n    return 0;\n}\n",
+    "The remainders come out least-significant bit first, so they are stored and printed in reverse. A special case covers 0.", 0, NULL, NULL },
+  { "Caesar Shift", "Strings", 1, 2, 6,
+    "Read a lowercase word and a number k, then shift every letter forward k places in the alphabet, wrapping around from z back to a.",
+    "Input: a word of lowercase letters, then an integer k (0 to 25).\nOutput: the shifted word",
+    { { "abc 1", "bcd" },  { "xyz 3", "abc" },  { "hello 0", "hello" },  { "zebra 13", "mroen" },  { "a 25", "z" },  { "valley 5", "afqqjd" } },
+    { "Letters are numbers: 'a' + 1 is 'b'. Subtract 'a' to get a position from 0 to 25.", "Add k to the position, then use % 26 so it wraps around.", "Add 'a' back to get the letter: word[i] = 'a' + (word[i] - 'a' + k) % 26;" },
+    "print the shifted word",
+    "#include <stdio.h>\n\nint main(void) {\n    char word[100];\n    int k;\n    scanf(\"%99s %d\", word, &k);\n    for (int i = 0; word[i] != '\\0'; i++)\n        word[i] = 'a' + (word[i] - 'a' + k) % 26;\n    printf(\"%s\\n\", word);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\nusing namespace std;\n\nint main() {\n    string word;\n    int k;\n    cin >> word >> k;\n    for (size_t i = 0; i < word.size(); i++)\n        word[i] = 'a' + (word[i] - 'a' + k) % 26;\n    cout << word << endl;\n    return 0;\n}\n",
+    "Characters are small integers, so letter arithmetic works. Subtracting 'a' turns a letter into 0..25 and % 26 handles the wrap-around.", 0, NULL, NULL },
+  { "Anagram Check", "Strings", 1, 2, 6,
+    "Two words are anagrams if they use exactly the same letters the same number of times. Read two lowercase words and say whether they are anagrams.",
+    "Input: two lowercase words.\nOutput: yes or no",
+    { { "listen silent", "yes" },  { "abc abd", "no" },  { "a a", "yes" },  { "ab abc", "no" },  { "aabb abab", "yes" },  { "hello world", "no" } },
+    { "Make an array of 26 counters, one per letter.", "Add 1 for every letter of the first word and subtract 1 for every letter of the second.", "If every counter ends at 0 they match. Different lengths can never match." },
+    "print yes or no",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    char a[100], b[100];\n    int count[26] = { 0 };\n    scanf(\"%99s %99s\", a, b);\n    if (strlen(a) != strlen(b)) { puts(\"no\"); return 0; }\n    for (int i = 0; a[i]; i++) {\n        count[a[i] - 'a']++;\n        count[b[i] - 'a']--;\n    }\n    for (int i = 0; i < 26; i++)\n        if (count[i] != 0) { puts(\"no\"); return 0; }\n    puts(\"yes\");\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\nusing namespace std;\n\nint main() {\n    string a, b;\n    int count[26] = { 0 };\n    cin >> a >> b;\n    if (a.size() != b.size()) { cout << \"no\" << endl; return 0; }\n    for (size_t i = 0; i < a.size(); i++) {\n        count[a[i] - 'a']++;\n        count[b[i] - 'a']--;\n    }\n    for (int i = 0; i < 26; i++)\n        if (count[i] != 0) { cout << \"no\" << endl; return 0; }\n    cout << \"yes\" << endl;\n    return 0;\n}\n",
+    "Counting letters beats trying every rearrangement. Adding for one word and subtracting for the other means a perfect match leaves every counter at zero.", 0, NULL, NULL },
+  { "Longest Word", "Strings", 1, 2, 6,
+    "Read a count n and then n words. Print the longest word. If several share the longest length, print the first one.",
+    "Input: n, then n words.\nOutput: the longest word",
+    { { "3\\ncat horse dog", "horse" },  { "1\\nhi", "hi" },  { "4\\nab cd ef gh", "ab" },  { "5\\nfarm snow barn cow hay", "farm" },  { "2\\nsun moon", "moon" },  { "3\\napple pear banana", "banana" } },
+    { "Read each word in a loop of n passes.", "Keep the best word so far and compare lengths with strlen (or .size()).", "Only replace the best word when the new one is strictly longer, so ties keep the earlier word." },
+    "print the longest word",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int n;\n    char word[100], best[100] = \"\";\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) {\n        scanf(\"%99s\", word);\n        if (strlen(word) > strlen(best)) strcpy(best, word);\n    }\n    printf(\"%s\\n\", best);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\nusing namespace std;\n\nint main() {\n    int n;\n    string word, best = \"\";\n    cin >> n;\n    for (int i = 0; i < n; i++) {\n        cin >> word;\n        if (word.size() > best.size()) best = word;\n    }\n    cout << best << endl;\n    return 0;\n}\n",
+    "Keeping a running best is the pattern behind every maximum search. Using > (not >=) is what makes ties keep the first word.", 0, NULL, NULL },
+  { "Count Occurrences", "Arrays", 0, 3, 6,
+    "Read n numbers and then a value x. Print how many times x appears among the numbers.",
+    "Input: n, then n integers, then x.\nOutput: the number of times x appears",
+    { { "5\\n1 2 2 3 2\\n2", "3" },  { "3\\n4 5 6\\n7", "0" },  { "1\\n9\\n9", "1" },  { "6\\n1 1 1 1 1 1\\n1", "6" },  { "4\\n-1 -1 2 -1\\n-1", "3" },  { "5\\n10 20 30 40 50\\n30", "1" } },
+    { "Store the numbers in an array: int a[100];", "Read x after the array is filled.", "Loop over the array and add 1 to a counter whenever a[i] == x." },
+    "count how many times x appears",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, a[100], x, count = 0;\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    scanf(\"%d\", &x);\n    for (int i = 0; i < n; i++)\n        if (a[i] == x) count++;\n    printf(\"%d\\n\", count);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100], x, count = 0;\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    cin >> x;\n    for (int i = 0; i < n; i++)\n        if (a[i] == x) count++;\n    cout << count << endl;\n    return 0;\n}\n",
+    "Fill the array first, then make a second pass that tests each element. The same fill-then-scan shape solves most array problems.", 0, NULL, NULL },
+  { "Rotate Right", "Arrays", 1, 3, 6,
+    "Read n numbers and a count k. Rotate the array to the right by k places (the last element moves to the front, k times) and print it. k can be larger than n.",
+    "Input: n, then n integers, then k.\nOutput: the rotated array on one line, separated by spaces",
+    { { "5\\n1 2 3 4 5\\n2", "4 5 1 2 3" },  { "4\\n7 8 9 10\\n0", "7 8 9 10" },  { "3\\n1 2 3\\n4", "3 1 2" },  { "1\\n7\\n10", "7" },  { "4\\n1 2 3 4\\n4", "1 2 3 4" },  { "6\\n10 20 30 40 50 60\\n1", "60 10 20 30 40 50" } },
+    { "Rotating by n puts everything back where it started, so only k % n matters.", "After rotating right by k, the element that ends up at index i came from index (i - k + n) % n.", "Print b[i] = a[(i - k + n) % n] for each i, after reducing k with k %= n." },
+    "print the array rotated right by k",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, a[100], k;\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    scanf(\"%d\", &k);\n    k %= n;\n    for (int i = 0; i < n; i++) {\n        printf(\"%d\", a[(i - k + n) % n]);\n        if (i < n - 1) printf(\" \");\n    }\n    printf(\"\\n\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100], k;\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    cin >> k;\n    k %= n;\n    for (int i = 0; i < n; i++) {\n        cout << a[(i - k + n) % n];\n        if (i < n - 1) cout << \" \";\n    }\n    cout << endl;\n    return 0;\n}\n",
+    "Modulo arithmetic turns rotation into an index formula, so no shifting loop is needed. Reducing k % n first handles large k.", 0, NULL, NULL },
+  { "Remove Duplicates", "Arrays", 1, 3, 6,
+    "Read n numbers and print each distinct value once, in the order it first appeared.",
+    "Input: n, then n integers.\nOutput: the distinct values on one line, separated by spaces",
+    { { "6\\n1 2 1 3 2 4", "1 2 3 4" },  { "3\\n5 5 5", "5" },  { "4\\n1 2 3 4", "1 2 3 4" },  { "1\\n0", "0" },  { "7\\n3 3 1 1 2 2 3", "3 1 2" },  { "5\\n-1 0 -1 0 1", "-1 0 1" } },
+    { "Keep a second array of the values you have already printed.", "For each new number, search the second array. If it is not there, print it and add it.", "Use a small flag variable: seen = 0, set it to 1 if you find a match." },
+    "print each value once, in first-seen order",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, a[100], out[100], m = 0;\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    for (int i = 0; i < n; i++) {\n        int seen = 0;\n        for (int j = 0; j < m; j++)\n            if (out[j] == a[i]) seen = 1;\n        if (!seen) out[m++] = a[i];\n    }\n    for (int i = 0; i < m; i++) {\n        printf(\"%d\", out[i]);\n        if (i < m - 1) printf(\" \");\n    }\n    printf(\"\\n\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100], out[100], m = 0;\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    for (int i = 0; i < n; i++) {\n        bool seen = false;\n        for (int j = 0; j < m; j++)\n            if (out[j] == a[i]) seen = true;\n        if (!seen) out[m++] = a[i];\n    }\n    for (int i = 0; i < m; i++) {\n        cout << out[i];\n        if (i < m - 1) cout << \" \";\n    }\n    cout << endl;\n    return 0;\n}\n",
+    "A nested loop checks each value against the ones already kept. It is O(n squared), fine for small inputs; a hash set would be the next idea for large ones.", 0, NULL, NULL },
+  { "Two Sum", "Arrays", 1, 3, 6,
+    "Read n numbers and a target. Find the first pair of positions i < j whose values add up to the target and print them. Search i from the left, and for each i try j from the left too. Print none if there is no pair.",
+    "Input: n, then n integers, then the target.\nOutput: two indices (counting from 0), or none",
+    { { "4\\n2 7 11 15\\n9", "0 1" },  { "3\\n3 2 4\\n6", "1 2" },  { "2\\n3 3\\n6", "0 1" },  { "3\\n1 2 3\\n10", "none" },  { "5\\n1 5 3 5 7\\n10", "1 3" },  { "1\\n5\\n5", "none" } },
+    { "Try every pair: an outer loop for i and an inner loop for j starting at i + 1.", "When a[i] + a[j] == target, print i and j and stop.", "If both loops finish without a match, print none. A flag or an early return both work." },
+    "print the indices of the first pair, or none",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, a[100], target;\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    scanf(\"%d\", &target);\n    for (int i = 0; i < n; i++)\n        for (int j = i + 1; j < n; j++)\n            if (a[i] + a[j] == target) {\n                printf(\"%d %d\\n\", i, j);\n                return 0;\n            }\n    puts(\"none\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100], target;\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    cin >> target;\n    for (int i = 0; i < n; i++)\n        for (int j = i + 1; j < n; j++)\n            if (a[i] + a[j] == target) {\n                cout << i << \" \" << j << endl;\n                return 0;\n            }\n    cout << \"none\" << endl;\n    return 0;\n}\n",
+    "Starting j at i + 1 avoids pairing an element with itself and avoids counting each pair twice. Returning at the first match gives the earliest pair.", 0, NULL, NULL },
+  { "Max Subarray Sum", "Arrays", 2, 3, 6,
+    "Read n numbers (they may be negative). Find the contiguous run of at least one number with the largest sum and print that sum.",
+    "Input: n, then n integers.\nOutput: the largest sum of a contiguous run",
+    { { "9\\n-2 1 -3 4 -1 2 1 -5 4", "6" },  { "1\\n-5", "-5" },  { "3\\n-3 -1 -2", "-1" },  { "5\\n1 2 3 4 5", "15" },  { "4\\n5 -9 6 -2", "6" },  { "5\\n2 -1 2 -1 2", "4" } },
+    { "Brute force works: try every start and every end and add up each run. It is slow for big inputs but correct.", "A faster way: walk once, keeping the best sum of a run ending at the current element.", "At each element: cur = max(a[i], cur + a[i]); best = max(best, cur). Start both from a[0], not 0, so all-negative input works." },
+    "print the largest contiguous sum",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, a[100];\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    int cur = a[0], best = a[0];\n    for (int i = 1; i < n; i++) {\n        cur = (a[i] > cur + a[i]) ? a[i] : cur + a[i];\n        if (cur > best) best = cur;\n    }\n    printf(\"%d\\n\", best);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100];\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    int cur = a[0], best = a[0];\n    for (int i = 1; i < n; i++) {\n        cur = max(a[i], cur + a[i]);\n        best = max(best, cur);\n    }\n    cout << best << endl;\n    return 0;\n}\n",
+    "This is Kadane's algorithm. A run ending here either extends the previous run or starts fresh at this element, whichever is larger. Starting from a[0] keeps all-negative input correct.", 0, NULL, NULL },
+  { "Postfix Calculator", "Stacks", 2, 4, 6,
+    "Postfix notation writes the operator after its numbers: 2 3 + means 2 + 3. Read n tokens (non-negative integers and the operators + - *) and print the result.",
+    "Input: n, then n tokens separated by spaces.\nOutput: the value of the expression",
+    { { "5\\n2 3 + 4 *", "20" },  { "3\\n5 1 -", "4" },  { "1\\n7", "7" },  { "7\\n2 3 4 * + 5 -", "9" },  { "5\\n10 2 8 * +", "26" },  { "3\\n1 9 -", "-8" } },
+    { "Use a stack. A number is pushed. An operator pops two values, combines them and pushes the result.", "Pop the right-hand value first (b), then the left-hand value (a), so a - b has the right order.", "After all tokens, the single value left on the stack is the answer." },
+    "evaluate the postfix expression",
+    "#include <stdio.h>\n#include <ctype.h>\n#include <stdlib.h>\n\nint main(void) {\n    int n, stack[100], top = 0;\n    char tok[20];\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) {\n        scanf(\"%19s\", tok);\n        if (isdigit(tok[0])) {\n            stack[top++] = atoi(tok);\n        } else {\n            int b = stack[--top];\n            int a = stack[--top];\n            if (tok[0] == '+') stack[top++] = a + b;\n            else if (tok[0] == '-') stack[top++] = a - b;\n            else stack[top++] = a * b;\n        }\n    }\n    printf(\"%d\\n\", stack[0]);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <stack>\n#include <string>\n#include <cstdlib>\nusing namespace std;\n\nint main() {\n    int n;\n    stack<int> st;\n    string tok;\n    cin >> n;\n    for (int i = 0; i < n; i++) {\n        cin >> tok;\n        if (isdigit(tok[0])) {\n            st.push(atoi(tok.c_str()));\n        } else {\n            int b = st.top(); st.pop();\n            int a = st.top(); st.pop();\n            if (tok[0] == '+') st.push(a + b);\n            else if (tok[0] == '-') st.push(a - b);\n            else st.push(a * b);\n        }\n    }\n    cout << st.top() << endl;\n    return 0;\n}\n",
+    "A stack remembers operands until an operator needs them. The most recent two values are always the right ones, which is why postfix needs no brackets.", 0, NULL, NULL },
+  { "Fix: Average of Three", "Input / Output", 0, 0, 6,
+    "This program should print the average of three integers with one decimal place, but some answers are wrong. For 1 2 4 it prints 2.0 instead of 2.3. Find the bug and fix it.",
+    "Input: three integers a b c.\nOutput: their average with exactly 1 decimal place",
+    { { "1 2 4", "2.3" },  { "3 3 3", "3.0" },  { "1 1 2", "1.3" },  { "10 20 30", "20.0" },  { "-1 -2 -4", "-2.3" },  { "0 0 1", "0.3" } },
+    { "The sum is an int, and so is 3. What does int divided by int give?", "Integer division throws the fraction away before the result ever reaches the double.", "Make one side a double: (a + b + c) / 3.0" },
+    "fix the average",
+    "#include <stdio.h>\n\nint main(void) {\n    int a, b, c;\n    scanf(\"%d %d %d\", &a, &b, &c);\n    double avg = (a + b + c) / 3.0;\n    printf(\"%.1f\\n\", avg);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int a, b, c;\n    cin >> a >> b >> c;\n    double avg = (a + b + c) / 3.0;\n    cout << fixed << setprecision(1) << avg << endl;\n    return 0;\n}\n",
+    "(a + b + c) / 3 is int / int, so the fraction is discarded before it is stored in the double. Dividing by 3.0 makes the whole expression floating point.", 1, "#include <stdio.h>\n\nint main(void) {\n    int a, b, c;\n    scanf(\"%d %d %d\", &a, &b, &c);\n    double avg = (a + b + c) / 3;\n    printf(\"%.1f\\n\", avg);\n    return 0;\n}\n", "#include <iostream>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int a, b, c;\n    cin >> a >> b >> c;\n    double avg = (a + b + c) / 3;\n    cout << fixed << setprecision(1) << avg << endl;\n    return 0;\n}\n" },
+  { "Fix: Zero Check", "Conditionals", 0, 1, 5,
+    "This program should print zero when the number is 0 and not zero for anything else. It never says zero. Find the bug and fix it.",
+    "Input: one integer n.\nOutput: zero or not zero",
+    { { "0", "zero" },  { "5", "not zero" },  { "-2", "not zero" },  { "100", "not zero" },  { "0", "zero" } },
+    { "Read the if line very carefully, one symbol at a time.", "A single = assigns a value. It does not compare.", "Use == to compare: if (n == 0)." },
+    "fix the comparison",
+    "#include <stdio.h>\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    if (n == 0) puts(\"zero\");\n    else puts(\"not zero\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    if (n == 0) cout << \"zero\" << endl;\n    else cout << \"not zero\" << endl;\n    return 0;\n}\n",
+    "n = 0 assigns 0 to n and the value of that expression is 0, which counts as false. So the else branch always runs. Comparison needs ==. Compiling with -Wall warns about exactly this.", 1, "#include <stdio.h>\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    if (n = 0) puts(\"zero\");\n    else puts(\"not zero\");\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    if (n = 0) cout << \"zero\" << endl;\n    else cout << \"not zero\" << endl;\n    return 0;\n}\n" },
+  { "Fix: Ticket Price", "Conditionals", 0, 1, 6,
+    "Tickets cost 0 for under 5, 8 for ages 5 to 17, 15 for ages 18 to 64 and 10 for 65 and over. A 5-year-old is being charged nothing. Find the bug and fix it.",
+    "Input: one integer age.\nOutput: the ticket price",
+    { { "3", "0" },  { "5", "8" },  { "17", "8" },  { "18", "15" },  { "64", "15" },  { "65", "10" } },
+    { "Test the exact boundary values: 4, 5, 17, 18, 64 and 65.", "Look at which comparison is used for the free tickets. Is a 5-year-old under 5?", "Under 5 means age < 5, not age <= 5." },
+    "fix the boundary",
+    "#include <stdio.h>\n\nint main(void) {\n    int age, price;\n    scanf(\"%d\", &age);\n    if (age < 5) price = 0;\n    else if (age < 18) price = 8;\n    else if (age < 65) price = 15;\n    else price = 10;\n    printf(\"%d\\n\", price);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int age, price;\n    cin >> age;\n    if (age < 5) price = 0;\n    else if (age < 18) price = 8;\n    else if (age < 65) price = 15;\n    else price = 10;\n    cout << price << endl;\n    return 0;\n}\n",
+    "< versus <= is the classic off-by-one at a boundary. Always test the values on each side of every cut-off.", 1, "#include <stdio.h>\n\nint main(void) {\n    int age, price;\n    scanf(\"%d\", &age);\n    if (age <= 5) price = 0;\n    else if (age < 18) price = 8;\n    else if (age < 65) price = 15;\n    else price = 10;\n    printf(\"%d\\n\", price);\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nint main() {\n    int age, price;\n    cin >> age;\n    if (age <= 5) price = 0;\n    else if (age < 18) price = 8;\n    else if (age < 65) price = 15;\n    else price = 10;\n    cout << price << endl;\n    return 0;\n}\n" },
+  { "Fix: Day Name", "Conditionals", 1, 1, 6,
+    "This program should print the name of day 1, 2 or 3, and Another day for anything else. For day 1 it prints several lines. Find the bug and fix it.",
+    "Input: one integer d.\nOutput: Monday, Tuesday, Wednesday or Another day",
+    { { "1", "Monday" },  { "3", "Wednesday" },  { "4", "Another day" },  { "2", "Tuesday" },  { "7", "Another day" },  { "0", "Another day" } },
+    { "Run it with 1 and look at which lines appear. It keeps going past the matching case.", "A switch jumps to the matching case and then runs every line below it until something stops it.", "End each case with break;" },
+    "fix the switch",
+    "#include <stdio.h>\n\nint main(void) {\n    int d;\n    scanf(\"%d\", &d);\n    switch (d) {\n        case 1: puts(\"Monday\"); break;\n        case 2: puts(\"Tuesday\"); break;\n        case 3: puts(\"Wednesday\"); break;\n        default: puts(\"Another day\");\n    }\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int d;\n    cin >> d;\n    switch (d) {\n        case 1: cout << \"Monday\" << endl; break;\n        case 2: cout << \"Tuesday\" << endl; break;\n        case 3: cout << \"Wednesday\" << endl; break;\n        default: cout << \"Another day\" << endl;\n    }\n    return 0;\n}\n",
+    "switch cases fall through: after the matching case runs, execution continues into the next one unless a break stops it. Forgetting break is one of the most common C and C++ bugs.", 1, "#include <stdio.h>\n\nint main(void) {\n    int d;\n    scanf(\"%d\", &d);\n    switch (d) {\n        case 1: puts(\"Monday\");\n        case 2: puts(\"Tuesday\");\n        case 3: puts(\"Wednesday\");\n        default: puts(\"Another day\");\n    }\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nint main() {\n    int d;\n    cin >> d;\n    switch (d) {\n        case 1: cout << \"Monday\" << endl;\n        case 2: cout << \"Tuesday\" << endl;\n        case 3: cout << \"Wednesday\" << endl;\n        default: cout << \"Another day\" << endl;\n    }\n    return 0;\n}\n" },
+  { "Fix: Sum of Evens", "Loops", 0, 1, 6,
+    "This program should add up the even numbers from 1 to n, including n. For n = 10 it should print 30 but prints 20. Find the bug and fix it.",
+    "Input: one integer n >= 0.\nOutput: the sum of the even numbers from 1 to n",
+    { { "10", "30" },  { "9", "20" },  { "1", "0" },  { "2", "2" },  { "100", "2550" },  { "0", "0" } },
+    { "Try n = 10 by hand: 2 + 4 + 6 + 8 + 10. Which number is missing from the program's total?", "Look at the loop's stopping condition.", "i < n stops before n. Use i <= n." },
+    "fix the loop",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, sum = 0;\n    scanf(\"%d\", &n);\n    for (int i = 1; i <= n; i++)\n        if (i % 2 == 0) sum += i;\n    printf(\"%d\\n\", sum);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, sum = 0;\n    cin >> n;\n    for (int i = 1; i <= n; i++)\n        if (i % 2 == 0) sum += i;\n    cout << sum << endl;\n    return 0;\n}\n",
+    "The loop stops one number early because < excludes n itself. When the problem says 'including n', the condition needs <=. Note n = 9 still passed: n is odd so the missing number did not matter.", 1, "#include <stdio.h>\n\nint main(void) {\n    int n, sum = 0;\n    scanf(\"%d\", &n);\n    for (int i = 1; i < n; i++)\n        if (i % 2 == 0) sum += i;\n    printf(\"%d\\n\", sum);\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, sum = 0;\n    cin >> n;\n    for (int i = 1; i < n; i++)\n        if (i % 2 == 0) sum += i;\n    cout << sum << endl;\n    return 0;\n}\n" },
+  { "Fix: Count Down", "Loops", 0, 1, 5,
+    "This program should print n, n-1, ... 1 and then Liftoff!. It runs forever instead. Find the bug and fix it.",
+    "Input: one integer n >= 1.\nOutput: the numbers from n down to 1, one per line, then Liftoff!",
+    { { "3", "3\n2\n1\nLiftoff!" },  { "1", "1\nLiftoff!" },  { "5", "5\n4\n3\n2\n1\nLiftoff!" },  { "2", "2\n1\nLiftoff!" },  { "4", "4\n3\n2\n1\nLiftoff!" } },
+    { "A loop only ends when its condition becomes false. What does the loop condition depend on?", "Does anything inside the loop change n?", "Add n--; at the end of the loop body." },
+    "fix the endless loop",
+    "#include <stdio.h>\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    while (n > 0) {\n        printf(\"%d\\n\", n);\n        n--;\n    }\n    puts(\"Liftoff!\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    while (n > 0) {\n        cout << n << endl;\n        n--;\n    }\n    cout << \"Liftoff!\" << endl;\n    return 0;\n}\n",
+    "Nothing inside the loop ever changes n, so n > 0 stays true forever. Every while loop needs a statement that moves it toward its stopping condition.", 1, "#include <stdio.h>\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    while (n > 0) {\n        printf(\"%d\\n\", n);\n    }\n    puts(\"Liftoff!\");\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    while (n > 0) {\n        cout << n << endl;\n    }\n    cout << \"Liftoff!\" << endl;\n    return 0;\n}\n" },
+  { "Fix: Count Positives", "Loops", 1, 1, 6,
+    "This program should count how many of the n numbers are positive (greater than 0). It counts zeros too. Find the bug and fix it.",
+    "Input: n, then n integers.\nOutput: how many are greater than 0",
+    { { "5\\n1 -2 3 0 4", "3" },  { "3\\n-1 -2 -3", "0" },  { "4\\n0 0 0 0", "0" },  { "1\\n7", "1" },  { "6\\n5 5 -5 -5 0 1", "3" },  { "2\\n0 9", "1" } },
+    { "Is zero a positive number?", "Check the comparison inside the loop.", "x >= 0 includes zero. Positive means x > 0." },
+    "fix the comparison",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, x, count = 0;\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) {\n        scanf(\"%d\", &x);\n        if (x > 0) count++;\n    }\n    printf(\"%d\\n\", count);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, x, count = 0;\n    cin >> n;\n    for (int i = 0; i < n; i++) {\n        cin >> x;\n        if (x > 0) count++;\n    }\n    cout << count << endl;\n    return 0;\n}\n",
+    "Zero is neither positive nor negative, so the test must be x > 0. Edge values like 0 are exactly where this kind of bug hides.", 1, "#include <stdio.h>\n\nint main(void) {\n    int n, x, count = 0;\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) {\n        scanf(\"%d\", &x);\n        if (x >= 0) count++;\n    }\n    printf(\"%d\\n\", count);\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, x, count = 0;\n    cin >> n;\n    for (int i = 0; i < n; i++) {\n        cin >> x;\n        if (x >= 0) count++;\n    }\n    cout << count << endl;\n    return 0;\n}\n" },
+  { "Fix: Vowel Counter", "Strings", 1, 2, 6,
+    "This program should count the vowels (a, e, i, o, u in either case) in a word. It works on lowercase words but misses capital vowels. Find the bug and fix it.",
+    "Input: one word.\nOutput: the number of vowels",
+    { { "Education", "5" },  { "sky", "0" },  { "banana", "3" },  { "AEIOU", "5" },  { "rhythm", "0" },  { "Queue", "4" } },
+    { "Run it with AEIOU. What does it print and why?", "The comparisons only check lowercase letters.", "Convert each letter with tolower() before testing, or test the uppercase vowels too." },
+    "count vowels in any case",
+    "#include <stdio.h>\n#include <ctype.h>\n\nint main(void) {\n    char w[100];\n    int count = 0;\n    scanf(\"%99s\", w);\n    for (int i = 0; w[i]; i++) {\n        char c = tolower(w[i]);\n        if (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u') count++;\n    }\n    printf(\"%d\\n\", count);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <cctype>\nusing namespace std;\n\nint main() {\n    string w;\n    int count = 0;\n    cin >> w;\n    for (size_t i = 0; i < w.size(); i++) {\n        char c = tolower(w[i]);\n        if (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u') count++;\n    }\n    cout << count << endl;\n    return 0;\n}\n",
+    "'A' and 'a' are different characters. Normalising the case with tolower() before comparing is simpler and safer than listing both cases.", 1, "#include <stdio.h>\n#include <ctype.h>\n\nint main(void) {\n    char w[100];\n    int count = 0;\n    scanf(\"%99s\", w);\n    for (int i = 0; w[i]; i++) {\n        char c = w[i];\n        if (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u') count++;\n    }\n    printf(\"%d\\n\", count);\n    return 0;\n}\n", "#include <iostream>\n#include <string>\n#include <cctype>\nusing namespace std;\n\nint main() {\n    string w;\n    int count = 0;\n    cin >> w;\n    for (size_t i = 0; i < w.size(); i++) {\n        char c = w[i];\n        if (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u') count++;\n    }\n    cout << count << endl;\n    return 0;\n}\n" },
+  { "Fix: Palindrome", "Strings", 2, 2, 6,
+    "This program should say whether a word reads the same forwards and backwards. It answers no even for level. Find the bug and fix it.",
+    "Input: one word.\nOutput: yes or no",
+    { { "level", "yes" },  { "hello", "no" },  { "a", "yes" },  { "abba", "yes" },  { "ab", "no" },  { "racecar", "yes" } },
+    { "Trace it by hand with a short palindrome such as aba. What is compared on the first pass?", "A word of length len has valid indices 0 to len - 1.", "The mirror of index i is len - 1 - i, not len - i." },
+    "fix the mirror index",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    char s[100];\n    scanf(\"%99s\", s);\n    int len = (int)strlen(s), ok = 1;\n    for (int i = 0; i < len / 2; i++)\n        if (s[i] != s[len - 1 - i]) ok = 0;\n    puts(ok ? \"yes\" : \"no\");\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\nusing namespace std;\n\nint main() {\n    string s;\n    cin >> s;\n    int len = (int)s.size(), ok = 1;\n    for (int i = 0; i < len / 2; i++)\n        if (s[i] != s[len - 1 - i]) ok = 0;\n    cout << (ok ? \"yes\" : \"no\") << endl;\n    return 0;\n}\n",
+    "With len characters the last index is len - 1. s[len] is the string terminator, so the first comparison was always against the wrong character. Off-by-one errors with indices are everywhere in array and string code.", 1, "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    char s[100];\n    scanf(\"%99s\", s);\n    int len = (int)strlen(s), ok = 1;\n    for (int i = 0; i < len / 2; i++)\n        if (s[i] != s[len - i]) ok = 0;\n    puts(ok ? \"yes\" : \"no\");\n    return 0;\n}\n", "#include <iostream>\n#include <string>\nusing namespace std;\n\nint main() {\n    string s;\n    cin >> s;\n    int len = (int)s.size(), ok = 1;\n    for (int i = 0; i < len / 2; i++)\n        if (s[i] != s[len - i]) ok = 0;\n    cout << (ok ? \"yes\" : \"no\") << endl;\n    return 0;\n}\n" },
+  { "Fix: Array Sum", "Arrays", 0, 3, 6,
+    "This program should print the sum of n numbers. It gives a total that is too small. Find the bug and fix it.",
+    "Input: n, then n integers.\nOutput: their sum",
+    { { "3\\n1 2 3", "6" },  { "1\\n10", "10" },  { "4\\n5 5 5 5", "20" },  { "2\\n-3 3", "0" },  { "5\\n1 1 1 1 1", "5" },  { "3\\n0 0 7", "7" } },
+    { "Print the array index each time round the loop. Where does it start?", "Array positions are numbered from 0, not 1.", "Start the loop at i = 0." },
+    "fix the loop start",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, a[100], sum = 0;\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    for (int i = 0; i < n; i++) sum += a[i];\n    printf(\"%d\\n\", sum);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100], sum = 0;\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    for (int i = 0; i < n; i++) sum += a[i];\n    cout << sum << endl;\n    return 0;\n}\n",
+    "The first element lives at index 0. Starting the adding loop at 1 silently skips it. The test 0 0 7 still passed because the skipped value was 0.", 1, "#include <stdio.h>\n\nint main(void) {\n    int n, a[100], sum = 0;\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    for (int i = 1; i < n; i++) sum += a[i];\n    printf(\"%d\\n\", sum);\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100], sum = 0;\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    for (int i = 1; i < n; i++) sum += a[i];\n    cout << sum << endl;\n    return 0;\n}\n" },
+  { "Fix: Smallest Number", "Arrays", 0, 3, 6,
+    "This program should print the smallest of n numbers. It prints 0 when every number is positive. Find the bug and fix it.",
+    "Input: n, then n integers.\nOutput: the smallest number",
+    { { "3\\n5 2 8", "2" },  { "3\\n-5 2 8", "-5" },  { "1\\n7", "7" },  { "4\\n10 20 30 40", "10" },  { "2\\n-1 -2", "-2" },  { "5\\n3 3 3 3 3", "3" } },
+    { "What value does the minimum start with, and is it really one of the numbers?", "If nothing in the array is smaller than 0, 0 stays as the answer.", "Start from the first element: int min = a[0];" },
+    "fix the starting value",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, a[100];\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    int min = a[0];\n    for (int i = 1; i < n; i++)\n        if (a[i] < min) min = a[i];\n    printf(\"%d\\n\", min);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100];\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    int min = a[0];\n    for (int i = 1; i < n; i++)\n        if (a[i] < min) min = a[i];\n    cout << min << endl;\n    return 0;\n}\n",
+    "A running minimum must start as a real element, not an invented value like 0. Starting at a[0] is correct for any input, positive or negative.", 1, "#include <stdio.h>\n\nint main(void) {\n    int n, a[100];\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    int min = 0;\n    for (int i = 0; i < n; i++)\n        if (a[i] < min) min = a[i];\n    printf(\"%d\\n\", min);\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100];\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    int min = 0;\n    for (int i = 0; i < n; i++)\n        if (a[i] < min) min = a[i];\n    cout << min << endl;\n    return 0;\n}\n" },
+  { "Fix: Print Reversed", "Arrays", 1, 3, 6,
+    "This program should print the numbers in reverse order. The last number it should print (the first of the input) is missing. Find the bug and fix it.",
+    "Input: n, then n integers.\nOutput: the numbers in reverse, separated by spaces",
+    { { "3\\n1 2 3", "3 2 1" },  { "1\\n5", "5" },  { "4\\n9 8 7 6", "6 7 8 9" },  { "2\\n0 1", "1 0" },  { "5\\n1 2 3 4 5", "5 4 3 2 1" },  { "6\\n-1 0 1 -2 0 2", "2 0 -2 1 0 -1" } },
+    { "Count how many numbers it prints for 3 inputs.", "Look at the loop condition, which decides when the counting down stops.", "i > 0 stops before index 0. Use i >= 0." },
+    "fix the loop bound",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, a[100];\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    for (int i = n - 1; i >= 0; i--) {\n        printf(\"%d\", a[i]);\n        if (i > 0) printf(\" \");\n    }\n    printf(\"\\n\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100];\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    for (int i = n - 1; i >= 0; i--) {\n        cout << a[i];\n        if (i > 0) cout << \" \";\n    }\n    cout << endl;\n    return 0;\n}\n",
+    "Counting down to index 0 inclusive needs >=. With > the loop ends one step early and never touches a[0].", 1, "#include <stdio.h>\n\nint main(void) {\n    int n, a[100];\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    for (int i = n - 1; i > 0; i--) {\n        printf(\"%d\", a[i]);\n        if (i > 0) printf(\" \");\n    }\n    printf(\"\\n\");\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100];\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    for (int i = n - 1; i > 0; i--) {\n        cout << a[i];\n        if (i > 0) cout << \" \";\n    }\n    cout << endl;\n    return 0;\n}\n" },
+  { "Fix: Sort Ascending", "Arrays", 1, 3, 6,
+    "This selection sort should print the numbers in ascending order, but the output is the same as the input. Find the bug and fix it.",
+    "Input: n, then n integers.\nOutput: the numbers sorted from smallest to largest",
+    { { "5\\n5 2 4 1 3", "1 2 3 4 5" },  { "3\\n1 2 3", "1 2 3" },  { "1\\n9", "9" },  { "4\\n4 3 2 1", "1 2 3 4" },  { "6\\n3 -1 0 3 -5 2", "-5 -1 0 2 3 3" },  { "2\\n8 7", "7 8" } },
+    { "Selection sort finds the position of the smallest remaining value. Read the line that records that position.", "Which variable is being stored in min, and which one should be?", "if (a[j] < a[min]) min = j;  (it stores i instead of j)" },
+    "fix the index typo",
+    "#include <stdio.h>\n\nint main(void) {\n    int n, a[100];\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    for (int i = 0; i < n - 1; i++) {\n        int min = i;\n        for (int j = i + 1; j < n; j++)\n            if (a[j] < a[min]) min = j;\n        int t = a[i]; a[i] = a[min]; a[min] = t;\n    }\n    for (int i = 0; i < n; i++) {\n        printf(\"%d\", a[i]);\n        if (i < n - 1) printf(\" \");\n    }\n    printf(\"\\n\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100];\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    for (int i = 0; i < n - 1; i++) {\n        int min = i;\n        for (int j = i + 1; j < n; j++)\n            if (a[j] < a[min]) min = j;\n        int t = a[i]; a[i] = a[min]; a[min] = t;\n    }\n    for (int i = 0; i < n; i++) {\n        cout << a[i];\n        if (i < n - 1) cout << \" \";\n    }\n    cout << endl;\n    return 0;\n}\n",
+    "One wrong letter, i instead of j, means min never moves off i, so every swap swaps an element with itself. Single-character typos like this are best found by stepping through the code and watching the variables.", 1, "#include <stdio.h>\n\nint main(void) {\n    int n, a[100];\n    scanf(\"%d\", &n);\n    for (int i = 0; i < n; i++) scanf(\"%d\", &a[i]);\n    for (int i = 0; i < n - 1; i++) {\n        int min = i;\n        for (int j = i + 1; j < n; j++)\n            if (a[j] < a[min]) min = i;\n        int t = a[i]; a[i] = a[min]; a[min] = t;\n    }\n    for (int i = 0; i < n; i++) {\n        printf(\"%d\", a[i]);\n        if (i < n - 1) printf(\" \");\n    }\n    printf(\"\\n\");\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n, a[100];\n    cin >> n;\n    for (int i = 0; i < n; i++) cin >> a[i];\n    for (int i = 0; i < n - 1; i++) {\n        int min = i;\n        for (int j = i + 1; j < n; j++)\n            if (a[j] < a[min]) min = i;\n        int t = a[i]; a[i] = a[min]; a[min] = t;\n    }\n    for (int i = 0; i < n; i++) {\n        cout << a[i];\n        if (i < n - 1) cout << \" \";\n    }\n    cout << endl;\n    return 0;\n}\n" },
+  { "Fix: Swap Values", "Functions", 1, 2, 6,
+    "This program should read a and b and print them swapped, but it prints them unchanged. Find the bug and fix it.",
+    "Input: two integers a b.\nOutput: b a",
+    { { "1 2", "2 1" },  { "5 5", "5 5" },  { "-3 8", "8 -3" },  { "0 100", "100 0" },  { "7 -7", "-7 7" },  { "42 1", "1 42" } },
+    { "Add a printf inside swapNums to look at x and y. Do they swap there?", "They swap inside the function, but the function only received copies of a and b.", "In C pass addresses (swapNums(&a, &b) with int *x, int *y). In C++ you can use references (int &x, int &y)." },
+    "make the swap reach main",
+    "#include <stdio.h>\n\nvoid swapNums(int *x, int *y) {\n    int t = *x;\n    *x = *y;\n    *y = t;\n}\n\nint main(void) {\n    int a, b;\n    scanf(\"%d %d\", &a, &b);\n    swapNums(&a, &b);\n    printf(\"%d %d\\n\", a, b);\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nvoid swapNums(int &x, int &y) {\n    int t = x;\n    x = y;\n    y = t;\n}\n\nint main() {\n    int a, b;\n    cin >> a >> b;\n    swapNums(a, b);\n    cout << a << \" \" << b << endl;\n    return 0;\n}\n",
+    "Arguments are passed by value: the function swaps its own copies and the caller never sees it. C fixes this with pointers, C++ can use references.", 1, "#include <stdio.h>\n\nvoid swapNums(int x, int y) {\n    int t = x;\n    x = y;\n    y = t;\n}\n\nint main(void) {\n    int a, b;\n    scanf(\"%d %d\", &a, &b);\n    swapNums(a, b);\n    printf(\"%d %d\\n\", a, b);\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nvoid swapNums(int x, int y) {\n    int t = x;\n    x = y;\n    y = t;\n}\n\nint main() {\n    int a, b;\n    cin >> a >> b;\n    swapNums(a, b);\n    cout << a << \" \" << b << endl;\n    return 0;\n}\n" },
+  { "Fix: GCD", "Functions", 1, 2, 6,
+    "This program uses Euclid's method to print the greatest common divisor of two numbers but always prints 0. Find the bug and fix it.",
+    "Input: two integers a b (a, b >= 0, not both 0).\nOutput: their greatest common divisor",
+    { { "12 18", "6" },  { "7 13", "1" },  { "100 25", "25" },  { "9 9", "9" },  { "17 0", "17" },  { "48 36", "12" } },
+    { "Euclid's loop ends when b becomes 0. What does that tell you about which variable holds the answer?", "The answer is the last non-zero value, which has been moved into a.", "return a; instead of return b;" },
+    "return the right variable",
+    "#include <stdio.h>\n\nint gcd(int a, int b) {\n    while (b != 0) {\n        int t = b;\n        b = a % b;\n        a = t;\n    }\n    return a;\n}\n\nint main(void) {\n    int a, b;\n    scanf(\"%d %d\", &a, &b);\n    printf(\"%d\\n\", gcd(a, b));\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint gcd(int a, int b) {\n    while (b != 0) {\n        int t = b;\n        b = a % b;\n        a = t;\n    }\n    return a;\n}\n\nint main() {\n    int a, b;\n    cin >> a >> b;\n    cout << gcd(a, b) << endl;\n    return 0;\n}\n",
+    "The loop only exits when b is 0, so returning b always gives 0. The answer is in a at that moment. Step through the loop and watch a and b to see it.", 1, "#include <stdio.h>\n\nint gcd(int a, int b) {\n    while (b != 0) {\n        int t = b;\n        b = a % b;\n        a = t;\n    }\n    return b;\n}\n\nint main(void) {\n    int a, b;\n    scanf(\"%d %d\", &a, &b);\n    printf(\"%d\\n\", gcd(a, b));\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nint gcd(int a, int b) {\n    while (b != 0) {\n        int t = b;\n        b = a % b;\n        a = t;\n    }\n    return b;\n}\n\nint main() {\n    int a, b;\n    cin >> a >> b;\n    cout << gcd(a, b) << endl;\n    return 0;\n}\n" },
+  { "Fix: Prime Check", "Functions", 1, 2, 6,
+    "This program should say whether a number is prime. It works for most numbers but gets one small input wrong. Find the bug and fix it.",
+    "Input: one integer n >= 1.\nOutput: prime or not prime",
+    { { "7", "prime" },  { "1", "not prime" },  { "9", "not prime" },  { "2", "prime" },  { "15", "not prime" },  { "29", "prime" } },
+    { "Try every very small input: 1, 2, 3, 4.", "For n = 1 the loop from 2 never runs, so nothing says it is not prime.", "Add a check at the start: if (n < 2) return 0;" },
+    "fix the small-number case",
+    "#include <stdio.h>\n\nint isPrime(int n) {\n    if (n < 2) return 0;\n    for (int i = 2; i * i <= n; i++)\n        if (n % i == 0) return 0;\n    return 1;\n}\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    puts(isPrime(n) ? \"prime\" : \"not prime\");\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nbool isPrime(int n) {\n    if (n < 2) return false;\n    for (int i = 2; i * i <= n; i++)\n        if (n % i == 0) return false;\n    return true;\n}\n\nint main() {\n    int n;\n    cin >> n;\n    cout << (isPrime(n) ? \"prime\" : \"not prime\") << endl;\n    return 0;\n}\n",
+    "A loop that finds no divisor assumes the number is prime, which is wrong for 1 (and 0 and negatives). Special cases at the edge of the input range need their own check.", 1, "#include <stdio.h>\n\nint isPrime(int n) {\n    for (int i = 2; i * i <= n; i++)\n        if (n % i == 0) return 0;\n    return 1;\n}\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    puts(isPrime(n) ? \"prime\" : \"not prime\");\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nbool isPrime(int n) {\n    for (int i = 2; i * i <= n; i++)\n        if (n % i == 0) return false;\n    return true;\n}\n\nint main() {\n    int n;\n    cin >> n;\n    cout << (isPrime(n) ? \"prime\" : \"not prime\") << endl;\n    return 0;\n}\n" },
+  { "Fix: Fibonacci", "Functions", 1, 2, 6,
+    "This recursive function should print the nth Fibonacci number (0, 1, 1, 2, 3, 5, ...). The answers are too big for most inputs. Find the bug and fix it.",
+    "Input: one integer n >= 0.\nOutput: the nth Fibonacci number",
+    { { "0", "0" },  { "1", "1" },  { "5", "5" },  { "10", "55" },  { "2", "1" },  { "11", "89" } },
+    { "Check the very first values by hand: fib(0) = 0 and fib(1) = 1.", "Look at the base case. What does the function return for n = 0?", "if (n <= 1) return n; returns 0 for 0 and 1 for 1." },
+    "fix the base case",
+    "#include <stdio.h>\n\nint fib(int n) {\n    if (n <= 1) return n;\n    return fib(n - 1) + fib(n - 2);\n}\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    printf(\"%d\\n\", fib(n));\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nint fib(int n) {\n    if (n <= 1) return n;\n    return fib(n - 1) + fib(n - 2);\n}\n\nint main() {\n    int n;\n    cin >> n;\n    cout << fib(n) << endl;\n    return 0;\n}\n",
+    "Every recursive result is built from the base cases, so a wrong base case spoils all the answers above it. Returning n gives fib(0) = 0 and fib(1) = 1.", 1, "#include <stdio.h>\n\nint fib(int n) {\n    if (n <= 1) return 1;\n    return fib(n - 1) + fib(n - 2);\n}\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    printf(\"%d\\n\", fib(n));\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nint fib(int n) {\n    if (n <= 1) return 1;\n    return fib(n - 1) + fib(n - 2);\n}\n\nint main() {\n    int n;\n    cin >> n;\n    cout << fib(n) << endl;\n    return 0;\n}\n" },
+  { "Fix: Power Function", "Functions", 2, 2, 6,
+    "This recursive function should print base raised to the power exp. It crashes instead. Find the bug and fix it.",
+    "Input: two integers base and exp (exp >= 0).\nOutput: base to the power exp",
+    { { "2 10", "1024" },  { "5 0", "1" },  { "3 3", "27" },  { "7 1", "7" },  { "10 6", "1000000" },  { "1 30", "1" } },
+    { "A recursive function must eventually stop calling itself. What makes this one stop?", "Nothing does. It keeps calling with exp - 1 forever until the stack runs out of memory.", "Add a base case: if (e == 0) return 1;" },
+    "add the missing base case",
+    "#include <stdio.h>\n\nlong long power(long long b, int e) {\n    if (e == 0) return 1;\n    return b * power(b, e - 1);\n}\n\nint main(void) {\n    long long b;\n    int e;\n    scanf(\"%lld %d\", &b, &e);\n    printf(\"%lld\\n\", power(b, e));\n    return 0;\n}\n",
+    "#include <iostream>\nusing namespace std;\n\nlong long power(long long b, int e) {\n    if (e == 0) return 1;\n    return b * power(b, e - 1);\n}\n\nint main() {\n    long long b;\n    int e;\n    cin >> b >> e;\n    cout << power(b, e) << endl;\n    return 0;\n}\n",
+    "Without a base case the recursion never ends. Each call uses stack memory until the program crashes (a stack overflow), which is why the verdict is Runtime Error.", 1, "#include <stdio.h>\n\nlong long power(long long b, int e) {\n    return b * power(b, e - 1);\n}\n\nint main(void) {\n    long long b;\n    int e;\n    scanf(\"%lld %d\", &b, &e);\n    printf(\"%lld\\n\", power(b, e));\n    return 0;\n}\n", "#include <iostream>\nusing namespace std;\n\nlong long power(long long b, int e) {\n    return b * power(b, e - 1);\n}\n\nint main() {\n    long long b;\n    int e;\n    cin >> b >> e;\n    cout << power(b, e) << endl;\n    return 0;\n}\n" },
+    /* ---- Labs: C++ Practical 1 (19) and Lab 2 (15); kind 2, C++ only ---- */
+    { "Leap Year", "C++ Practical 1", 0, -1, 6,
+      "Write a function that checks whether an inputted year is a leap year.\n\nSteps:\n1. If the year is evenly divisible by 4, go to step 2. Otherwise, go to step 5.\n2. If the year is evenly divisible by 100, go to step 3. Otherwise, go to step 4.\n3. If the year is evenly divisible by 400, go to step 4. Otherwise, go to step 5.\n4. The year is a leap year (366 days).\n5. The year is not a leap year (365 days).",
+      "Input: a year.\nOutput: Leap year or Not a leap year",
+      { { "2024", "Leap year" },  { "1900", "Not a leap year" },  { "2000", "Leap year" },  { "2023", "Not a leap year" },  { "2100", "Not a leap year" },  { "1996", "Leap year" } },
+      { "Write the steps as questions: is it divisible by 4? by 100? by 400? Use the remainder operator, year % 4 == 0.", "Years not divisible by 4 are never leap years, so you can return false straight away.", "Divisible by 4 but not by 100 is a leap year. A century (divisible by 100) is only a leap year when it is also divisible by 400." },
+      "write the function Leap Year",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nbool isLeapYear(int year)\n{\n    if (year % 4 != 0)\n        return false;\n    if (year % 100 != 0)\n        return true;\n    return year % 400 == 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int year;\n    cin >> year;\n    if (isLeapYear(year))\n        cout << \"Leap year\" << endl;\n    else\n        cout << \"Not a leap year\" << endl;\n    return 0;\n}\n",
+      "A year divisible by 4 is a leap year unless it is a century, and centuries only count when divisible by 400. Checking the rarest rule last keeps the code short.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Return true if year is a leap year.\nbool isLeapYear(int year)\n{\n    // TODO: follow the steps from the practical\n    return false;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int year;\n    cin >> year;\n    if (isLeapYear(year))\n        cout << \"Leap year\" << endl;\n    else\n        cout << \"Not a leap year\" << endl;\n    return 0;\n}\n", 1 },
+    { "Palindrome Number", "C++ Practical 1", 0, -1, 6,
+      "Write a function that checks whether a number is a palindrome (it reads the same forwards and backwards, like 12321). Do not turn it into text: work with the digits using % and /.",
+      "Input: a positive whole number.\nOutput: Palindrome or Not a palindrome",
+      { { "121", "Palindrome" },  { "123", "Not a palindrome" },  { "7", "Palindrome" },  { "1221", "Palindrome" },  { "10", "Not a palindrome" },  { "12321", "Palindrome" } },
+      { "number % 10 gives the last digit and number / 10 removes it.", "Build the reversed number digit by digit: reversed = reversed * 10 + lastDigit. Keep a copy of the original first.", "When the reversed number equals the original, it is a palindrome. Careful: 10 reversed is 1, so it is not." },
+      "write the function Palindrome Number",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nbool isPalindrome(int number)\n{\n    int original = number;\n    int reversed = 0;\n    while (number > 0)\n    {\n        reversed = reversed * 10 + number % 10;\n        number = number / 10;\n    }\n    return reversed == original;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int number;\n    cin >> number;\n    if (isPalindrome(number))\n        cout << \"Palindrome\" << endl;\n    else\n        cout << \"Not a palindrome\" << endl;\n    return 0;\n}\n",
+      "Peeling digits off with % 10 and / 10 and rebuilding them in reverse order is the standard way to reverse a number without converting it to text.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Return true if number reads the same forwards and\n// backwards.\nbool isPalindrome(int number)\n{\n    // TODO\n    return false;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int number;\n    cin >> number;\n    if (isPalindrome(number))\n        cout << \"Palindrome\" << endl;\n    else\n        cout << \"Not a palindrome\" << endl;\n    return 0;\n}\n", 1 },
+    { "Prime Number", "C++ Practical 1", 0, -1, 6,
+      "Write a function that checks whether a number is prime. A prime number is a number only divisible by itself and 1. (1 is not prime.)",
+      "Input: a whole number.\nOutput: Prime or Not prime",
+      { { "2", "Prime" },  { "1", "Not prime" },  { "17", "Prime" },  { "18", "Not prime" },  { "97", "Prime" },  { "100", "Not prime" } },
+      { "Numbers below 2 are not prime. Deal with them first.", "Try every divisor from 2 upwards. If number % divisor == 0 for any of them, it is not prime.", "You only need to test divisors while divisor * divisor <= number. Return true after the loop if nothing divided it." },
+      "write the function Prime Number",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nbool isPrime(int number)\n{\n    if (number < 2)\n        return false;\n    for (int divisor = 2; divisor * divisor <= number; divisor++)\n    {\n        if (number % divisor == 0)\n            return false;\n    }\n    return true;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int number;\n    cin >> number;\n    if (isPrime(number))\n        cout << \"Prime\" << endl;\n    else\n        cout << \"Not prime\" << endl;\n    return 0;\n}\n",
+      "A composite number always has a divisor no bigger than its square root, so the loop can stop early. Returning from inside the loop ends the search at the first divisor found.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Return true if number is prime.\nbool isPrime(int number)\n{\n    // TODO\n    return false;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int number;\n    cin >> number;\n    if (isPrime(number))\n        cout << \"Prime\" << endl;\n    else\n        cout << \"Not prime\" << endl;\n    return 0;\n}\n", 1 },
+    { "Binary to Decimal", "C++ Practical 1", 1, -1, 6,
+      "Write a function that converts a binary number to decimal without using the shift operator. The binary number is given as an int made of 0s and 1s, so 1011 means binary 1011 and the answer is 11.",
+      "Input: a number made of 0s and 1s.\nOutput: its decimal value",
+      { { "1011", "11" },  { "0", "0" },  { "1", "1" },  { "11111111", "255" },  { "100000", "32" },  { "101010", "42" } },
+      { "Take the last digit with binary % 10, then drop it with binary / 10.", "The last digit is worth 1, the next is worth 2, then 4, then 8. Keep a variable that doubles each time round the loop.", "Add digit * placeValue to the total each time, and stop when no digits are left." },
+      "write the function Binary to Decimal",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint binaryToDecimal(int binary)\n{\n    int decimal = 0;\n    int placeValue = 1;\n    while (binary > 0)\n    {\n        decimal = decimal + (binary % 10) * placeValue;\n        placeValue = placeValue * 2;\n        binary = binary / 10;\n    }\n    return decimal;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int binary;\n    cin >> binary;\n    cout << binaryToDecimal(binary) << endl;\n    return 0;\n}\n",
+      "Each binary digit is worth a power of two. Multiplying the place value by 2 each step does the job of a left shift without using the shift operator.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Convert the binary digits in binary (for example\n// 1011) to a decimal int (11). No shift operators.\nint binaryToDecimal(int binary)\n{\n    // TODO\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int binary;\n    cin >> binary;\n    cout << binaryToDecimal(binary) << endl;\n    return 0;\n}\n", 1 },
+    { "Chars to Int", "C++ Practical 1", 1, -1, 6,
+      "Write a function that converts chars '0'-'9' read from the keyboard into an integer. For example the chars 1, 4, 5 become the int 145. The function should return 0 if any of the chars are not digits.",
+      "Input: a word of up to 20 characters.\nOutput: the integer, or 0 if a character is\nnot a digit",
+      { { "145", "145" },  { "12a4", "0" },  { "7", "7" },  { "0099", "99" },  { "9x", "0" },  { "2024", "2024" } },
+      { "The character '5' has a number value too. digits[i] - '0' turns the char '5' into the int 5.", "Go through the chars from left to right. Each new digit makes the number so far ten times bigger: number = number * 10 + digit.", "Before using a char, check it is between '0' and '9'. If it is not, return 0 straight away." },
+      "write the function Chars to Int",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint charsToInt(char digits[], int length)\n{\n    int number = 0;\n    for (int i = 0; i < length; i++)\n    {\n        if (digits[i] < '0' || digits[i] > '9')\n            return 0;\n        number = number * 10 + (digits[i] - '0');\n    }\n    return number;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    char digits[21];\n    cin.getline(digits, 21);\n    int length = 0;\n    while (digits[length] != '\\0')\n        length++;\n    cout << charsToInt(digits, length) << endl;\n    return 0;\n}\n",
+      "Digit characters are stored in order ('0' to '9'), so subtracting '0' gives the digit's value. Multiplying the running total by 10 shifts every earlier digit one place left.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// digits holds the characters typed in, length is how\n// many there are.\n// Return the whole number they spell, or 0 if any char\n// is not a digit.\nint charsToInt(char digits[], int length)\n{\n    // TODO\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    char digits[21];\n    cin.getline(digits, 21);\n    int length = 0;\n    while (digits[length] != '\\0')\n        length++;\n    cout << charsToInt(digits, length) << endl;\n    return 0;\n}\n", 1 },
+    { "Triangle of A", "C++ Practical 1", 0, -1, 6,
+      "Write a function using a nested loop (only 2 for loops) that prints a triangle of As with the given number of rows. For 4 rows:\nA\nAA\nAAA\nAAAA",
+      "Input: the number of rows.\nOutput: the triangle",
+      { { "4", "A\nAA\nAAA\nAAAA" },  { "1", "A" },  { "3", "A\nAA\nAAA" },  { "6", "A\nAA\nAAA\nAAAA\nAAAAA\nAAAAAA" },  { "2", "A\nAA" },  { "5", "A\nAA\nAAA\nAAAA\nAAAAA" } },
+      { "The outer loop counts the rows. The inner loop prints the As on one row.", "Row number 3 needs 3 As, so the inner loop should run as many times as the row number.", "After the inner loop finishes, print a new line with endl." },
+      "write the function Triangle of A",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nvoid printTriangle(int rows)\n{\n    for (int row = 1; row <= rows; row++)\n    {\n        for (int count = 0; count < row; count++)\n            cout << 'A';\n        cout << endl;\n    }\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int rows;\n    cin >> rows;\n    printTriangle(rows);\n    return 0;\n}\n",
+      "In a nested loop the inner loop runs completely for every step of the outer loop. Making the inner loop's limit depend on the outer counter is what creates a triangle.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Print a triangle of As, one more A on each row. Use\n// exactly 2 for loops.\nvoid printTriangle(int rows)\n{\n    // TODO\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int rows;\n    cin >> rows;\n    printTriangle(rows);\n    return 0;\n}\n", 5 },
+    { "Up and Down Triangle", "C++ Practical 1", 1, -1, 6,
+      "Write a function using a nested loop (only 2 for loops and at most 1 if and an else) that prints a triangle of As that grows and then shrinks. For 4 rows:\nA\nAA\nAAA\nAAAA\nAAA\nAA\nA",
+      "Input: the number of rows (the longest\nline).\nOutput: the up-and-down triangle",
+      { { "4", "A\nAA\nAAA\nAAAA\nAAA\nAA\nA" },  { "1", "A" },  { "3", "A\nAA\nAAA\nAA\nA" },  { "5", "A\nAA\nAAA\nAAAA\nAAAAA\nAAAA\nAAA\nAA\nA" },  { "2", "A\nAA\nA" },  { "6", "A\nAA\nAAA\nAAAA\nAAAAA\nAAAAAA\nAAAAA\nAAAA\nAAA\nAA\nA" } },
+      { "The picture has rows * 2 - 1 lines in total. One outer loop can count all of them.", "For the first half the number of As equals the row number. For the second half it goes back down.", "Use the if / else to choose how many As this row needs: row if row <= rows, otherwise rows * 2 - row." },
+      "write the function Up and Down Triangle",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nvoid printUpDownTriangle(int rows)\n{\n    for (int row = 1; row < rows * 2; row++)\n    {\n        int count;\n        if (row <= rows)\n            count = row;\n        else\n            count = rows * 2 - row;\n        for (int i = 0; i < count; i++)\n            cout << 'A';\n        cout << endl;\n    }\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int rows;\n    cin >> rows;\n    printUpDownTriangle(rows);\n    return 0;\n}\n",
+      "One loop can draw both halves if you work out the length of each line from the row number. The if / else only decides which formula applies.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Print the As going up to rows and back down to 1.\n// Exactly 2 for loops, at most 1 if (and an else).\nvoid printUpDownTriangle(int rows)\n{\n    // TODO\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int rows;\n    cin >> rows;\n    printUpDownTriangle(rows);\n    return 0;\n}\n", 13 },
+    { "Find in Array", "C++ Practical 1", 0, -1, 6,
+      "Find an element in an array and return the index where it was found, or -1 if it was not found. If the value appears more than once, return the first index.",
+      "Input: the size, the elements, then the\nvalue to find.\nOutput: the index, or -1",
+      { { "5 3 8 1 9 4 9", "3" },  { "5 3 8 1 9 4 7", "-1" },  { "1 5 5", "0" },  { "6 2 4 6 8 10 12 12", "5" },  { "4 7 7 7 7 7", "0" },  { "3 1 2 3 4", "-1" } },
+      { "Look at every position from 0 up to size - 1.", "Compare arr[i] with toFind each time round the loop.", "As soon as they match, return i. Only return -1 after the whole loop has finished." },
+      "write the function Find in Array",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint find(int size, int arr[], int toFind)\n{\n    for (int i = 0; i < size; i++)\n    {\n        if (arr[i] == toFind)\n            return i;\n    }\n    return -1;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    int toFind;\n    cin >> toFind;\n    cout << find(size, arr, toFind) << endl;\n    return 0;\n}\n",
+      "A linear search checks each element in turn. Returning from inside the loop gives the first match, and -1 after the loop means the value was not there.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Return the index of toFind in arr, or -1 if it is not\n// there.\nint find(int size, int arr[], int toFind)\n{\n    // TODO\n    return -1;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    int toFind;\n    cin >> toFind;\n    cout << find(size, arr, toFind) << endl;\n    return 0;\n}\n", 1 },
+    { "Second Largest", "C++ Practical 1", 1, -1, 6,
+      "Find and return the second largest element in an array of positive integers. Return -1 if there is no second largest. The second largest is the next biggest different value, so in 5 5 3 it is 3, and in 4 4 4 there is none.",
+      "Input: the size, then the positive elements.\nOutput: the second largest value, or -1",
+      { { "6 5 3 8 1 9 4", "8" },  { "2 1 7", "1" },  { "4 4 4 4 4", "-1" },  { "5 10 20 20 5 1", "10" },  { "1 9", "-1" },  { "6 1 2 3 4 5 6", "5" } },
+      { "Keep two variables, largest and second, both starting at -1 (every element is positive).", "When you find something bigger than largest, the old largest becomes the second.", "Otherwise, if the element is smaller than largest but bigger than second, it becomes the new second. Equal values change nothing." },
+      "write the function Second Largest",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint find2ndLargest(int size, int arr[])\n{\n    int largest = -1;\n    int second = -1;\n    for (int i = 0; i < size; i++)\n    {\n        if (arr[i] > largest)\n        {\n            second = largest;\n            largest = arr[i];\n        }\n        else if (arr[i] < largest && arr[i] > second)\n            second = arr[i];\n    }\n    return second;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    cout << find2ndLargest(size, arr) << endl;\n    return 0;\n}\n",
+      "You can find both the biggest and second biggest in a single pass by remembering two values. Using strict comparisons means repeated values are not counted twice.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Return the second largest (different) value in arr,\n// or -1 if it can't be found.\nint find2ndLargest(int size, int arr[])\n{\n    // TODO\n    return -1;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    cout << find2ndLargest(size, arr) << endl;\n    return 0;\n}\n", 1 },
+    { "Copy Array", "C++ Practical 1", 0, -1, 6,
+      "Copy all the elements from arr1 to arr2. Both arrays are the same size.",
+      "Input: the size, then the elements of arr1.\nOutput: the elements of arr2 after the copy",
+      { { "5 1 2 3 4 5", "1 2 3 4 5" },  { "1 9", "9" },  { "3 7 7 7", "7 7 7" },  { "4 10 20 30 40", "10 20 30 40" },  { "2 100 200", "100 200" },  { "6 6 5 4 3 2 1", "6 5 4 3 2 1" } },
+      { "One loop from 0 to size - 1 is enough.", "Arrays are passed by address, so changes you make to arr2 inside the function are seen by the caller.", "Inside the loop: arr2[i] = arr1[i];" },
+      "write the function Copy Array",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nvoid copyArraytoArray(int size, int arr1[], int arr2[])\n{\n    for (int i = 0; i < size; i++)\n        arr2[i] = arr1[i];\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void showArray(int size, int arr[])\n{\n    for (int i = 0; i < size; i++)\n    {\n        if (i > 0)\n            cout << \" \";\n        cout << arr[i];\n    }\n    cout << endl;\n}\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    int copy[100];\n    for (int i = 0; i < 100; i++)\n        copy[i] = 0;\n    copyArraytoArray(size, arr, copy);\n    showArray(size, copy);\n    return 0;\n}\n",
+      "Arrays are not copied when passed to a function: the function gets the same memory. That is why writing into arr2 changes the caller's array.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Copy every element of arr1 into arr2.\nvoid copyArraytoArray(int size, int arr1[], int arr2[])\n{\n    // TODO\n    return;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void showArray(int size, int arr[])\n{\n    for (int i = 0; i < size; i++)\n    {\n        if (i > 0)\n            cout << \" \";\n        cout << arr[i];\n    }\n    cout << endl;\n}\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    int copy[100];\n    for (int i = 0; i < 100; i++)\n        copy[i] = 0;\n    copyArraytoArray(size, arr, copy);\n    showArray(size, copy);\n    return 0;\n}\n", 1 },
+    { "Insert an Element", "C++ Practical 1", 2, -1, 6,
+      "Insert an element into an array at a specified index. Shift the elements from that index onwards one place to the right. Use count to track how many elements are in the array; size is the capacity. The count cannot exceed the size of the array. Return true if the element was inserted, otherwise false (the array is full, or the index is not between 0 and count).",
+      "Input: size, count, the count elements, the\nelement to insert, the index.\nOutput: true or false, then count, then the\nelements",
+      { { "5 3 10 20 30 99 1", "true\ncount 4\n10 99 20 30" },  { "5 3 10 20 30 99 3", "true\ncount 4\n10 20 30 99" },  { "3 3 10 20 30 99 1", "false\ncount 3\n10 20 30" },  { "5 3 10 20 30 99 4", "false\ncount 3\n10 20 30" },  { "5 0 42 0", "true\ncount 1\n42" },  { "4 3 1 2 3 7 0", "true\ncount 4\n7 1 2 3" } },
+      { "First check the two reasons to refuse: the array is full (count is not less than size) or the index is out of range (below 0 or above count).", "Make room by moving elements to the right, starting from the LAST one and working back to insertIndex: arr[i] = arr[i - 1].", "Put the new element at insertIndex and add one to count. Inserting at index == count is allowed: it just goes on the end." },
+      "write the function Insert an Element",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nbool insertElement(int& size, int& count, int arr[],\n        int elementToInsert, int insertIndex)\n{\n    if (count >= size)\n        return false;\n    if (insertIndex < 0 || insertIndex > count)\n        return false;\n    for (int i = count; i > insertIndex; i--)\n        arr[i] = arr[i - 1];\n    arr[insertIndex] = elementToInsert;\n    count++;\n    return true;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void showArray(int size, int arr[])\n{\n    for (int i = 0; i < size; i++)\n    {\n        if (i > 0)\n            cout << \" \";\n        cout << arr[i];\n    }\n    cout << endl;\n}\n\nint main()\n{\n    int size, count;\n    cin >> size >> count;\n    int arr[100];\n    for (int i = 0; i < count; i++)\n        cin >> arr[i];\n    int element, index;\n    cin >> element >> index;\n    bool inserted = insertElement(size, count, arr,\n            element, index);\n    if (inserted)\n        cout << \"true\" << endl;\n    else\n        cout << \"false\" << endl;\n    cout << \"count \" << count << endl;\n    showArray(count, arr);\n    return 0;\n}\n",
+      "Shifting must start at the far end, otherwise each move overwrites a value you have not copied yet. Passing count by reference lets the function update the caller's element count.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// size is the capacity, count is how many elements are\n// in use.\n// Insert elementToInsert at insertIndex, shifting later\n// elements right. Return true if it was inserted.\nbool insertElement(int& size, int& count, int arr[],\n        int elementToInsert, int insertIndex)\n{\n    // TODO\n\n    return false;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void showArray(int size, int arr[])\n{\n    for (int i = 0; i < size; i++)\n    {\n        if (i > 0)\n            cout << \" \";\n        cout << arr[i];\n    }\n    cout << endl;\n}\n\nint main()\n{\n    int size, count;\n    cin >> size >> count;\n    int arr[100];\n    for (int i = 0; i < count; i++)\n        cin >> arr[i];\n    int element, index;\n    cin >> element >> index;\n    bool inserted = insertElement(size, count, arr,\n            element, index);\n    if (inserted)\n        cout << \"true\" << endl;\n    else\n        cout << \"false\" << endl;\n    cout << \"count \" << count << endl;\n    showArray(count, arr);\n    return 0;\n}\n", 1 },
+    { "Delete an Element", "C++ Practical 1", 2, -1, 6,
+      "Delete an element from an array at a specified position. The elements higher in the array are shifted to the left one position. Use count to track how many elements are in the array. Return true if an element was deleted, otherwise false (the index is not between 0 and count - 1).",
+      "Input: size, count, the count elements, the\nindex to delete.\nOutput: true or false, then count, then the\nelements",
+      { { "5 4 10 20 30 40 1", "true\ncount 3\n10 30 40" },  { "5 4 10 20 30 40 0", "true\ncount 3\n20 30 40" },  { "5 4 10 20 30 40 3", "true\ncount 3\n10 20 30" },  { "5 4 10 20 30 40 4", "false\ncount 4\n10 20 30 40" },  { "5 0 0", "false\ncount 0" },  { "3 3 1 2 3 -1", "false\ncount 3\n1 2 3" } },
+      { "An index is only valid if it is at least 0 and less than count. Anything else returns false.", "Shift left starting at deleteIndex: arr[i] = arr[i + 1], going UP the array.", "Reduce count by one afterwards. The old last element is still in memory but is no longer counted." },
+      "write the function Delete an Element",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nbool deleteElement(int& size, int& count, int arr[],\n        int deleteIndex)\n{\n    if (deleteIndex < 0 || deleteIndex >= count)\n        return false;\n    for (int i = deleteIndex; i < count - 1; i++)\n        arr[i] = arr[i + 1];\n    count--;\n    return true;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void showArray(int size, int arr[])\n{\n    for (int i = 0; i < size; i++)\n    {\n        if (i > 0)\n            cout << \" \";\n        cout << arr[i];\n    }\n    cout << endl;\n}\n\nint main()\n{\n    int size, count;\n    cin >> size >> count;\n    int arr[100];\n    for (int i = 0; i < count; i++)\n        cin >> arr[i];\n    int index;\n    cin >> index;\n    bool deleted = deleteElement(size, count, arr,\n            index);\n    if (deleted)\n        cout << \"true\" << endl;\n    else\n        cout << \"false\" << endl;\n    cout << \"count \" << count << endl;\n    showArray(count, arr);\n    return 0;\n}\n",
+      "Deleting is the mirror image of inserting: shift from the gap towards the end, then shrink count. Nothing is erased; the count just stops including the last slot.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// size is the capacity, count is how many elements are\n// in use.\n// Remove the element at deleteIndex, shifting later\n// elements left. Return true if one was deleted.\nbool deleteElement(int& size, int& count, int arr[],\n        int deleteIndex)\n{\n    // TODO\n\n    return true;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void showArray(int size, int arr[])\n{\n    for (int i = 0; i < size; i++)\n    {\n        if (i > 0)\n            cout << \" \";\n        cout << arr[i];\n    }\n    cout << endl;\n}\n\nint main()\n{\n    int size, count;\n    cin >> size >> count;\n    int arr[100];\n    for (int i = 0; i < count; i++)\n        cin >> arr[i];\n    int index;\n    cin >> index;\n    bool deleted = deleteElement(size, count, arr,\n            index);\n    if (deleted)\n        cout << \"true\" << endl;\n    else\n        cout << \"false\" << endl;\n    cout << \"count \" << count << endl;\n    showArray(count, arr);\n    return 0;\n}\n", 1 },
+    { "Frequency Count", "C++ Practical 1", 0, -1, 6,
+      "Count how many times a value appears in an array.",
+      "Input: the size, the elements, then the\nvalue to count.\nOutput: how many times it appears",
+      { { "6 1 2 2 3 2 5 2", "3" },  { "5 4 4 4 4 4 4", "5" },  { "3 1 2 3 9", "0" },  { "1 7 7", "1" },  { "7 5 1 5 1 5 1 5 1", "3" },  { "4 9 8 7 6 8", "1" } },
+      { "You need a counter that starts at 0.", "Look at every element with a loop.", "Add 1 to the counter each time arr[i] equals value, and return the counter at the end." },
+      "write the function Frequency Count",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint frequencyCount(int size, int arr[], int value)\n{\n    int count = 0;\n    for (int i = 0; i < size; i++)\n    {\n        if (arr[i] == value)\n            count++;\n    }\n    return count;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    int value;\n    cin >> value;\n    cout << frequencyCount(size, arr, value) << endl;\n    return 0;\n}\n",
+      "Counting is a loop with a counter and an if. It is the building block behind histograms, voting and duplicate detection.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Return how many elements of arr are equal to value.\nint frequencyCount(int size, int arr[], int value)\n{\n    // TODO\n\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    int value;\n    cin >> value;\n    cout << frequencyCount(size, arr, value) << endl;\n    return 0;\n}\n", 1 },
+    { "Count Duplicates", "C++ Practical 1", 1, -1, 6,
+      "Count the total number of duplicate elements in an array. Every extra copy of a value counts as one duplicate, so in 1 2 2 3 3 3 there are 3 duplicates (one extra 2 and two extra 3s).",
+      "Input: the size, then the elements.\nOutput: the number of duplicate elements",
+      { { "6 1 2 2 3 3 3", "3" },  { "4 1 2 3 4", "0" },  { "5 7 7 7 7 7", "4" },  { "6 1 2 1 2 1 2", "4" },  { "1 5", "0" },  { "7 4 4 9 9 4 1 1", "4" } },
+      { "An element is a duplicate if the same value has already appeared earlier in the array.", "For each position i, look at the positions before it (j from 0 to i - 1) for an equal value.", "Count element i once if you find a match, then stop looking (use break) so it is not counted twice." },
+      "write the function Count Duplicates",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint countDuplicates(int size, int arr[])\n{\n    int duplicates = 0;\n    for (int i = 1; i < size; i++)\n    {\n        for (int j = 0; j < i; j++)\n        {\n            if (arr[i] == arr[j])\n            {\n                duplicates++;\n                break;\n            }\n        }\n    }\n    return duplicates;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    cout << countDuplicates(size, arr) << endl;\n    return 0;\n}\n",
+      "A nested loop compares each element with all the ones before it. The first copy of a value is not a duplicate; every later copy is.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Return how many elements are repeats of a value that\n// appeared earlier in the array.\nint countDuplicates(int size, int arr[])\n{\n    // TODO\n\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    cout << countDuplicates(size, arr) << endl;\n    return 0;\n}\n", 1 },
+    { "Reverse an Array", "C++ Practical 1", 1, -1, 6,
+      "Reverse an array in place. You must only declare and use 1 array: do not make a second array to copy into.",
+      "Input: the size, then the elements.\nOutput: the elements after reversing",
+      { { "5 1 2 3 4 5", "5 4 3 2 1" },  { "1 9", "9" },  { "4 10 20 30 40", "40 30 20 10" },  { "2 1 2", "2 1" },  { "6 5 5 1 1 2 2", "2 2 1 1 5 5" },  { "3 7 8 7", "7 8 7" } },
+      { "Swap the first element with the last, the second with the second last, and so on.", "Element i swaps with element size - 1 - i. You only need to go half way, so the loop runs while i < size / 2.", "A swap needs a temporary variable: temp = a; a = b; b = temp;" },
+      "write the function Reverse an Array",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nvoid reverse(int size, int arr[])\n{\n    for (int i = 0; i < size / 2; i++)\n    {\n        int temp = arr[i];\n        arr[i] = arr[size - 1 - i];\n        arr[size - 1 - i] = temp;\n    }\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void showArray(int size, int arr[])\n{\n    for (int i = 0; i < size; i++)\n    {\n        if (i > 0)\n            cout << \" \";\n        cout << arr[i];\n    }\n    cout << endl;\n}\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    reverse(size, arr);\n    showArray(size, arr);\n    return 0;\n}\n",
+      "Swapping symmetric pairs reverses an array in place. Stopping at the middle matters: going all the way would swap everything back again.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Reverse arr in place. Only one array allowed.\nvoid reverse(int size, int arr[])\n{\n    // TODO\n    return;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void showArray(int size, int arr[])\n{\n    for (int i = 0; i < size; i++)\n    {\n        if (i > 0)\n            cout << \" \";\n        cout << arr[i];\n    }\n    cout << endl;\n}\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    reverse(size, arr);\n    showArray(size, arr);\n    return 0;\n}\n", 1 },
+    { "Rotate Left", "C++ Practical 1", 1, -1, 6,
+      "Left rotate an array by one position. The first element is moved to the end of the array and every other element moves one place to the left. Return the value that was moved to the end, or -1 if the array is empty.",
+      "Input: the size, then the elements.\nOutput: returned <value>, then the rotated\nelements",
+      { { "5 1 2 3 4 5", "returned 1\n2 3 4 5 1" },  { "1 9", "returned 9\n9" },  { "2 1 2", "returned 1\n2 1" },  { "4 10 20 30 40", "returned 10\n20 30 40 10" },  { "0", "returned -1" },  { "6 6 5 4 3 2 1", "returned 6\n5 4 3 2 1 6" } },
+      { "Handle the empty array first: return -1.", "Save arr[0] in a variable before you overwrite it.", "Move every element one place left (arr[i] = arr[i + 1]), then put the saved value in the last place." },
+      "write the function Rotate Left",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint rotateLeft(int size, int arr[])\n{\n    if (size < 1)\n        return -1;\n    int first = arr[0];\n    for (int i = 0; i < size - 1; i++)\n        arr[i] = arr[i + 1];\n    arr[size - 1] = first;\n    return first;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void showArray(int size, int arr[])\n{\n    for (int i = 0; i < size; i++)\n    {\n        if (i > 0)\n            cout << \" \";\n        cout << arr[i];\n    }\n    cout << endl;\n}\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    int moved = rotateLeft(size, arr);\n    cout << \"returned \" << moved << endl;\n    showArray(size, arr);\n    return 0;\n}\n",
+      "A rotation is a shift plus one saved value. Without saving the first element before the shift, it would be overwritten and lost.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Rotate arr one place to the left (first element goes\n// to the end).\n// Return the element that moved to the end, or -1 if\n// size is 0.\nint rotateLeft(int size, int arr[])\n{\n    // TODO\n\n    return -1;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void showArray(int size, int arr[])\n{\n    for (int i = 0; i < size; i++)\n    {\n        if (i > 0)\n            cout << \" \";\n        cout << arr[i];\n    }\n    cout << endl;\n}\n\nint main()\n{\n    int size;\n    cin >> size;\n    int arr[100];\n    for (int i = 0; i < size; i++)\n        cin >> arr[i];\n    int moved = rotateLeft(size, arr);\n    cout << \"returned \" << moved << endl;\n    showArray(size, arr);\n    return 0;\n}\n", 1 },
+    { "Two Movies", "C++ Practical 1", 2, -1, 6,
+      "You've built an inflight entertainment system with on-demand movie streaming. Users on longer flights like to start a second movie right when their first one ends, but they complain that the plane usually lands before they can see the ending. So you're building a feature for choosing two movies whose total runtimes will equal the exact flight length.\n\nThe function takes the flight length (in minutes) and an array of movie lengths (in minutes) and returns true if there are two movies whose lengths add up to the flight length. Assume users watch exactly two movies, and don't make them watch the same movie twice (two different movies may have the same length).",
+      "Input: the flight length, the number of\nmovies, then their lengths.\nOutput: true or false",
+      { { "120 4 40 80 90 30", "true" },  { "100 3 50 30 60", "false" },  { "100 2 50 50", "true" },  { "100 1 100", "false" },  { "90 5 10 20 30 45 45", "true" },  { "90 4 80 10 5 60", "true" } },
+      { "You need to try pairs of movies and check whether the two lengths add up to flightLength.", "Use two loops. Let the second loop start at first + 1 so a movie is never paired with itself and each pair is tried once.", "Return true as soon as a pair adds up. Only return false after every pair has been tried." },
+      "write the function Two Movies",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nbool twoMovies(int flightLength, int movieLengths[],\n        int size)\n{\n    for (int first = 0; first < size; first++)\n    {\n        for (int second = first\n                + 1; second < size; second++)\n        {\n            if (movieLengths[first]\n                    + movieLengths[second] == flightLength)\n                return true;\n        }\n    }\n    return false;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int flightLength, size;\n    cin >> flightLength >> size;\n    int movieLengths[100];\n    for (int i = 0; i < size; i++)\n        cin >> movieLengths[i];\n    if (twoMovies(flightLength, movieLengths, size))\n        cout << \"true\" << endl;\n    else\n        cout << \"false\" << endl;\n    return 0;\n}\n",
+      "Pairing each element only with the ones after it avoids using the same movie twice and avoids checking each pair in both orders.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Return true if two different movies add up to exactly\n// flightLength.\nbool twoMovies(int flightLength, int movieLengths[],\n        int size)\n{\n    // TODO\n\n    return false;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int flightLength, size;\n    cin >> flightLength >> size;\n    int movieLengths[100];\n    for (int i = 0; i < size; i++)\n        cin >> movieLengths[i];\n    if (twoMovies(flightLength, movieLengths, size))\n        cout << \"true\" << endl;\n    else\n        cout << \"false\" << endl;\n    return 0;\n}\n", 1 },
+    { "Word Counter", "C++ Practical 1", 2, -1, 6,
+      "Take an array of chars and return the number of separate words, where a word is one or more characters separated by spaces. Only count as words groups made up entirely of characters in the ranges A..Z and a..z, so groups like 123 or ?! are not words.",
+      "Input: one line of text.\nOutput: the number of words",
+      { { "the quick brown fox", "4" },  { "  hello   world  ", "2" },  { "one 2 three", "2" },  { "123 456 ?!", "0" },  { "Hello World ABC xyz", "4" },  { "a b c d e f g", "7" } },
+      { "Walk along the array. First skip any spaces, then you are at the start of a group.", "Read characters until the next space, and remember whether every one of them was a letter.", "Count the group as a word only if it had at least one character and they were all letters. Mind the end of the array." },
+      "write the function Word Counter",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint wordCounter(int size, char characters[])\n{\n    int words = 0;\n    int i = 0;\n    while (i < size)\n    {\n        while (i < size && characters[i] == ' ')\n            i++;\n        int start = i;\n        bool allLetters = true;\n        while (i < size && characters[i] != ' ')\n        {\n            char c = characters[i];\n            if (!((c >= 'A' && c <= 'Z') || (c >= 'a'\n                    && c <= 'z')))\n                allLetters = false;\n            i++;\n        }\n        if (i > start && allLetters)\n            words++;\n    }\n    return words;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    char text[201];\n    cin.getline(text, 201);\n    int size = 0;\n    while (text[size] != '\\0')\n        size++;\n    cout << wordCounter(size, text) << endl;\n    return 0;\n}\n",
+      "Counting words is a small state machine: skipping spaces, reading a group, then deciding whether the group counts. Handling several spaces in a row is what makes it tricky.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// characters holds size chars of text. Return how many\n// separate words it has.\n// A word is a group of letters (A..Z, a..z) separated\n// by spaces.\nint wordCounter(int size, char characters[])\n{\n    // TODO\n\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    char text[201];\n    cin.getline(text, 201);\n    int size = 0;\n    while (text[size] != '\\0')\n        size++;\n    cout << wordCounter(size, text) << endl;\n    return 0;\n}\n", 1 },
+    { "Up and Down, No Ifs (Extra)", "C++ Practical 1", 2, -1, 6,
+      "EXTRA: write a nested loop that prints the up-and-down triangle of As. It must contain only 2 for loops and no conditional statements: no if, else, switch or ? :. For 4 rows:\nA\nAA\nAAA\nAAAA\nAAA\nAA\nA",
+      "Input: the number of rows.\nOutput: the up-and-down triangle",
+      { { "4", "A\nAA\nAAA\nAAAA\nAAA\nAA\nA" },  { "1", "A" },  { "3", "A\nAA\nAAA\nAA\nA" },  { "5", "A\nAA\nAAA\nAAAA\nAAAAA\nAAAA\nAAA\nAA\nA" },  { "2", "A\nAA\nA" },  { "6", "A\nAA\nAAA\nAAAA\nAAAAA\nAAAAAA\nAAAAA\nAAAA\nAAA\nAA\nA" } },
+      { "Without an if you have to get the number of As from arithmetic.", "A comparison like row > rows is 1 when true and 0 when false. That is just a number you can store in an int and multiply by.", "count = row * (1 - past) + (rows * 2 - row) * past, where past is 1 once you are beyond the middle row." },
+      "write the function Up and Down, No Ifs (Extra)",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nvoid printUpDownNoIf(int rows)\n{\n    for (int row = 1; row < rows * 2; row++)\n    {\n        int pastMiddle = row > rows;\n        int count = row * (1 - pastMiddle)\n                + (rows * 2 - row) * pastMiddle;\n        for (int i = 0; i < count; i++)\n            cout << 'A';\n        cout << endl;\n    }\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int rows;\n    cin >> rows;\n    printUpDownNoIf(rows);\n    return 0;\n}\n",
+      "A true comparison evaluates to 1 and a false one to 0, so multiplying by it switches a term on or off. This is how branch-free code selects between two formulas.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Print the As going up to rows and back down to 1.\n// Exactly 2 for loops and NO conditional statements.\nvoid printUpDownNoIf(int rows)\n{\n    // TODO\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int rows;\n    cin >> rows;\n    printUpDownNoIf(rows);\n    return 0;\n}\n", 7 },
+    { "Replace Largest Value", "Lab 2", 1, -1, 6,
+      "Find the largest value in the entire array and replace all occurrences with -1. Return the largest value found. (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the 24 values of the 4 x 6 array, row\nby row.\nOutput: largest <value>, then the array",
+      { { "1 2 3 4 5 6\\n6 5 4 3 2 1\\n2 9 2 9 2 9\\n0 1 0 1 0 1", "largest 9\n1 2 3 4 5 6\n6 5 4 3 2 1\n2 -1 2 -1 2 -1\n0 1 0 1 0 1" },  { "5 5 5 5 5 5\\n5 5 5 5 5 5\\n5 5 5 5 5 5\\n5 5 5 5 5 5", "largest 5\n-1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1" },  { "0 0 0 0 0 0\\n0 0 7 0 0 0\\n0 0 0 0 0 0\\n0 0 0 0 0 7", "largest 7\n0 0 0 0 0 0\n0 0 -1 0 0 0\n0 0 0 0 0 0\n0 0 0 0 0 -1" },  { "3 1 4 1 5 9\\n2 6 5 3 5 8\\n9 7 9 3 2 3\\n8 4 6 2 6 4", "largest 9\n3 1 4 1 5 -1\n2 6 5 3 5 8\n-1 7 -1 3 2 3\n8 4 6 2 6 4" },  { "1 1 1 1 1 1\\n1 1 1 1 1 1\\n1 1 1 1 1 1\\n1 1 1 1 1 2", "largest 2\n1 1 1 1 1 1\n1 1 1 1 1 1\n1 1 1 1 1 1\n1 1 1 1 1 -1" },  { "20 3 3 3 3 3\\n3 3 3 3 3 3\\n3 3 -1 3 3 3\\n3 3 3 3 3 20", "largest 20\n-1 3 3 3 3 3\n3 3 3 3 3 3\n3 3 -1 3 3 3\n3 3 3 3 3 -1" } },
+      { "You need two passes: one to find the largest value, then one to replace it.", "Start with largest = array[0][0] and compare every cell. Two nested for loops visit every cell.", "In the second pass, every cell equal to largest becomes -1. Then return largest." },
+      "write the function Replace Largest Value",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint ReplaceLargestValue(int array[4][6])\n{\n    int largest = array[0][0];\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            if (array[row][col] > largest)\n                largest = array[row][col];\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            if (array[row][col] == largest)\n                array[row][col] = -1;\n    return largest;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int result = ReplaceLargestValue(grid);\n    cout << \"largest \" << result << endl;\n    showGrid(grid);\n    return 0;\n}\n",
+      "Finding a maximum and then acting on it needs two passes, because you only know which value to replace once you have seen the whole array.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Replace every occurrence of the largest value with -1\n// and return that value.\nint ReplaceLargestValue(int array[4][6])\n{\n    // TODO\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int result = ReplaceLargestValue(grid);\n    cout << \"largest \" << result << endl;\n    showGrid(grid);\n    return 0;\n}\n", 1 },
+    { "Count and Replace Zeros", "Lab 2", 0, -1, 6,
+      "Count all zero values and replace them with -1. Return the count of zeros. (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the 24 values of the array.\nOutput: zeros <count>, then the array",
+      { { "0 0 3 1 3 4\\n0 0 2 3 4 3\\n0 0 1 3 3 2\\n0 0 2 2 2 2", "zeros 8\n-1 -1 3 1 3 4\n-1 -1 2 3 4 3\n-1 -1 1 3 3 2\n-1 -1 2 2 2 2" },  { "1 2 3 4 1 2\\n2 3 4 1 2 3\\n3 4 1 2 3 4\\n4 1 2 3 4 1", "zeros 0\n1 2 3 4 1 2\n2 3 4 1 2 3\n3 4 1 2 3 4\n4 1 2 3 4 1" },  { "0 0 0 0 0 0\\n0 0 0 0 0 0\\n0 0 0 0 0 0\\n0 0 0 0 0 0", "zeros 24\n-1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1" },  { "1 0 1 0 1 0\\n0 1 0 1 0 1\\n1 0 1 0 1 0\\n0 1 0 1 0 1", "zeros 12\n1 -1 1 -1 1 -1\n-1 1 -1 1 -1 1\n1 -1 1 -1 1 -1\n-1 1 -1 1 -1 1" },  { "5 5 5 5 5 0\\n5 5 5 5 5 5\\n5 5 5 5 5 5\\n0 5 5 5 5 5", "zeros 2\n5 5 5 5 5 -1\n5 5 5 5 5 5\n5 5 5 5 5 5\n-1 5 5 5 5 5" },  { "-1 0 -1 0 -1 0\\n2 2 2 2 2 2\\n0 0 0 0 0 0\\n3 3 3 3 3 3", "zeros 9\n-1 -1 -1 -1 -1 -1\n2 2 2 2 2 2\n-1 -1 -1 -1 -1 -1\n3 3 3 3 3 3" } },
+      { "Visit every cell with two nested loops: rows 0 to 3 and columns 0 to 5.", "Keep a counter that starts at 0.", "When a cell is 0, set it to -1 and add one to the counter. Return the counter." },
+      "write the function Count and Replace Zeros",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint CountAndReplaceZeros(int array[4][6])\n{\n    int zeros = 0;\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            if (array[row][col] == 0)\n            {\n                array[row][col] = -1;\n                zeros++;\n            }\n    return zeros;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int result = CountAndReplaceZeros(grid);\n    cout << \"zeros \" << result << endl;\n    showGrid(grid);\n    return 0;\n}\n",
+      "Counting and changing in the same pass saves a second loop. Changing the cell to -1 does not disturb the count because each cell is visited only once.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Replace every 0 with -1 and return how many zeros\n// there were.\nint CountAndReplaceZeros(int array[4][6])\n{\n    // TODO\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int result = CountAndReplaceZeros(grid);\n    cout << \"zeros \" << result << endl;\n    showGrid(grid);\n    return 0;\n}\n", 1 },
+    { "Replace a Row Pattern", "Lab 2", 1, -1, 6,
+      "Find any horizontal sequence of 3 consecutive cells matching the given pattern. Replace each match with -1 and return the number of matches found. A match must sit inside one row: it cannot wrap onto the next row. (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the 24 array values, then the 3\npattern values.\nOutput: matches <count>, then the array",
+      { { "1 2 3 4 1 2\\n3 1 2 3 1 2\\n0 0 0 0 0 0\\n5 5 5 5 5 5\\n1 2 3", "matches 2\n-1 -1 -1 4 1 2\n3 -1 -1 -1 1 2\n0 0 0 0 0 0\n5 5 5 5 5 5" },  { "1 2 4 4 1 2\\n3 1 3 3 1 2\\n0 0 0 0 0 0\\n5 5 5 5 5 5\\n1 2 3", "matches 0\n1 2 4 4 1 2\n3 1 3 3 1 2\n0 0 0 0 0 0\n5 5 5 5 5 5" },  { "9 9 9 9 1 2\\n3 9 9 9 9 9\\n0 0 0 0 0 0\\n5 5 5 5 5 5\\n9 9 9", "matches 2\n-1 -1 -1 9 1 2\n3 -1 -1 -1 9 9\n0 0 0 0 0 0\n5 5 5 5 5 5" },  { "1 2 3 1 2 3\\n0 0 0 0 0 0\\n1 2 3 0 1 2\\n3 1 2 3 1 2\\n1 2 3", "matches 4\n-1 -1 -1 -1 -1 -1\n0 0 0 0 0 0\n-1 -1 -1 0 1 2\n3 -1 -1 -1 1 2" },  { "1 1 1 1 1 1\\n1 1 1 1 1 1\\n2 2 2 2 5 5\\n0 1 1 1 0 0\\n1 1 1", "matches 5\n-1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1\n2 2 2 2 5 5\n0 -1 -1 -1 0 0" },  { "4 5 6 4 5 6\\n6 5 4 6 5 4\\n4 5 6 0 0 0\\n0 0 0 4 5 6\\n6 5 4", "matches 2\n4 5 6 4 5 6\n-1 -1 -1 -1 -1 -1\n4 5 6 0 0 0\n0 0 0 4 5 6" } },
+      { "A row has 6 cells, so a run of 3 can start in columns 0, 1, 2 or 3. Stop at column 3 so you never go past the edge.", "Compare array[row][col], array[row][col + 1] and array[row][col + 2] with pattern[0], pattern[1] and pattern[2].", "On a match set the three cells to -1 and add one to the counter. Because matched cells are now -1, matches cannot overlap." },
+      "write the function Replace a Row Pattern",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint ReplaceRowPattern(int array[4][6], int pattern[3])\n{\n    int matches = 0;\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col + 2 < 6; col++)\n        {\n            if (array[row][col] == pattern[0]\n                    && array[row][col\n                    + 1] == pattern[1]\n                    && array[row][col\n                    + 2] == pattern[2])\n            {\n                array[row][col] = -1;\n                array[row][col + 1] = -1;\n                array[row][col + 2] = -1;\n                matches++;\n            }\n        }\n    }\n    return matches;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int pattern[3];\n    for (int i = 0; i < 3; i++)\n        cin >> pattern[i];\n    int result = ReplaceRowPattern(grid, pattern);\n    cout << \"matches \" << result << endl;\n    showGrid(grid);\n    return 0;\n}\n",
+      "A sliding window of three cells moves along each row. Writing -1 over a match stops it being matched again by the next window position.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Replace each horizontal run of 3 cells equal to\n// pattern with -1 and return how many runs there were.\nint ReplaceRowPattern(int array[4][6], int pattern[3])\n{\n    // TODO\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int pattern[3];\n    for (int i = 0; i < 3; i++)\n        cin >> pattern[i];\n    int result = ReplaceRowPattern(grid, pattern);\n    cout << \"matches \" << result << endl;\n    showGrid(grid);\n    return 0;\n}\n", 1 },
+    { "Swap Two Rows", "Lab 2", 0, -1, 6,
+      "Swap two specified rows in the array. (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the 24 array values, then the two row\nnumbers (0 to 3).\nOutput: the array after swapping",
+      { { "1 2 3 4 5 6\\n7 8 9 10 11 12\\n13 14 15 16 17 18\\n19 20 21 22 23 24\\n0 3", "19 20 21 22 23 24\n7 8 9 10 11 12\n13 14 15 16 17 18\n1 2 3 4 5 6" },  { "1 2 3 4 5 6\\n7 8 9 10 11 12\\n13 14 15 16 17 18\\n19 20 21 22 23 24\\n1 2", "1 2 3 4 5 6\n13 14 15 16 17 18\n7 8 9 10 11 12\n19 20 21 22 23 24" },  { "1 2 3 4 5 6\\n7 8 9 10 11 12\\n13 14 15 16 17 18\\n19 20 21 22 23 24\\n2 2", "1 2 3 4 5 6\n7 8 9 10 11 12\n13 14 15 16 17 18\n19 20 21 22 23 24" },  { "5 5 5 5 5 5\\n0 0 0 0 0 0\\n1 2 1 2 1 2\\n9 9 9 9 9 9\\n3 1", "5 5 5 5 5 5\n9 9 9 9 9 9\n1 2 1 2 1 2\n0 0 0 0 0 0" },  { "1 2 3 4 5 6\\n7 8 9 10 11 12\\n13 14 15 16 17 18\\n19 20 21 22 23 24\\n3 0", "19 20 21 22 23 24\n7 8 9 10 11 12\n13 14 15 16 17 18\n1 2 3 4 5 6" },  { "-1 0 1 0 -1 0\\n2 2 2 2 2 2\\n3 3 3 3 3 3\\n4 4 4 4 4 4\\n0 1", "2 2 2 2 2 2\n-1 0 1 0 -1 0\n3 3 3 3 3 3\n4 4 4 4 4 4" } },
+      { "Swapping two rows means swapping each pair of cells in the same columns.", "Loop col from 0 to 5 and swap array[row1][col] with array[row2][col].", "Use a temporary variable for each swap. Swapping a row with itself must leave it unchanged." },
+      "write the function Swap Two Rows",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nvoid SwapRows(int array[4][6], int row1, int row2)\n{\n    for (int col = 0; col < 6; col++)\n    {\n        int temp = array[row1][col];\n        array[row1][col] = array[row2][col];\n        array[row2][col] = temp;\n    }\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int row1, row2;\n    cin >> row1 >> row2;\n    SwapRows(grid, row1, row2);\n    showGrid(grid);\n    return 0;\n}\n",
+      "Swapping two values needs a third variable to hold one of them. Repeating the swap down every column swaps whole rows.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Swap row1 and row2 of the array.\nvoid SwapRows(int array[4][6], int row1, int row2)\n{\n    // TODO\n\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int row1, row2;\n    cin >> row1 >> row2;\n    SwapRows(grid, row1, row2);\n    showGrid(grid);\n    return 0;\n}\n", 1 },
+    { "Column Sum", "Lab 2", 0, -1, 6,
+      "Calculate and return the sum of all values in the specified column. Ignore -1 values. (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the 24 array values, then the column\nnumber (0 to 5).\nOutput: the sum",
+      { { "1 2 3 4 5 6\\n7 8 9 10 11 12\\n13 14 15 16 17 18\\n19 20 21 22 23 24\\n0", "40" },  { "1 2 3 4 5 6\\n7 8 9 10 11 12\\n13 14 15 16 17 18\\n19 20 21 22 23 24\\n5", "60" },  { "1 -1 3 4 5 6\\n7 -1 9 10 11 12\\n13 -1 15 16 17 18\\n19 -1 21 22 23 24\\n1", "0" },  { "1 2 3 4 5 6\\n7 -1 9 10 11 12\\n-1 8 15 16 17 18\\n19 20 21 22 23 -1\\n1", "30" },  { "0 0 0 0 0 0\\n0 0 0 0 0 0\\n0 0 0 0 0 0\\n0 0 0 0 0 0\\n3", "0" },  { "2 2 2 2 2 2\\n3 3 3 3 3 3\\n-1 -1 -1 -1 -1 -1\\n4 4 4 4 4 4\\n4", "9" } },
+      { "The column number is fixed. Only the row changes, so one loop over rows 0 to 3 is enough.", "Keep a running total that starts at 0.", "Add array[row][col] to it only when the value is not -1." },
+      "write the function Column Sum",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint FindColumnSum(int array[4][6], int col)\n{\n    int sum = 0;\n    for (int row = 0; row < 4; row++)\n    {\n        if (array[row][col] != -1)\n            sum = sum + array[row][col];\n    }\n    return sum;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int col;\n    cin >> col;\n    cout << FindColumnSum(grid, col) << endl;\n    return 0;\n}\n",
+      "Summing a column is a single loop over the rows with the column held constant. Skipping -1 treats it as an empty cell.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Return the sum of column col, skipping any -1 values.\nint FindColumnSum(int array[4][6], int col)\n{\n    // TODO\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int col;\n    cin >> col;\n    cout << FindColumnSum(grid, col) << endl;\n    return 0;\n}\n", 1 },
+    { "Replace the Border", "Lab 2", 1, -1, 6,
+      "Replace all border elements (the first and last row, and the first and last column) with -1. Return the count of cells replaced. Every border cell counts, even one that already holds -1. (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the 24 array values.\nOutput: replaced <count>, then the array",
+      { { "1 2 3 4 5 6\\n7 8 9 10 11 12\\n13 14 15 16 17 18\\n19 20 21 22 23 24", "replaced 16\n-1 -1 -1 -1 -1 -1\n-1 8 9 10 11 -1\n-1 14 15 16 17 -1\n-1 -1 -1 -1 -1 -1" },  { "5 5 5 5 5 5\\n5 5 5 5 5 5\\n5 5 5 5 5 5\\n5 5 5 5 5 5", "replaced 16\n-1 -1 -1 -1 -1 -1\n-1 5 5 5 5 -1\n-1 5 5 5 5 -1\n-1 -1 -1 -1 -1 -1" },  { "0 0 0 0 0 0\\n0 0 0 0 0 0\\n0 0 0 0 0 0\\n0 0 0 0 0 0", "replaced 16\n-1 -1 -1 -1 -1 -1\n-1 0 0 0 0 -1\n-1 0 0 0 0 -1\n-1 -1 -1 -1 -1 -1" },  { "1 -1 3 4 5 6\\n7 8 9 10 11 12\\n13 14 15 16 17 18\\n19 20 21 22 23 -1", "replaced 16\n-1 -1 -1 -1 -1 -1\n-1 8 9 10 11 -1\n-1 14 15 16 17 -1\n-1 -1 -1 -1 -1 -1" },  { "9 8 7 6 5 4\\n3 2 1 0 9 8\\n7 6 5 4 3 2\\n1 0 9 8 7 6", "replaced 16\n-1 -1 -1 -1 -1 -1\n-1 2 1 0 9 -1\n-1 6 5 4 3 -1\n-1 -1 -1 -1 -1 -1" },  { "1 1 1 1 1 1\\n1 0 0 0 0 1\\n1 0 0 0 0 1\\n1 1 1 1 1 1", "replaced 16\n-1 -1 -1 -1 -1 -1\n-1 0 0 0 0 -1\n-1 0 0 0 0 -1\n-1 -1 -1 -1 -1 -1" } },
+      { "A cell is on the border if its row is 0 or 3, or its column is 0 or 5.", "Use two nested loops over every cell and test that condition with ||.", "Replace and count each border cell. For a 4 x 6 array that is always 16 cells." },
+      "write the function Replace the Border",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint ReplaceBorder(int array[4][6])\n{\n    int replaced = 0;\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (row == 0 || row == 3 || col == 0\n                    || col == 5)\n            {\n                array[row][col] = -1;\n                replaced++;\n            }\n        }\n    }\n    return replaced;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int result = ReplaceBorder(grid);\n    cout << \"replaced \" << result << endl;\n    showGrid(grid);\n    return 0;\n}\n",
+      "Rather than writing separate loops for each edge, test every cell once and ask 'am I on an edge?'. It is simpler and works for any size if you replace the 3 and 5 with the last index.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Set every border cell to -1 and return how many cells\n// that was.\nint ReplaceBorder(int array[4][6])\n{\n    // TODO\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int result = ReplaceBorder(grid);\n    cout << \"replaced \" << result << endl;\n    showGrid(grid);\n    return 0;\n}\n", 1 },
+    { "Count Unique Values", "Lab 2", 2, -1, 6,
+      "Count how many different unique values exist in the array. Ignore 0 and -1. (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the 24 array values.\nOutput: the number of unique values",
+      { { "1 2 3 4 1 2\\n3 4 1 2 3 4\\n1 2 3 4 1 2\\n3 4 1 2 3 4", "4" },  { "1 2 3 4 5 6\\n7 8 9 10 11 12\\n13 14 15 16 17 18\\n19 20 21 22 23 24", "24" },  { "5 5 5 5 5 5\\n5 5 5 5 5 5\\n5 5 5 5 5 5\\n5 5 5 5 5 5", "1" },  { "0 0 3 1 3 4\\n0 0 2 3 4 3\\n0 0 1 3 3 2\\n0 0 2 2 2 2", "4" },  { "-1 0 -1 0 -1 0\\n0 -1 0 -1 0 -1\\n-1 0 -1 0 -1 0\\n0 -1 0 -1 0 -1", "0" },  { "7 7 0 0 9 9\\n7 -1 0 -1 9 9\\n3 3 -1 -1 0 0\\n3 0 0 7 7 7", "3" } },
+      { "Skip any cell holding 0 or -1: they do not count.", "A value is new if it has not appeared in any earlier cell. Earlier means before this row and column in reading order.", "Use a second pair of loops to look back at the cells before the current one. If there is no match, add one to the count." },
+      "write the function Count Unique Values",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint CountUniqueValues(int array[4][6])\n{\n    int unique = 0;\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            int value = array[row][col];\n            if (value == 0 || value == -1)\n                continue;\n            bool seenBefore = false;\n            for (int r = 0; r < 4; r++)\n            {\n                for (int c = 0; c < 6; c++)\n                {\n                    if (r * 6 + c < row * 6 + col\n                            && array[r][c] == value)\n                        seenBefore = true;\n                }\n            }\n            if (!seenBefore)\n                unique++;\n        }\n    }\n    return unique;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    cout << CountUniqueValues(grid) << endl;\n    return 0;\n}\n",
+      "Checking each value against everything that came before it counts each distinct value exactly once, without needing a second array to remember what has been seen.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Return how many different values appear in the array,\n// not counting 0 or -1.\nint CountUniqueValues(int array[4][6])\n{\n    // TODO\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    cout << CountUniqueValues(grid) << endl;\n    return 0;\n}\n", 1 },
+    { "Reverse Each Row", "Lab 2", 1, -1, 6,
+      "Reverse each row of the array (the first element becomes the last, and so on). (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the 24 array values.\nOutput: the array after reversing every row",
+      { { "1 2 3 4 5 6\\n7 8 9 10 11 12\\n13 14 15 16 17 18\\n19 20 21 22 23 24", "6 5 4 3 2 1\n12 11 10 9 8 7\n18 17 16 15 14 13\n24 23 22 21 20 19" },  { "1 1 1 1 1 1\\n2 2 2 2 2 2\\n3 3 3 3 3 3\\n4 4 4 4 4 4", "1 1 1 1 1 1\n2 2 2 2 2 2\n3 3 3 3 3 3\n4 4 4 4 4 4" },  { "1 2 3 3 2 1\\n0 0 0 0 0 1\\n1 0 0 0 0 0\\n5 4 3 2 1 0", "1 2 3 3 2 1\n1 0 0 0 0 0\n0 0 0 0 0 1\n0 1 2 3 4 5" },  { "0 0 0 0 0 0\\n0 0 0 0 0 0\\n0 0 0 0 0 0\\n0 0 0 0 0 0", "0 0 0 0 0 0\n0 0 0 0 0 0\n0 0 0 0 0 0\n0 0 0 0 0 0" },  { "-1 2 -1 4 -1 6\\n1 -1 3 -1 5 -1\\n9 8 7 6 5 4\\n1 2 3 4 5 6", "6 -1 4 -1 2 -1\n-1 5 -1 3 -1 1\n4 5 6 7 8 9\n6 5 4 3 2 1" },  { "6 5 4 3 2 1\\n12 11 10 9 8 7\\n18 17 16 15 14 13\\n24 23 22 21 20 19", "1 2 3 4 5 6\n7 8 9 10 11 12\n13 14 15 16 17 18\n19 20 21 22 23 24" } },
+      { "Reversing a row is the same swap-the-ends idea used for reversing an array.", "In a row of 6, column col swaps with column 5 - col. You only need to go as far as the middle: columns 0, 1 and 2.", "Do that swap for every row, with a temporary variable." },
+      "write the function Reverse Each Row",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nvoid ReverseArrayRows(int array[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 3; col++)\n        {\n            int temp = array[row][col];\n            array[row][col] = array[row][5 - col];\n            array[row][5 - col] = temp;\n        }\n    }\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    ReverseArrayRows(grid);\n    showGrid(grid);\n    return 0;\n}\n",
+      "Reversing a one-dimensional array and reversing each row of a grid are the same job; the outer loop just repeats it for every row.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Reverse the order of the elements in every row.\nvoid ReverseArrayRows(int array[4][6])\n{\n    // TODO\n\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    ReverseArrayRows(grid);\n    showGrid(grid);\n    return 0;\n}\n", 1 },
+    { "Most Frequent Value", "Lab 2", 2, -1, 6,
+      "Find and return the value that appears most frequently in the array. Ignore 0 and -1. If two values appear equally often, return the smaller one. If there are no values to count, return 0. (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the 24 array values.\nOutput: the most frequent value",
+      { { "1 2 3 4 1 2\\n3 4 1 2 3 4\\n1 2 3 4 1 2\\n3 4 1 2 3 4", "1" },  { "5 5 5 5 5 5\\n5 5 5 5 5 5\\n5 5 5 5 5 5\\n5 5 5 5 5 5", "5" },  { "0 0 0 0 0 0\\n0 0 0 0 0 0\\n0 0 0 0 0 0\\n0 0 0 0 0 0", "0" },  { "7 7 7 0 0 0\\n2 2 0 0 0 0\\n-1 -1 -1 -1 -1 -1\\n9 0 0 0 0 0", "7" },  { "0 0 3 1 3 4\\n0 0 2 3 4 3\\n0 0 1 3 3 2\\n0 0 2 2 2 2", "2" },  { "4 4 3 3 2 2\\n1 1 5 5 6 6\\n0 0 0 0 0 0\\n-1 -1 -1 -1 -1 -1", "1" } },
+      { "For each cell, count how many cells hold the same value. Skip 0 and -1.", "Remember the best value so far and how many times it appeared.", "A new value wins if its count is higher, or if the count is equal and the value is smaller." },
+      "write the function Most Frequent Value",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint FindMostFrequent(int array[4][6])\n{\n    int bestValue = 0;\n    int bestCount = 0;\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            int value = array[row][col];\n            if (value == 0 || value == -1)\n                continue;\n            int count = 0;\n            for (int r = 0; r < 4; r++)\n                for (int c = 0; c < 6; c++)\n                    if (array[r][c] == value)\n                        count++;\n            if (count > bestCount\n                    || (count == bestCount\n                    && value < bestValue))\n            {\n                bestCount = count;\n                bestValue = value;\n            }\n        }\n    }\n    return bestValue;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    cout << FindMostFrequent(grid) << endl;\n    return 0;\n}\n",
+      "Counting each value's occurrences with an inner double loop is slow but simple. The tie-break rule makes the answer unique so it can be tested.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Return the value that appears most often (ignoring 0\n// and -1). Smaller value wins a tie. 0 if there are\n// none.\nint FindMostFrequent(int array[4][6])\n{\n    // TODO\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    cout << FindMostFrequent(grid) << endl;\n    return 0;\n}\n", 1 },
+    { "Shift Right", "Lab 2", 1, -1, 6,
+      "Shift all elements one position to the right. The last column of each row moves to the first column of that row. (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the 24 array values.\nOutput: the array after shifting",
+      { { "1 2 3 4 5 6\\n7 8 9 10 11 12\\n13 14 15 16 17 18\\n19 20 21 22 23 24", "6 1 2 3 4 5\n12 7 8 9 10 11\n18 13 14 15 16 17\n24 19 20 21 22 23" },  { "1 1 1 1 1 1\\n2 2 2 2 2 2\\n3 3 3 3 3 3\\n4 4 4 4 4 4", "1 1 1 1 1 1\n2 2 2 2 2 2\n3 3 3 3 3 3\n4 4 4 4 4 4" },  { "1 0 0 0 0 0\\n0 0 0 0 0 1\\n0 0 0 0 0 0\\n0 1 0 0 0 0", "0 1 0 0 0 0\n1 0 0 0 0 0\n0 0 0 0 0 0\n0 0 1 0 0 0" },  { "-1 2 -1 4 -1 6\\n1 -1 3 -1 5 -1\\n9 8 7 6 5 4\\n1 2 3 4 5 6", "6 -1 2 -1 4 -1\n-1 1 -1 3 -1 5\n4 9 8 7 6 5\n6 1 2 3 4 5" },  { "6 5 4 3 2 1\\n12 11 10 9 8 7\\n18 17 16 15 14 13\\n24 23 22 21 20 19", "1 6 5 4 3 2\n7 12 11 10 9 8\n13 18 17 16 15 14\n19 24 23 22 21 20" },  { "0 0 3 1 3 4\\n0 0 2 3 4 3\\n0 0 1 3 3 2\\n0 0 2 2 2 2", "4 0 0 3 1 3\n3 0 0 2 3 4\n2 0 0 1 3 3\n2 0 0 2 2 2" } },
+      { "Save the last element of the row before anything is overwritten.", "Move the others right one at a time starting from the END of the row: array[row][col] = array[row][col - 1], going from column 5 down to column 1.", "Put the saved element into column 0. Do this for every row." },
+      "write the function Shift Right",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nvoid ShiftArrayRight(int array[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        int last = array[row][5];\n        for (int col = 5; col > 0; col--)\n            array[row][col] = array[row][col - 1];\n        array[row][0] = last;\n    }\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    ShiftArrayRight(grid);\n    showGrid(grid);\n    return 0;\n}\n",
+      "Shifting right must work from the right-hand end back to the left so each value is copied before it is overwritten. The saved last element wraps round to the front.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Shift every row one place to the right; the last\n// element of each row wraps to the front.\nvoid ShiftArrayRight(int array[4][6])\n{\n    // TODO\n\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    ShiftArrayRight(grid);\n    showGrid(grid);\n    return 0;\n}\n", 1 },
+    { "Find and Replace a Cluster", "Lab 2", 2, -1, 6,
+      "30 marks. The level is an array of integers with values 1 to 4 (0 means an empty cell and is never part of a cluster).\n\nStarting from 0,0, test each column in the first row, then the second row, going left to right until the end of the array. At each position check for a horizontal line first and then a vertical line. Find ONE cluster of 3 or more identical items in a straight line (horizontally or vertically), starting at that position. Score the cluster by adding up its values, replace the cluster with -1s and return the score. If there is no cluster return 0 and change nothing.\n\nExample: the cluster 2 2 2 2 along the bottom row scores 8. (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the 24 array values.\nOutput: score <value>, then the array",
+      { { "0 0 3 1 3 4\\n0 0 2 3 4 3\\n0 0 1 3 3 2\\n0 0 2 2 2 2", "score 8\n0 0 3 1 3 4\n0 0 2 3 4 3\n0 0 1 3 3 2\n0 0 -1 -1 -1 -1" },  { "3 1 2 4 1 2\\n3 2 1 3 4 1\\n3 4 2 1 2 3\\n1 2 4 3 1 4", "score 9\n-1 1 2 4 1 2\n-1 2 1 3 4 1\n-1 4 2 1 2 3\n1 2 4 3 1 4" },  { "1 2 3 4 1 2\\n2 3 4 1 2 3\\n3 4 1 2 3 4\\n4 1 2 3 4 1", "score 0\n1 2 3 4 1 2\n2 3 4 1 2 3\n3 4 1 2 3 4\n4 1 2 3 4 1" },  { "1 4 4 4 4 2\\n2 1 3 1 2 3\\n3 2 1 3 1 2\\n1 3 2 1 2 3", "score 16\n1 -1 -1 -1 -1 2\n2 1 3 1 2 3\n3 2 1 3 1 2\n1 3 2 1 2 3" },  { "2 2 2 2 2 3\\n1 3 1 3 1 4\\n3 1 3 1 3 1\\n1 3 1 3 1 3", "score 10\n-1 -1 -1 -1 -1 3\n1 3 1 3 1 4\n3 1 3 1 3 1\n1 3 1 3 1 3" },  { "1 2 4 3 1 2\\n2 1 1 3 2 1\\n4 4 4 3 1 2\\n1 2 1 3 4 1", "score 12\n1 2 4 -1 1 2\n2 1 1 -1 2 1\n4 4 4 -1 1 2\n1 2 1 -1 4 1" } },
+      { "Go through the array row by row, left to right. For each cell ignore the value 0 (and anything that is not 1 to 4).", "At each cell count how far the same value continues to the right. If that is 3 or more, you have a horizontal cluster. If not, count how far it continues downwards.", "When you find a cluster set all its cells to -1 and return value * length. Stop at the first cluster: only one is replaced. If nothing is found, return 0." },
+      "write the function Find and Replace a Cluster",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nint ReplaceWithMinusOne(int array[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            int value = array[row][col];\n            if (value < 1 || value > 4)\n                continue;\n            int length = 0;\n            while (col + length < 6 && array[row][col\n                    + length] == value)\n                length++;\n            if (length >= 3)\n            {\n                for (int i = 0; i < length; i++)\n                    array[row][col + i] = -1;\n                return value * length;\n            }\n            length = 0;\n            while (row + length < 4 && array[row\n                    + length][col] == value)\n                length++;\n            if (length >= 3)\n            {\n                for (int i = 0; i < length; i++)\n                    array[row + i][col] = -1;\n                return value * length;\n            }\n        }\n    }\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int result = ReplaceWithMinusOne(grid);\n    cout << \"score \" << result << endl;\n    showGrid(grid);\n    return 0;\n}\n",
+      "Because the scan goes in reading order and checks the horizontal line before the vertical one, the first cluster found is always the right one, and returning straight away guarantees only one is replaced.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Find the first cluster of 3 or more identical values\n// (1 to 4) in a row or column, replace it with -1 and\n// return its score.\nint ReplaceWithMinusOne(int array[4][6])\n{\n    // TODO\n    return 0;\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    int result = ReplaceWithMinusOne(grid);\n    cout << \"score \" << result << endl;\n    showGrid(grid);\n    return 0;\n}\n", 1 },
+    { "Print the Array", "Lab 2", 0, -1, 4,
+      "10 marks. Print the array in rows and columns. This is the only function allowed to use cout in this lab. Print each row on its own line with a single space between the values. (Lab rules: use only ints and chars, no <string>, and cout is allowed here.)",
+      "Input: the 24 array values.\nOutput: the array, one row per line, values\nseparated by a single space",
+      { { "1 2 3 4 5 6\\n7 8 9 10 11 12\\n13 14 15 16 17 18\\n19 20 21 22 23 24", "1 2 3 4 5 6\n7 8 9 10 11 12\n13 14 15 16 17 18\n19 20 21 22 23 24" },  { "0 0 3 1 3 4\\n0 0 2 3 4 3\\n0 0 1 3 3 2\\n0 0 2 2 2 2", "0 0 3 1 3 4\n0 0 2 3 4 3\n0 0 1 3 3 2\n0 0 2 2 2 2" },  { "-1 -2 -1 -2 -1 -2\\n-2 -1 -2 -1 -2 -1\\n-1 -2 -1 -2 -1 -2\\n-2 -1 -2 -1 -2 -1", "-1 -2 -1 -2 -1 -2\n-2 -1 -2 -1 -2 -1\n-1 -2 -1 -2 -1 -2\n-2 -1 -2 -1 -2 -1" },  { "5 5 5 5 5 5\\n5 5 5 5 5 5\\n5 5 5 5 5 5\\n5 5 5 5 5 5", "5 5 5 5 5 5\n5 5 5 5 5 5\n5 5 5 5 5 5\n5 5 5 5 5 5" } },
+      { "Use two nested loops: the outer one for rows, the inner one for the columns of that row.", "Print a space between values, but not before the first value on a line.", "After each row's inner loop, print endl to start a new line." },
+      "write the function Print the Array",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nvoid PrintArray(int array[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << array[row][col];\n        }\n        cout << endl;\n    }\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    PrintArray(grid);\n    return 0;\n}\n",
+      "Nested loops that mirror the array's rows and columns are the natural way to print a table. Putting the newline after the inner loop gives one row per line.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Print the array, one row per line, a single space\n// between values.\nvoid PrintArray(int array[4][6])\n{\n    // TODO\n\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    PrintArray(grid);\n    return 0;\n}\n", 1 },
+    { "Fall Down and Replace", "Lab 2", 2, -1, 6,
+      "30 marks. 'Remove' the -1s in the array and let the items above them fall into the empty positions. Every item above an empty position falls down into it. New items with the value -2 are added at the top of the array to fill the gaps (and will not be part of the next cluster). Only -1 is removed; every other value, including 0, simply falls.\n\nExample: a column holding 3, -1, -1, -1 (top to bottom) becomes -2, -2, -2, 3. (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the 24 array values.\nOutput: the array after the items have\nfallen",
+      { { "0 0 3 3 4 3\\n0 0 -1 3 4 3\\n0 0 -1 3 3 2\\n0 0 -1 2 3 3", "0 0 -2 3 4 3\n0 0 -2 3 4 3\n0 0 -2 3 3 2\n0 0 3 2 3 3" },  { "1 2 3 4 1 2\\n2 3 4 1 2 3\\n3 4 1 2 3 4\\n4 1 2 3 4 1", "1 2 3 4 1 2\n2 3 4 1 2 3\n3 4 1 2 3 4\n4 1 2 3 4 1" },  { "-1 5 6 7 1 2\\n3 4 5 -1 2 3\\n1 2 3 4 5 6\\n7 8 9 1 2 3", "-2 5 6 -2 1 2\n3 4 5 7 2 3\n1 2 3 4 5 6\n7 8 9 1 2 3" },  { "1 2 3 4 1 2\\n-1 3 -1 1 -1 3\\n3 4 1 2 3 4\\n-1 1 -1 3 -1 1", "-2 2 -2 4 -2 2\n-2 3 -2 1 -2 3\n1 4 3 2 1 4\n3 1 1 3 3 1" },  { "-1 -1 -1 -1 -1 -1\\n-1 -1 -1 -1 -1 -1\\n-1 -1 -1 -1 -1 -1\\n-1 -1 -1 -1 -1 -1", "-2 -2 -2 -2 -2 -2\n-2 -2 -2 -2 -2 -2\n-2 -2 -2 -2 -2 -2\n-2 -2 -2 -2 -2 -2" },  { "1 2 3 4 1 2\\n2 3 4 1 2 3\\n3 4 1 2 3 4\\n-1 -1 -1 -1 -1 -1", "-2 -2 -2 -2 -2 -2\n1 2 3 4 1 2\n2 3 4 1 2 3\n3 4 1 2 3 4" } },
+      { "Work on one column at a time. Within a column, the cells that are not -1 keep their order but move to the bottom.", "Go up the column from the bottom with a 'write' row that starts at the bottom. Whenever you meet a cell that is not -1, copy it to the write row and move the write row up one.", "When you have been through the whole column, every row from the write row up to the top is empty. Fill those with -2." },
+      "write the function Fall Down and Replace",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nvoid FallDownAndReplace(int array[4][6])\n{\n    for (int col = 0; col < 6; col++)\n    {\n        int write = 3;\n        for (int row = 3; row >= 0; row--)\n        {\n            if (array[row][col] != -1)\n            {\n                array[write][col] = array[row][col];\n                write--;\n            }\n        }\n        while (write >= 0)\n        {\n            array[write][col] = -2;\n            write--;\n        }\n    }\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    FallDownAndReplace(grid);\n    showGrid(grid);\n    return 0;\n}\n",
+      "Removing items from a column is a compaction: copy the survivors to the bottom in order, then fill what is left over the top with a marker. This is how match-three games make tiles fall.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Remove every -1: the items above fall down, and -2\n// fills the top of each column.\nvoid FallDownAndReplace(int array[4][6])\n{\n    // TODO\n\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nstatic void readGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n        for (int col = 0; col < 6; col++)\n            cin >> grid[row][col];\n}\n\nvoid showGrid(int grid[4][6])\n{\n    for (int row = 0; row < 4; row++)\n    {\n        for (int col = 0; col < 6; col++)\n        {\n            if (col > 0)\n                cout << \" \";\n            cout << grid[row][col];\n        }\n        cout << endl;\n    }\n}\n\nint main()\n{\n    int grid[4][6];\n    readGrid(grid);\n    FallDownAndReplace(grid);\n    showGrid(grid);\n    return 0;\n}\n", 1 },
+    { "Find All Variables", "Lab 2", 2, -1, 6,
+      "15 marks. Write a function that takes 2 arrays of chars. It fills the variables array with a comma separated list of the variable names declared in the code. Only variables of type int and char need to be included, and only one variable is declared per line. Both arrays hold at most 1000 chars and strings end with a 0. The function main itself is not a variable.\n\nExample: for the code\nint main()\n{\n int var1=10;\n int var2 =10;\n if(var1<10)\n {\n int var3=20;\n}\n}\nvariables becomes var1,var2,var3 (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the lines of the code.\nOutput: the comma separated list of variable\nnames",
+      { { "int main() \\n{ \\n int var1=10;\\n int var2 =10;\\n if(var1<10) \\n {\\n int var3=20;\\n} \\n}\\n", "var1,var2,var3" },  { "int main()\\n{\\n char letter = 'a';\\n int count;\\n}\\n", "letter,count" },  { "int main()\\n{\\n return 0;\\n}\\n", "" },  { "int main()\\n{\\n int total_score = 0;\\n char grade_1 = 'A';\\n int x2;\\n}\\n", "total_score,grade_1,x2" },  { "int main()\\n{\\n int a = 1;\\n if (a == 1)\\n {\\n char b = 'x';\\n int c = 2;\\n }\\n}\\n", "a,b,c" },  { "int main()\\n{\\n int integer = 5;\\n char charlie = 'c';\\n int index;\\n}\\n", "integer,charlie,index" } },
+      { "Go through the text one line at a time. A line ends at the character '\\n'.", "On each line skip the leading spaces and check whether the next characters are 'int ' or 'char '. A line starting 'int main()' is a function, not a variable: its name is followed by a bracket.", "Copy the name (letters, digits and underscores) to the end of variables, with a comma before it if variables is not empty. Remember to finish with the 0 that ends the string." },
+      "write the function Find All Variables",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nstatic bool isNameChar(char c)\n{\n    return (c >= 'a' && c <= 'z') || (c >= 'A'\n            && c <= 'Z') || (c >= '0' && c <= '9')\n            || c == '_';\n}\n\nvoid FindAllVariables(char variables[], char code[])\n{\n    int outLength = 0;\n    variables[0] = '\\0';\n    int pos = 0;\n    while (code[pos] != '\\0')\n    {\n        while (code[pos] == ' ' || code[pos] == '\\t')\n            pos++;\n        int typeLength = 0;\n        if (code[pos] == 'i' && code[pos + 1] == 'n'\n                && code[pos + 2] == 't' && code[pos\n                + 3] == ' ')\n            typeLength = 4;\n        else if (code[pos] == 'c' && code[pos\n                + 1] == 'h' && code[pos + 2] == 'a'\n                && code[pos + 3] == 'r' && code[pos\n                + 4] == ' ')\n            typeLength = 5;\n        if (typeLength > 0)\n        {\n            int nameStart = pos + typeLength;\n            while (code[nameStart] == ' ')\n                nameStart++;\n            int nameEnd = nameStart;\n            while (isNameChar(code[nameEnd]))\n                nameEnd++;\n            int after = nameEnd;\n            while (code[after] == ' ')\n                after++;\n            if (nameEnd > nameStart\n                    && code[after] != '(')\n            {\n                if (outLength > 0)\n                {\n                    variables[outLength] = ',';\n                    outLength++;\n                }\n                for (int i = nameStart; i < nameEnd; i++)\n                {\n                    variables[outLength] = code[i];\n                    outLength++;\n                }\n                variables[outLength] = '\\0';\n            }\n        }\n        while (code[pos] != '\\n' && code[pos] != '\\0')\n            pos++;\n        if (code[pos] == '\\n')\n            pos++;\n    }\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    char code[1000];\n    int length = 0;\n    char letter;\n    while (length < 999 && cin.get(letter))\n    {\n        code[length] = letter;\n        length++;\n    }\n    code[length] = '\\0';\n    char variables[1000];\n    variables[0] = '\\0';\n    FindAllVariables(variables, code);\n    cout << variables << endl;\n    return 0;\n}\n",
+      "Parsing text is just walking along a char array, recognising patterns character by character. The 0 terminator is how every C string knows where it ends.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// code holds the program text. Fill variables with the\n// names of the int and char variables\n// declared in it, separated by commas (for example\n// var1,var2,var3).\nvoid FindAllVariables(char variables[], char code[])\n{\n    // TODO\n\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    char code[1000];\n    int length = 0;\n    char letter;\n    while (length < 999 && cin.get(letter))\n    {\n        code[length] = letter;\n        length++;\n    }\n    code[length] = '\\0';\n    char variables[1000];\n    variables[0] = '\\0';\n    FindAllVariables(variables, code);\n    cout << variables << endl;\n    return 0;\n}\n", 1 },
+    { "Variables in Scope", "Lab 2", 2, -1, 6,
+      "15 marks. Find the variables in scope after a particular line number (line 1 is the first line, and the variable declared on that line counts). The code won't contain for loops. Only int and char variables need to be included, only one variable is declared per line, and the only function in the code is int main(). A variable declared inside { } goes out of scope at the closing }. Names are listed in the order they were declared.\n\nFor the example code in the tests, line 17 (the line int var5 = 10;) gives numElephants,var2,var5 and line 13 gives numElephants,var2,var4. (Lab rules: use only ints and chars, no <string>, and no cout inside this function.)",
+      "Input: the line number, then the lines of\nthe code.\nOutput: the comma separated list of names in\nscope",
+      { { "17\\nint main()\\n{ \\n int numElephants = 10;\\n int var2 = 10; \\n if (var2 < 10)\\n{\\nint var3 = 20;\\n}\\n while(var2 < 0)\\n { \\n if (var2 == 10) \\n { \\n int var4; \\n } \\n int num = 10; \\n } \\n int var5 = 10; \\n }", "numElephants,var2,var5" },  { "13\\nint main()\\n{ \\n int numElephants = 10;\\n int var2 = 10; \\n if (var2 < 10)\\n{\\nint var3 = 20;\\n}\\n while(var2 < 0)\\n { \\n if (var2 == 10) \\n { \\n int var4; \\n } \\n int num = 10; \\n } \\n int var5 = 10; \\n }", "numElephants,var2,var4" },  { "3\\nint main()\\n{ \\n int numElephants = 10;\\n int var2 = 10; \\n if (var2 < 10)\\n{\\nint var3 = 20;\\n}\\n while(var2 < 0)\\n { \\n if (var2 == 10) \\n { \\n int var4; \\n } \\n int num = 10; \\n } \\n int var5 = 10; \\n }", "numElephants" },  { "7\\nint main()\\n{ \\n int numElephants = 10;\\n int var2 = 10; \\n if (var2 < 10)\\n{\\nint var3 = 20;\\n}\\n while(var2 < 0)\\n { \\n if (var2 == 10) \\n { \\n int var4; \\n } \\n int num = 10; \\n } \\n int var5 = 10; \\n }", "numElephants,var2,var3" },  { "15\\nint main()\\n{ \\n int numElephants = 10;\\n int var2 = 10; \\n if (var2 < 10)\\n{\\nint var3 = 20;\\n}\\n while(var2 < 0)\\n { \\n if (var2 == 10) \\n { \\n int var4; \\n } \\n int num = 10; \\n } \\n int var5 = 10; \\n }", "numElephants,var2,num" },  { "1\\nint main()\\n{ \\n int numElephants = 10;\\n int var2 = 10; \\n if (var2 < 10)\\n{\\nint var3 = 20;\\n}\\n while(var2 < 0)\\n { \\n if (var2 == 10) \\n { \\n int var4; \\n } \\n int num = 10; \\n } \\n int var5 = 10; \\n }", "" } },
+      { "Work through the code line by line, counting lines from 1, and stop after lineNumber. Use the same name-finding approach as Find All Variables.", "Track the nesting depth: a '{' starts a new scope and a '}' ends one. Note how long variables is when each scope starts.", "When a '}' closes a scope, cut variables back to the length it had when that scope began. That removes exactly the variables declared inside it." },
+      "write the function Variables in Scope",
+      "",
+      "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\nstatic bool isNameChar(char c)\n{\n    return (c >= 'a' && c <= 'z') || (c >= 'A'\n            && c <= 'Z') || (c >= '0' && c <= '9')\n            || c == '_';\n}\n\nvoid FindVariablesInScope(char variables[],\n        char code[], int lineNumber)\n{\n    int outLength = 0;\n    variables[0] = '\\0';\n    int scopeStart[50];\n    int depth = 0;\n    int pos = 0;\n    int line = 1;\n    while (code[pos] != '\\0' && line <= lineNumber)\n    {\n        int lineStart = pos;\n        int p = pos;\n        while (code[p] == ' ' || code[p] == '\\t')\n            p++;\n        int typeLength = 0;\n        if (code[p] == 'i' && code[p + 1] == 'n'\n                && code[p + 2] == 't' && code[p\n                + 3] == ' ')\n            typeLength = 4;\n        else if (code[p] == 'c' && code[p + 1] == 'h'\n                && code[p + 2] == 'a' && code[p\n                + 3] == 'r' && code[p + 4] == ' ')\n            typeLength = 5;\n        if (typeLength > 0)\n        {\n            int nameStart = p + typeLength;\n            while (code[nameStart] == ' ')\n                nameStart++;\n            int nameEnd = nameStart;\n            while (isNameChar(code[nameEnd]))\n                nameEnd++;\n            int after = nameEnd;\n            while (code[after] == ' ')\n                after++;\n            if (nameEnd > nameStart\n                    && code[after] != '(')\n            {\n                if (outLength > 0)\n                {\n                    variables[outLength] = ',';\n                    outLength++;\n                }\n                for (int i = nameStart; i < nameEnd; i++)\n                {\n                    variables[outLength] = code[i];\n                    outLength++;\n                }\n                variables[outLength] = '\\0';\n            }\n        }\n        for (int i = lineStart; code[i] != '\\n'\n                && code[i] != '\\0'; i++)\n        {\n            if (code[i] == '{')\n            {\n                scopeStart[depth] = outLength;\n                depth++;\n            }\n            else if (code[i] == '}' && depth > 0)\n            {\n                depth--;\n                outLength = scopeStart[depth];\n                variables[outLength] = '\\0';\n            }\n        }\n        while (code[pos] != '\\n' && code[pos] != '\\0')\n            pos++;\n        if (code[pos] == '\\n')\n            pos++;\n        line++;\n    }\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int lineNumber;\n    cin >> lineNumber;\n    char newline;\n    cin.get(newline);\n    char code[1000];\n    int length = 0;\n    char letter;\n    while (length < 999 && cin.get(letter))\n    {\n        code[length] = letter;\n        length++;\n    }\n    code[length] = '\\0';\n    char variables[1000];\n    variables[0] = '\\0';\n    FindVariablesInScope(variables, code, lineNumber);\n    cout << variables << endl;\n    return 0;\n}\n",
+      "Scope is a stack: each { pushes a new level and each } pops it, discarding the names declared inside. Remembering where each level started in the output makes the cut-back trivial.", 2, NULL, "// Name: <your name>\n// Student number: <your student number>\n#include <iostream>\nusing namespace std;\n\n// Fill variables with the names of the int and char\n// variables that are in scope\n// after line lineNumber (the first line is line 1),\n// separated by commas.\nvoid FindVariablesInScope(char variables[],\n        char code[], int lineNumber)\n{\n    // TODO\n\n}\n\n// ===== Test harness: reads the test input, calls your\n// function and prints the result. Leave it as it is.\n// =====\n\nint main()\n{\n    int lineNumber;\n    cin >> lineNumber;\n    char newline;\n    cin.get(newline);\n    char code[1000];\n    int length = 0;\n    char letter;\n    while (length < 999 && cin.get(letter))\n    {\n        code[length] = letter;\n        length++;\n    }\n    code[length] = '\\0';\n    char variables[1000];\n    variables[0] = '\\0';\n    FindVariablesInScope(variables, code, lineNumber);\n    cout << variables << endl;\n    return 0;\n}\n", 1 },
 };
 
 static struct {
@@ -1769,11 +2447,18 @@ static void SaveProgress(void)
 /* ---- profile: practice progress, streak, XP and mastery (Khan-Academy style) ---- */
 typedef struct {
     int magic;
-    unsigned char solved[2][NPROB];       /* per language */
-    int attempts[2][NPROB];
-    unsigned char hints[NPROB];           /* hints revealed */
+    unsigned char solved[2][PROBMAX];     /* per language */
+    int attempts[2][PROBMAX];
+    unsigned char hints[PROBMAX];         /* hints revealed */
     int lastDay, streak, bestStreak;
 } Profile;
+typedef struct {                          /* the older save layout (19 problems), still readable */
+    int magic;
+    unsigned char solved[2][19];
+    int attempts[2][19];
+    unsigned char hints[19];
+    int lastDay, streak, bestStreak;
+} ProfileV2;
 static Profile pro;
 static const char* DIFF_NAME[3] = { "Easy", "Medium", "Hard" };
 static const Color DIFF_COL[3] = { { 52, 199, 120, 255 }, { 255, 184, 64, 255 }, { 240, 92, 104, 255 } };
@@ -1789,8 +2474,19 @@ static void LoadProfile(void)
 {
     memset(&pro, 0, sizeof pro);
     FILE* f = fopen("profile.dat", "rb");
-    if (f) { Profile t; if (fread(&t, sizeof t, 1, f) == 1 && t.magic == (int)0xC0DE0002) pro = t; fclose(f); }
-    pro.magic = (int)0xC0DE0002;
+    if (f) {
+        Profile t; memset(&t, 0, sizeof t);
+        size_t got = fread(&t, 1, sizeof t, f);
+        if (got == sizeof t && t.magic == (int)0xC0DE0003) pro = t;
+        else if (got == sizeof(ProfileV2) && t.magic == (int)0xC0DE0002) {      /* upgrade an old save */
+            ProfileV2 o; memcpy(&o, &t, sizeof o);
+            for (int l = 0; l < 2; l++) for (int i = 0; i < 19; i++) { pro.solved[l][i] = o.solved[l][i]; pro.attempts[l][i] = o.attempts[l][i]; }
+            for (int i = 0; i < 19; i++) pro.hints[i] = o.hints[i];
+            pro.lastDay = o.lastDay; pro.streak = o.streak; pro.bestStreak = o.bestStreak;
+        }
+        fclose(f);
+    }
+    pro.magic = (int)0xC0DE0003;
     int d = DayNow();
     if (pro.lastDay != d) {                                   /* opening the app on consecutive days builds a streak */
         pro.streak = (pro.lastDay == d - 1) ? pro.streak + 1 : 1;
@@ -1802,9 +2498,9 @@ static void LoadProfile(void)
 
 static int ProbsInLesson(int les) { int n = 0; for (int i = 0; i < NPROB; i++) if (PROBS[i].lesson == les) n++; return n; }
 static int SolvedInLesson(int lg, int les) { int n = 0; for (int i = 0; i < NPROB; i++) if (PROBS[i].lesson == les && pro.solved[lg][i]) n++; return n; }
-static int SolvedTotal(int lg) { int n = 0; for (int i = 0; i < NPROB; i++) n += pro.solved[lg][i]; return n; }
-static int DiffTotal(int d) { int n = 0; for (int i = 0; i < NPROB; i++) if (PROBS[i].diff == d) n++; return n; }
-static int DiffSolved(int lg, int d) { int n = 0; for (int i = 0; i < NPROB; i++) if (PROBS[i].diff == d && pro.solved[lg][i]) n++; return n; }
+static int SolvedTotal(int lg) { int n = 0; for (int i = 0; i < NPROB_STD; i++) n += pro.solved[lg][i]; return n; }
+static int DiffTotal(int d) { int n = 0; for (int i = 0; i < NPROB_STD; i++) if (PROBS[i].diff == d) n++; return n; }
+static int DiffSolved(int lg, int d) { int n = 0; for (int i = 0; i < NPROB_STD; i++) if (PROBS[i].diff == d && pro.solved[lg][i]) n++; return n; }
 
 /* mastery of one lesson, 0..100: reading 20, quiz 30, coding challenges 50 */
 static int Mastery(int lg, int les)
@@ -1832,7 +2528,7 @@ static int LevelOf(int xp) { int l = 1; while (xp >= 30 * l * l) l++; return l; 
 
 /* the lesson to continue with, and what to do next in it */
 static int NextLesson(int lg) { for (int i = 0; i < NLESSONS; i++) if (Mastery(lg, i) < 100) return i; return 0; }
-static int DailyProblem(void) { return DayNow() % NPROB; }
+static int DailyProblem(void) { return DayNow() % NPROB_STD; }
 
 /* ------------------------------------------------------------------ */
 /*  Fonts and text helpers                                             */
@@ -1959,7 +2655,10 @@ static int WrapH(Font f, const char* t, float maxW, float fs)
 /* ------------------------------------------------------------------ */
 static void Panel(Rectangle r, float rd, Color fill, Color border)
 {
-    DrawRectangleRounded((Rectangle) { r.x, r.y + 4, r.width, r.height }, rd, 10, Fade(BLACK, 0.22f));
+    /* layered soft shadow */
+    DrawRectangleRounded((Rectangle) { r.x - 3, r.y + 8, r.width + 6, r.height + 2 }, rd, 10, Fade(BLACK, 0.10f));
+    DrawRectangleRounded((Rectangle) { r.x - 1, r.y + 5, r.width + 2, r.height }, rd, 10, Fade(BLACK, 0.14f));
+    DrawRectangleRounded((Rectangle) { r.x, r.y + 3, r.width, r.height }, rd, 10, Fade(BLACK, 0.20f));
     DrawRectangleRounded(r, rd, 10, border);
     if (fill.a < 255) {            /* blend a see-through fill over the dark background, not over the border */
         float al = fill.a / 255.0f;
@@ -1970,15 +2669,51 @@ static void Panel(Rectangle r, float rd, Color fill, Color border)
     }
     Rectangle in = { r.x + 1, r.y + 1, r.width - 2, r.height - 2 };
     DrawRectangleRounded(in, rd, 10, fill);
+    if (r.height > 36 && r.width > 40) {
+        /* glass: a lighter sheen over the top third, a darker foot, and a bright hairline */
+        DrawRectangleRounded((Rectangle) { in.x + 1, in.y + 1, in.width - 2, in.height * 0.36f }, rd * 1.6f > 1 ? 1 : rd * 1.6f, 10, Fade(WHITE, 0.035f));
+        DrawRectangleRounded((Rectangle) { in.x + 1, in.y + in.height * 0.70f, in.width - 2, in.height * 0.29f }, rd * 1.6f > 1 ? 1 : rd * 1.6f, 10, Fade(BLACK, 0.07f));
+        if (rd < 0.5f) {
+            float inset = rd * (r.height < r.width ? r.height : r.width) * 0.5f + 3;
+            DrawRectangle((int)(r.x + inset), (int)r.y + 1, (int)(r.width - 2 * inset), 1, Fade(WHITE, 0.16f));
+            DrawRectangle((int)(r.x + inset), (int)(r.y + r.height - 2), (int)(r.width - 2 * inset), 1, Fade(BLACK, 0.25f));
+        }
+    }
+}
+
+/* hover animation: each button remembers how "hot" it is, keyed by its position */
+static float btnHot[128];
+static float BtnHot(Rectangle r, bool hov)
+{
+    unsigned h = ((unsigned)(int)r.x * 73856093u) ^ ((unsigned)(int)r.y * 19349663u) ^ ((unsigned)(int)r.width * 83492791u);
+    float* v = &btnHot[h % 128];
+    float tgt = hov ? 1.0f : 0.0f;
+    *v += (tgt - *v) * fminf(1.0f, GetFrameTime() * 14.0f);
+    return *v;
 }
 
 static bool Button(Rectangle r, const char* label, Color col, float fs)
 {
     bool hov = CheckCollisionPointRec(GetMousePosition(), r);
     if (hov) hand = true;
-    DrawRectangleRounded((Rectangle) { r.x, r.y + 3, r.width, r.height }, 0.28f, 10, Fade(BLACK, 0.35f));
-    DrawRectangleRounded(r, 0.28f, 10, hov ? ColorBrightness(col, 0.18f) : col);
-    DrawRectangleRounded((Rectangle) { r.x + 2, r.y + 2, r.width - 4, r.height * 0.42f }, 0.5f, 8, Fade(WHITE, 0.09f));
+    bool down = hov && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+    float hot = BtnHot(r, hov);
+    if (hot > 0.02f) {                                                  /* soft glow that fades in */
+        DrawRectangleRounded((Rectangle) { r.x - 6, r.y - 4, r.width + 12, r.height + 12 }, 0.36f, 10, Fade(col, 0.07f * hot));
+        DrawRectangleRounded((Rectangle) { r.x - 3, r.y - 2, r.width + 6, r.height + 6 }, 0.32f, 10, Fade(col, 0.16f * hot));
+    }
+    DrawRectangleRounded((Rectangle) { r.x, r.y + 4, r.width, r.height }, 0.28f, 10, Fade(BLACK, 0.35f));
+    if (down) r.y += 2; else r.y -= hot * 1.5f;
+    Color dark = ColorBrightness(col, -0.38f);
+    DrawRectangleRounded(r, 0.28f, 10, dark);                           /* rim */
+    Rectangle f = { r.x + 1, r.y + 1, r.width - 2, r.height - 3 };
+    DrawRectangleRounded(f, 0.28f, 10, ColorBrightness(col, 0.04f + 0.16f * hot));
+    DrawRectangleRounded((Rectangle) { f.x + 1, f.y + f.height * 0.55f, f.width - 2, f.height * 0.43f }, 0.5f, 8, Fade(BLACK, 0.11f));
+    DrawRectangleRounded((Rectangle) { f.x + 2, f.y + 2, f.width - 4, f.height * 0.42f }, 0.5f, 8, Fade(WHITE, 0.10f + 0.07f * hot));
+    if (hot > 0.02f) {                                                  /* a light sweep across the face */
+        float sx = f.x + fmodf((float)GetTime() * 90.0f, f.width + 60) - 30;
+        if (sx > f.x && sx + 14 < f.x + f.width) DrawRectangle((int)sx, (int)f.y + 3, 14, (int)f.height - 6, Fade(WHITE, 0.07f * hot));
+    }
     fs = FitSize(fBold, label, fs, r.width - 20);
     CenterTxt(fBold, label, r.x + r.width / 2, r.y + (r.height - fs * UI_SCALE) / 2 - 1, fs, WHITE);
     return hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
@@ -2209,6 +2944,8 @@ static void StartLesson(int idx) { lessonIdx = idx; page = 0; scroll = 0; screen
 static void StartProblem(int idx);
 static int menuTab = 0, pracDiff = -1, pracLesson = -1;
 static bool pracUnsolved = false;
+static int pracKind = -1;                  /* -1 all, 0 write it, 1 fix it */
+static int pracTab = 0;                    /* 0 = Problems, 1 = Labs */
 static float pracScroll = 0;
 
 static void DrawCheck(float cx, float cy, float r, Color c)
@@ -2232,6 +2969,11 @@ static void NavIcon(int k, float cx, float cy, Color c)
     case 4: DrawLineEx((Vector2) { cx, cy + 10 }, (Vector2) { cx, cy - 2 }, 2.5f, c); DrawEllipse((int)cx - 6, (int)cy - 4, 6, 3.5f, c); DrawEllipse((int)cx + 6, (int)cy - 7, 6, 3.5f, c); break;
     case 6: DrawRectangleRounded((Rectangle) { cx - 11, cy - 9, 12, 8 }, 0.3f, 4, c); DrawRectangleRounded((Rectangle) { cx - 1, cy + 1, 12, 8 }, 0.3f, 4, Fade(c, 0.7f)); DrawLineEx((Vector2) { cx - 5, cy - 1 }, (Vector2) { cx + 5, cy + 5 }, 2, c); break;
     case 7: DrawRing((Vector2) { cx, cy }, 8, 11, 0, 360, 28, c); DrawLineEx((Vector2) { cx, cy }, (Vector2) { cx, cy - 7 }, 2, c); DrawLineEx((Vector2) { cx, cy }, (Vector2) { cx + 5, cy + 3 }, 2, c); break;
+    case 8: DrawRectangleRounded((Rectangle) { cx - 12, cy - 10, 24, 20 }, 0.2f, 4, c); DrawRectangle((int)cx - 8, (int)cy - 6, 7, 5, Fade(BLACK, 0.35f)); DrawRectangle((int)cx + 1, (int)cy - 6, 7, 5, Fade(BLACK, 0.35f)); DrawRectangle((int)cx - 8, (int)cy + 1, 16, 4, Fade(BLACK, 0.35f)); break;
+    case 9:                                                  /* bug: body, head, six legs */
+        for (int k = -1; k <= 1; k++) { DrawLineEx((Vector2) { cx - 6, cy + k * 5 }, (Vector2) { cx - 12, cy + k * 7 }, 1.8f, c); DrawLineEx((Vector2) { cx + 6, cy + k * 5 }, (Vector2) { cx + 12, cy + k * 7 }, 1.8f, c); }
+        DrawEllipse((int)cx, (int)cy + 2, 7, 9, c); DrawCircle((int)cx, (int)cy - 8, 4, c);
+        DrawLineEx((Vector2) { cx, cy - 6 }, (Vector2) { cx, cy + 10 }, 1.5f, Fade(BLACK, 0.3f)); break;
     default: DrawCircle((int)cx, (int)cy, 10, c); DrawCircle((int)cx, (int)cy, 6, Fade(BLACK, 0.25f)); break;
     }
 }
@@ -2245,15 +2987,16 @@ static void MenuSidebar(Color accent)
     TxtFit(fBold, "Coding Valley", 74, 15, 24, 150, TXT);
     Txt(fReg, "C & C++ in the snow", 76, 44, 12, DIM);
 
-    static const char* nm[8] = { "Learn", "Practice", "Coding Lab", "Campus & Arena", "Mower Farm", "Shop", "Code Breakdown", "Study hub" };
-    for (int i = 0; i < 8; i++) {
-        Rectangle r = { 12, 92.0f + i * 50 + (i >= 2 ? 22 : 0), 212, 44 };
+    static const char* nm[10] = { "Learn", "Practice", "Coding Lab", "Campus & Arena", "Mower Farm", "Shop", "Code Breakdown", "Bug Hunt", "Study hub", "Valley Jobs" };
+    static const int ic[10] = { 0, 1, 2, 3, 4, 5, 6, 9, 7, 8 };      /* icon for each entry */
+    for (int i = 0; i < 10; i++) {
+        Rectangle r = { 12, 92.0f + i * 42 + (i >= 2 ? 22 : 0), 212, 40 };
         bool hov = CheckCollisionPointRec(GetMousePosition(), r), act = i < 2 && i == menuTab;
         if (hov) hand = true;
         if (act) { DrawRectangleRounded(r, 0.25f, 8, Fade(accent, 0.18f)); DrawRectangleRounded((Rectangle) { r.x, r.y + 8, 4, r.height - 16 }, 0.5f, 4, accent); }
         else if (hov) DrawRectangleRounded(r, 0.25f, 8, SURF2);
-        NavIcon(i, r.x + 30, r.y + 22, act ? accent : (hov ? TXT : DIM));
-        Txt(fBold, nm[i], r.x + 58, r.y + 10, 18, act || hov ? TXT : (Color) { 208, 200, 178, 255 });
+        NavIcon(ic[i], r.x + 30, r.y + 20, act ? accent : (hov ? TXT : DIM));
+        Txt(fBold, nm[i], r.x + 58, r.y + 9, 18, act || hov ? TXT : (Color) { 208, 200, 178, 255 });
         if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             if (i < 2) { menuTab = i; pracScroll = 0; }
             else if (i == 2) StartLab();
@@ -2261,15 +3004,17 @@ static void MenuSidebar(Color accent)
             else if (i == 4) StartFarm();
             else if (i == 5) StartShop();
             else if (i == 6) StartMem();
-            else StartStudy();
+            else if (i == 7) StartBug();
+            else if (i == 8) StartStudy();
+            else StartJobs();
         }
     }
-    Txt(fBold, "SPACES", 24, 92.0f + 2 * 50 + 4, 11, (Color) { 101, 106, 89, 255 });
+    Txt(fBold, "SPACES", 24, 92.0f + 2 * 42 + 4, 11, (Color) { 101, 106, 89, 255 });
 
     /* language switch */
-    Panel((Rectangle) { 16, 520, 204, 44 }, 0.3f, SURF, BORDER);
+    Panel((Rectangle) { 16, 540, 204, 44 }, 0.3f, SURF, BORDER);
     for (int l = 0; l < 2; l++) {
-        Rectangle r = { 20.0f + l * 98, 524, 96, 36 };
+        Rectangle r = { 20.0f + l * 98, 544, 96, 36 };
         bool hov = CheckCollisionPointRec(GetMousePosition(), r);
         if (hov) hand = true;
         if (l == lang) DrawRectangleRounded(r, 0.3f, 10, ACCENTS[l]);
@@ -2278,18 +3023,18 @@ static void MenuSidebar(Color accent)
     }
     /* level and streak */
     int xp = XpTotal(), lv = LevelOf(xp), lo = 30 * (lv - 1) * (lv - 1), hi = 30 * lv * lv;
-    Rectangle pc = { 16, 580, 204, 164 };
+    Rectangle pc = { 16, 596, 204, 152 };
     Panel(pc, 0.08f, SURF, BORDER);
-    DrawCircle(46, 614, 20, Fade(accent, 0.2f));
-    DrawRing((Vector2) { 46, 614 }, 17, 20, -90, -90 + 360.0f * (xp - lo) / (hi - lo), 40, accent);
-    CenterTxt(fBold, TextFormat("%d", lv), 46, 603, 19, TXT);
-    Txt(fBold, TextFormat("Level %d", lv), 80, 598, 18, TXT);
-    Txt(fReg, TextFormat("%d / %d XP", xp, hi), 80, 622, 13, DIM);
-    DrawRectangleRounded((Rectangle) { 28, 650, 180, 7 }, 0.5f, 6, SURF2);
-    DrawRectangleRounded((Rectangle) { 28, 650, 180.0f * (xp - lo) / (hi - lo), 7 }, 0.5f, 6, accent);
-    DrawFlame(40, 689, 11, (Color) { 255, 140, 40, 255 });
-    Txt(fBold, TextFormat("%d day streak", pro.streak), 60, 679, 16, TXT);
-    Txt(fReg, TextFormat("Best: %d    Solved: %d", pro.bestStreak, SolvedTotal(lang)), 28, 710, 13, DIM);
+    DrawCircle(46, 630, 20, Fade(accent, 0.2f));
+    DrawRing((Vector2) { 46, 630 }, 17, 20, -90, -90 + 360.0f * (xp - lo) / (hi - lo), 40, accent);
+    CenterTxt(fBold, TextFormat("%d", lv), 46, 619, 19, TXT);
+    Txt(fBold, TextFormat("Level %d", lv), 80, 614, 18, TXT);
+    Txt(fReg, TextFormat("%d / %d XP", xp, hi), 80, 638, 13, DIM);
+    DrawRectangleRounded((Rectangle) { 28, 666, 180, 7 }, 0.5f, 6, SURF2);
+    DrawRectangleRounded((Rectangle) { 28, 666, 180.0f * (xp - lo) / (hi - lo), 7 }, 0.5f, 6, accent);
+    DrawFlame(40, 705, 11, (Color) { 255, 140, 40, 255 });
+    Txt(fBold, TextFormat("%d day streak", pro.streak), 60, 695, 16, TXT);
+    Txt(fReg, TextFormat("Best: %d    Solved: %d", pro.bestStreak, SolvedTotal(lang)), 28, 726, 13, DIM);
 }
 
 static void MenuHeader(const char* title, const char* sub)
@@ -2297,6 +3042,7 @@ static void MenuHeader(const char* title, const char* sub)
     Txt(fBold, title, 268, 22, 31, TXT);
     Txt(fReg, sub, 270, 62, 15, DIM);
     DrawCreditsChip(W - 32, 24);
+    SettingsButton(0, 24);
 }
 
 /* what the "Continue" button does for a lesson */
@@ -2437,7 +3183,7 @@ static void MenuLearn(Color accent)
     int xp = XpTotal(), lv = LevelOf(xp);
     float target[4] = { (float)pro.streak, (float)lv, (float)SolvedTotal(lang), (float)perfect };
     const char* label[4] = { "DAY STREAK", "LEVEL", "PROBLEMS SOLVED", "PERFECT QUIZZES" };
-    const char* of[4] = { "", "", TextFormat("/ %d", NPROB), TextFormat("/ %d", NLESSONS) };
+    const char* of[4] = { "", "", TextFormat("/ %d", NPROB_STD), TextFormat("/ %d", NLESSONS) };
     Color sc4[4] = { { 255, 140, 40, 255 }, accent, GOOD, { 255, 214, 90, 255 } };
     for (int i = 0; i < 4; i++) {
         learnStat[i] += (target[i] - learnStat[i]) * (dt * 7 > 1 ? 1 : dt * 7);
@@ -2586,9 +3332,94 @@ static void MenuLearn(Color accent)
     EndScissorMode();
 }
 
+static const char* LabRuleText(int rules)
+{
+    if (rules & LR_NOCOND) return "2 loops, no if";
+    if (rules & LR_ONEIF) return "2 loops, 1 if";
+    if (rules & LR_TWOFOR) return "2 loops only";
+    return "";
+}
+static int LabSheetTotal(const char* sheet) { int n = 0; for (int i = NPROB_STD; i < NPROB; i++) if (!strcmp(PROBS[i].topic, sheet)) n++; return n; }
+static int LabSheetSolved(const char* sheet) { int n = 0; for (int i = NPROB_STD; i < NPROB; i++) if (!strcmp(PROBS[i].topic, sheet) && pro.solved[1][i]) n++; return n; }
+
+static void MenuLabs(Color accent)
+{
+    static const char* sheets[2] = { "C++ Practical 1", "Lab 2" };
+    for (int c = 0; c < 2; c++) {
+        Rectangle r = { 268.0f + c * 458, 96, 442, 76 };
+        int tot = LabSheetTotal(sheets[c]), sol = LabSheetSolved(sheets[c]);
+        Panel(r, 0.12f, SURF, BORDER);
+        Txt(fBold, sheets[c], r.x + 18, r.y + 10, 17, c ? (Color) { 90, 160, 240, 255 } : (Color) { 255, 184, 64, 255 });
+        Txt(fBold, TextFormat("%d / %d", sol, tot), r.x + r.width - 18 - TxtW(fBold, TextFormat("%d / %d", sol, tot), 17), r.y + 10, 17, TXT);
+        DrawRectangleRounded((Rectangle) { r.x + 18, r.y + 48, r.width - 36, 8 }, 0.5f, 6, SURF2);
+        if (sol) DrawRectangleRounded((Rectangle) { r.x + 18, r.y + 48, (r.width - 36)* sol / tot, 8 }, 0.5f, 6, c ? (Color) { 90, 160, 240, 255 } : (Color) { 255, 184, 64, 255 });
+    }
+    Txt(fReg, "Always C++. Write the function; the test harness under it reads the input and prints your result. Pass every test to solve a task.", 268, 188, 15, DIM);
+
+    Rectangle th = { 268, 218, 900, 30 };
+    DrawRectangle((int)th.x, (int)th.y, (int)th.width, (int)th.height, SURF);
+    Txt(fBold, "STATUS", th.x + 16, th.y + 7, 12, DIM); Txt(fBold, "TASK", th.x + 90, th.y + 7, 12, DIM);
+    Txt(fBold, "RULES", th.x + 560, th.y + 7, 12, DIM); Txt(fBold, "DIFFICULTY", th.x + 790, th.y + 7, 12, DIM);
+
+    int rowsN = 0, rowIdx[NPROB + 4];                           /* -1 / -2 = a sheet heading, otherwise a problem */
+    for (int c = 0; c < 2; c++) {
+        rowIdx[rowsN++] = -1 - c;
+        for (int i = NPROB_STD; i < NPROB; i++) if (!strcmp(PROBS[i].topic, sheets[c])) rowIdx[rowsN++] = i;
+    }
+    Rectangle view = { 268, 248, 900, 500 };
+    const float rh = 44;
+    float maxS = rowsN * rh - view.height; if (maxS < 0) maxS = 0;
+    if (CheckCollisionPointRec(GetMousePosition(), view)) pracScroll -= GetMouseWheelMove() * 44;
+    if (pracScroll < 0) pracScroll = 0;
+    if (pracScroll > maxS) pracScroll = maxS;
+    ScissorT((int)view.x, (int)view.y, (int)view.width, (int)view.height);
+    int num = 0;
+    for (int k = 0; k < rowsN; k++) {
+        int i = rowIdx[k]; float y = view.y + k * rh - pracScroll;
+        if (i < 0) {
+            num = 0;
+            if (y > view.y + view.height || y + rh < view.y) continue;
+            DrawRectangle((int)view.x, (int)y, (int)view.width, (int)rh, (Color) { 28, 40, 27, 255 });
+            Txt(fBold, TextFormat("%s   -   %d / %d solved", sheets[-1 - i], LabSheetSolved(sheets[-1 - i]), LabSheetTotal(sheets[-1 - i])), view.x + 16, y + 12, 17, accent);
+            continue;
+        }
+        num++;
+        if (y > view.y + view.height || y + rh < view.y) continue;
+        Rectangle r = { view.x, y, view.width, rh };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r) && CheckCollisionPointRec(GetMousePosition(), view);
+        DrawRectangleRec(r, hov ? SURF2 : (k & 1 ? (Color) { 19, 27, 18, 255 } : (Color) { 15, 22, 14, 255 }));
+        if (hov) hand = true;
+        float cy = y + rh / 2;
+        if (pro.solved[1][i]) { DrawCircle((int)r.x + 30, (int)cy, 11, GOOD); DrawCheck(r.x + 30, cy, 14, WHITE); }
+        else if (pro.attempts[1][i]) DrawRing((Vector2) { r.x + 30, cy }, 8, 11, 0, 360, 24, (Color) { 255, 184, 64, 255 });
+        else DrawRing((Vector2) { r.x + 30, cy }, 9, 11, 0, 360, 24, BORDER);
+        TxtFit(fMed, TextFormat("%d.  %s", num, PROBS[i].title), r.x + 90, y + 10, 18, 450, TXT);
+        Txt(fReg, LabRuleText(PROBS[i].rules), r.x + 560, y + 12, 15, DIM);
+        Txt(fBold, DIFF_NAME[PROBS[i].diff], r.x + 790, y + 11, 16, DIFF_COL[PROBS[i].diff]);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) StartProblem(i);
+    }
+    EndScissorMode();
+}
+
 static void MenuPractice(Color accent)
 {
-    MenuHeader("Practice", TextFormat("%s  -  write real %s programs; every submission is compiled and run against test cases", LANG_NAME[lang], LANG_NAME[lang]));
+    MenuHeader("Practice", pracTab ? "Labs  -  the C++ Practical 1 and Lab 2 tasks, auto-checked against test cases"
+        : TextFormat("%s  -  write real %s programs; every submission is compiled and run against test cases", LANG_NAME[lang], LANG_NAME[lang]));
+    {   /* Problems | Labs */
+        static const char* tn[2] = { "Problems", "Labs" };
+        float tx = 420;
+        for (int t = 0; t < 2; t++) {
+            float w = TxtW(fBold, tn[t], 16) + 34;
+            Rectangle r = { tx, 24, w, 34 };
+            bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+            if (hov) hand = true;
+            DrawRectangleRounded(r, 0.5f, 10, t == pracTab ? accent : (hov ? SURF2 : SURF));
+            CenterTxt(fBold, tn[t], r.x + w / 2, r.y + 7, 16, t == pracTab ? WHITE : DIM);
+            if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && t != pracTab) { pracTab = t; pracScroll = 0; }
+            tx += w + 8;
+        }
+    }
+    if (pracTab == 1) { MenuLabs(accent); return; }
     for (int d = 0; d < 3; d++) {
         Rectangle c = { 268.0f + d * 304, 96, 292, 76 };
         Panel(c, 0.12f, SURF, BORDER);
@@ -2622,6 +3453,16 @@ static void MenuPractice(Color accent)
         if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { pracUnsolved = !pracUnsolved; pracScroll = 0; }
         fx = r.x + w + 8;
     }
+    {
+        const char* t = pracKind < 0 ? "Type: all" : pracKind == 0 ? "Type: write it" : "Type: fix it"; float w = TxtW(fMed, t, 15) + 30;
+        Rectangle r = { fx, 186, w, 34 };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+        if (hov) hand = true;
+        DrawRectangleRounded(r, 0.5f, 10, pracKind == 1 ? Fade((Color) { 240, 92, 104, 255 }, hov ? 0.5f : 0.35f) : pracKind == 0 ? Fade(accent, hov ? 0.4f : 0.25f) : (hov ? SURF2 : SURF));
+        CenterTxt(fMed, t, r.x + w / 2, r.y + 6, 15, pracKind < 0 ? DIM : TXT);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { pracKind = pracKind >= 1 ? -1 : pracKind + 1; pracScroll = 0; }
+        fx = r.x + w + 8;
+    }
     if (pracLesson >= 0) {
         const char* t = TextFormat("Unit %d  x", pracLesson + 1); float w = TxtW(fMed, t, 15) + 30;
         Rectangle r = { fx, 186, w, 34 };
@@ -2638,10 +3479,11 @@ static void MenuPractice(Color accent)
     Txt(fBold, "STATUS", th.x + 16, th.y + 7, 12, DIM); Txt(fBold, "TITLE", th.x + 90, th.y + 7, 12, DIM);
     Txt(fBold, "TOPIC", th.x + 520, th.y + 7, 12, DIM); Txt(fBold, "UNIT", th.x + 690, th.y + 7, 12, DIM); Txt(fBold, "DIFFICULTY", th.x + 790, th.y + 7, 12, DIM);
     int idx[NPROB], n = 0;
-    for (int i = 0; i < NPROB; i++) {
+    for (int i = 0; i < NPROB_STD; i++) {
         if (pracDiff >= 0 && PROBS[i].diff != pracDiff) continue;
         if (pracLesson >= 0 && PROBS[i].lesson != pracLesson) continue;
         if (pracUnsolved && pro.solved[lang][i]) continue;
+        if (pracKind >= 0 && PROBS[i].kind != pracKind) continue;
         idx[n++] = i;
     }
     Rectangle view = { 268, 262, 900, 486 };
@@ -3185,6 +4027,55 @@ static void GainCredits(int n, const char* why)
     char b[96];
     snprintf(b, sizeof b, "+%d credits  -  %s", n, why);
     Notify(b, (Color) { 255, 205, 90, 255 });
+    FxCredits(n);
+}
+
+/* ---- floating "+N" numbers and confetti when you earn something ---- */
+typedef struct { float x, y, vx, vy, life, max, rot; int n; Color c; } Fx;
+static Fx fxs[110];
+static void FxAdd(Fx f) { for (int i = 0; i < 110; i++) if (fxs[i].life <= 0) { fxs[i] = f; return; } }
+static void FxCredits(int n)
+{
+    if (!cfg.fx) return;
+    static const Color pal[6] = { { 255, 214, 90, 255 }, { 120, 235, 150, 255 }, { 150, 214, 236, 255 }, { 255, 130, 150, 255 }, { 240, 244, 248, 255 }, { 190, 150, 255, 255 } };
+    FxAdd((Fx) { W - 300.0f, 70, 0, -34, 1.6f, 1.6f, 0, n, { 255, 205, 90, 255 } });
+    int pieces = n >= 40 ? 40 : n >= 20 ? 28 : 18;
+    for (int i = 0; i < pieces; i++) {
+        float a = -PI / 2 + ((float)GetRandomValue(-100, 100) / 100.0f) * 1.25f, sp = 140 + (float)GetRandomValue(0, 260);
+        float life = 0.9f + (float)GetRandomValue(0, 70) / 100.0f;
+        FxAdd((Fx) { W - 300.0f, 60, cosf(a)* sp, sinf(a)* sp, life, life, (float)GetRandomValue(0, 628) / 100.0f, 0, pal[GetRandomValue(0, 5)] });
+    }
+}
+static void DrawFx(float dt)
+{
+    for (int i = 0; i < 110; i++) {
+        Fx* f = &fxs[i];
+        if (f->life <= 0) continue;
+        f->life -= dt;
+        if (f->n > 0) {
+            f->y += f->vy * dt; f->vy *= 0.975f;
+            float a = f->life / f->max, aa = a > 0.6f ? 1.0f : a / 0.6f;
+            const char* t = TextFormat("+%d", f->n);
+            float w = TxtW(fBold, t, 30);
+            Txt(fBold, t, f->x - w / 2 + 2, f->y + 2, 30, Fade(BLACK, 0.5f * aa));
+            Txt(fBold, t, f->x - w / 2, f->y, 30, Fade(f->c, aa));
+        }
+        else {
+            f->vy += 520 * dt; f->x += f->vx * dt; f->y += f->vy * dt; f->vx *= 0.99f; f->rot += dt * 9;
+            float a = f->life * 2.0f; if (a > 1) a = 1;
+            DrawRectanglePro((Rectangle) { f->x, f->y, 7, 11 }, (Vector2) { 3.5f, 5.5f }, f->rot * 57.3f, Fade(f->c, a));
+        }
+    }
+}
+/* darkened edges and corners, like a camera lens */
+static void DrawVignette(void)
+{
+    const int e = 120;
+    Color c = Fade(BLACK, 0.26f), z = Fade(BLACK, 0);
+    DrawRectangleGradientV(0, 0, W, e, c, z);
+    DrawRectangleGradientV(0, H - e, W, e, z, c);
+    DrawRectangleGradientH(0, 0, e, H, c, z);
+    DrawRectangleGradientH(W - e, 0, e, H, z, c);
 }
 
 static void DrawCoin(float x, float y, float r)
@@ -3594,12 +4485,19 @@ static void DrawPersonEx(float x, float fy, int dir, float sc, float ph, const L
     const float o = 1.3f * sc;
     float s = sinf(ph) * K(3.0f), bob = fabsf(sinf(ph)) * K(1.5f);
     float offL = s > 0 ? s : 0, offR = s < 0 ? -s : 0;
-    float by = fy - K(33) - bob, hy = fy - K(44) - bob;
     bool moving = ph != 0;
+    float tm = (float)GetTime();
+    float breath = moving ? 0.0f : sinf(tm * 2.3f + x * 0.013f) * K(0.55f);          /* standing still: gentle breathing */
+    float by = fy - K(33) - bob - breath, hy = fy - K(44) - bob - breath * 1.7f;
+    bool blink = fmodf(tm + x * 0.0137f + fy * 0.0071f, 4.1f) < 0.13f;
     Color sk = L->skin, shirt = L->shirt;
+    Color skShade = ColorBrightness(sk, -0.15f);
+    static const Color IRIS[3] = { { 74, 118, 168, 255 }, { 96, 62, 40, 255 }, { 62, 128, 84, 255 } };
+    Color iris = IRIS[(L->hair.r + L->hair.g + L->hair.b) % 3];
 
-    DrawEllipse((int)x, (int)fy, K(16), K(6), Fade(BLACK, 0.20f));
-    DrawEllipse((int)x, (int)fy, K(11), K(4), Fade(BLACK, 0.25f));
+    DrawEllipse((int)x, (int)fy, K(19), K(7), Fade(BLACK, 0.10f));                    /* soft ground shadow, three layers */
+    DrawEllipse((int)x, (int)fy, K(14), K(5), Fade(BLACK, 0.14f));
+    DrawEllipse((int)x, (int)fy, K(10), K(3.4f), Fade(BLACK, 0.22f));
 
     /* things that hang behind the body */
     if (L->pack == 1 && dir != 3) {                                   /* cape */
@@ -3623,11 +4521,19 @@ static void DrawPersonEx(float x, float fy, int dir, float sc, float ph, const L
     /* legs and shoes */
     OutRR(x - K(9), fy - K(13) - offL, K(8), K(13), 0.3f, L->pants, o);
     OutRR(x + K(1), fy - K(13) - offR, K(8), K(13), 0.3f, L->pants, o);
+    DrawRectangleRounded((Rectangle) { x - K(7.6f), fy - K(12) - offL, K(2), K(8) }, 0.6f, 3, Fade(WHITE, 0.10f));
+    DrawRectangleRounded((Rectangle) { x + K(5.4f), fy - K(12) - offR, K(2.4f), K(8) }, 0.6f, 3, Fade(BLACK, 0.16f));
     DrawRectangleRounded((Rectangle) { x - K(10), fy - K(4) - offL, K(10), K(4) }, 0.5f, 4, shoe);
     DrawRectangleRounded((Rectangle) { x, fy - K(4) - offR, K(10), K(4) }, 0.5f, 4, shoe);
+    DrawRectangle((int)(x - K(9)), (int)(fy - K(4) - offL), (int)K(8), (int)(K(0.9f) + 1), Fade(WHITE, 0.16f));
+    DrawRectangle((int)(x + K(1)), (int)(fy - K(4) - offR), (int)K(8), (int)(K(0.9f) + 1), Fade(WHITE, 0.16f));
 
     /* body */
     OutRR(x - K(13), by, K(26), K(22), 0.3f, shirt, o);
+    DrawRectangleRounded((Rectangle) { x - K(11.6f), by + K(1.5f), K(4.2f), K(17) }, 0.6f, 4, Fade(WHITE, 0.15f));      /* light from the top left */
+    DrawRectangleRounded((Rectangle) { x + K(7.6f), by + K(1.5f), K(4.2f), K(17) }, 0.6f, 4, Fade(BLACK, 0.17f));
+    DrawRectangle((int)(x - K(12.4f)), (int)(by + K(18.6f)), (int)K(24.8f), (int)K(2.6f), ColorBrightness(L->pants, -0.38f));     /* belt */
+    if (dir == 0) DrawRectangle((int)(x - K(2)), (int)(by + K(18.4f)), (int)K(4), (int)K(3), (Color) { 232, 196, 96, 255 });
     if (L->outfit == 3) {                                             /* lab coat: longer, with a collar */
         OutRR(x - K(13), by + K(12), K(26), K(14), 0.2f, shirt, o);
         if (dir == 0) {
@@ -3652,8 +4558,12 @@ static void DrawPersonEx(float x, float fy, int dir, float sc, float ph, const L
     /* arms */
     OutRR(x - K(19), by + K(3) + s * 0.5f, K(6), K(15), 0.5f, shirt, o);
     OutRR(x + K(13), by + K(3) - s * 0.5f, K(6), K(15), 0.5f, shirt, o);
+    DrawRectangleRounded((Rectangle) { x - K(18.2f), by + K(4.5f) + s * 0.5f, K(1.8f), K(10) }, 0.6f, 3, Fade(WHITE, 0.16f));
+    DrawRectangleRounded((Rectangle) { x + K(16.4f), by + K(4.5f) - s * 0.5f, K(1.8f), K(10) }, 0.6f, 3, Fade(BLACK, 0.18f));
     DrawCircle((int)(x - K(16)), (int)(by + K(20) + s * 0.5f), K(3), sk);
     DrawCircle((int)(x + K(16)), (int)(by + K(20) - s * 0.5f), K(3), sk);
+    DrawCircle((int)(x - K(15.2f)), (int)(by + K(20.8f) + s * 0.5f), K(1.6f), skShade);
+    DrawCircle((int)(x + K(16.8f)), (int)(by + K(20.8f) - s * 0.5f), K(1.6f), skShade);
 
     /* things worn on the back, seen from behind */
     if (dir == 3) {
@@ -3671,24 +4581,51 @@ static void DrawPersonEx(float x, float fy, int dir, float sc, float ph, const L
         }
     }
 
+    /* neck */
+    DrawRectangle((int)(x - K(3.4f)), (int)(hy + K(9)), (int)K(6.8f), (int)K(6), skShade);
+    DrawRectangle((int)(x - K(3.4f)), (int)(hy + K(9)), (int)(K(2.2f) + 1), (int)K(6), sk);
     /* head: long hair behind, then the head, then spikes / face */
     if (L->hairStyle == 1) OutRR(x - K(12), hy - K(2), K(24), K(25), 0.35f, L->hair, o);
     DrawCircle((int)x, (int)hy, K(12) + o, ink);
     DrawCircle((int)x, (int)hy, K(12), L->hair);
+    DrawRing((Vector2) { x, hy }, K(9.6f), K(12), 330, 450, 18, Fade(BLACK, 0.20f));                              /* hair shading, lower right */
     if (L->hairStyle == 2)
         for (int k = -1; k <= 1; k++) {
             float cx = x + k * K(7), tipY = hy - K(19) - (k == 0 ? K(3) : 0);
             OutTri((Vector2) { cx + k * K(1.5f), tipY }, (Vector2) { cx - K(5), hy - K(6) }, (Vector2) { cx + K(5), hy - K(6) }, L->hair, o);
         }
     if (dir == 0) {
-        DrawCircle((int)x, (int)(hy + K(2)), K(10), sk);
-        DrawCircle((int)(x - K(4)), (int)(hy + K(3)), K(2), ink);
-        DrawCircle((int)(x + K(4)), (int)(hy + K(3)), K(2), ink);
-        DrawCircle((int)(x - K(3.4f)), (int)(hy + K(2.3f)), K(0.7f), WHITE);
-        DrawCircle((int)(x + K(4.6f)), (int)(hy + K(2.3f)), K(0.7f), WHITE);
-        DrawCircle((int)(x - K(6.5f)), (int)(hy + K(6)), K(1.6f), Fade((Color) { 240, 110, 130, 255 }, 0.45f));
-        DrawCircle((int)(x + K(6.5f)), (int)(hy + K(6)), K(1.6f), Fade((Color) { 240, 110, 130, 255 }, 0.45f));
-        DrawRectangle((int)(x - K(2)), (int)(hy + K(7)), (int)K(4), (int)(K(1) + 1), (Color) { 190, 110, 100, 255 });
+        /* ears, then the face (a soft oval with one gentle shadow), then bangs */
+        DrawCircle((int)(x - K(10.6f)), (int)(hy + K(3.2f)), K(2.7f) + o * 0.8f, ink);
+        DrawCircle((int)(x + K(10.6f)), (int)(hy + K(3.2f)), K(2.7f) + o * 0.8f, ink);
+        DrawCircle((int)(x - K(10.6f)), (int)(hy + K(3.2f)), K(2.7f), skShade);
+        DrawCircle((int)(x + K(10.6f)), (int)(hy + K(3.2f)), K(2.7f), skShade);
+        DrawEllipse((int)x, (int)(hy + K(2.4f)), K(10.4f) + o * 0.7f, K(10.2f) + o * 0.7f, ink);
+        DrawEllipse((int)x, (int)(hy + K(2.4f)), K(10.4f), K(10.2f), sk);
+        DrawRing((Vector2) { x, hy + K(2.4f) }, K(8.6f), K(10.3f), 330, 450, 18, Fade(skShade, 0.75f));                  /* shadow on the right */
+        DrawEllipse((int)(x - K(3.4f)), (int)(hy + K(0.2f)), K(3.4f), K(2.2f), Fade(WHITE, 0.10f));                     /* light on the forehead */
+        /* fringe */
+        DrawEllipse((int)x, (int)(hy - K(6.2f)), K(11.4f), K(5.4f), L->hair);
+        DrawTriangle((Vector2) { x - K(9.5f), hy - K(3) }, (Vector2) { x - K(1.5f), hy - K(3.4f) }, (Vector2) { x - K(5.6f), hy + K(1.6f) }, L->hair);
+        DrawTriangle((Vector2) { x - K(2.5f), hy - K(3.4f) }, (Vector2) { x + K(4.5f), hy - K(3.6f) }, (Vector2) { x + K(0.6f), hy + K(0.4f) }, L->hair);
+        DrawTriangle((Vector2) { x + K(3.5f), hy - K(3.6f) }, (Vector2) { x + K(10), hy - K(2.6f) }, (Vector2) { x + K(8.2f), hy + K(0.8f) }, L->hair);
+        DrawRing((Vector2) { x, hy }, K(7.4f), K(10.4f), 212, 262, 12, Fade(WHITE, 0.26f));                              /* shine on the hair */
+        /* face details */
+        for (int e = -1; e <= 1; e += 2) {
+            float ex = x + e * K(3.9f), ey = hy + K(3.6f);
+            DrawLineEx((Vector2) { ex - e * K(2.1f), ey - K(3.3f) }, (Vector2) { ex + e * K(2.3f), ey - K(3.9f) }, K(0.95f), ColorBrightness(L->hair, -0.35f));   /* brow */
+            if (blink) DrawRing((Vector2) { ex, ey - K(0.6f) }, K(1.5f), K(2.4f), 25, 155, 6, ink);
+            else {
+                DrawEllipse((int)ex, (int)ey, K(1.95f), K(2.55f), (Color) { 30, 26, 38, 255 });
+                DrawEllipse((int)ex, (int)(ey + K(0.7f)), K(1.35f), K(1.45f), iris);
+                DrawCircle((int)(ex + K(0.55f)), (int)(ey - K(0.9f)), K(0.85f), WHITE);
+                DrawCircle((int)(ex - K(0.6f)), (int)(ey + K(1.2f)), K(0.4f), Fade(WHITE, 0.85f));
+            }
+        }
+        DrawEllipse((int)(x - K(6.6f)), (int)(hy + K(6.1f)), K(1.9f), K(1.1f), Fade((Color) { 240, 110, 130, 255 }, 0.42f));
+        DrawEllipse((int)(x + K(6.6f)), (int)(hy + K(6.1f)), K(1.9f), K(1.1f), Fade((Color) { 240, 110, 130, 255 }, 0.42f));
+        DrawCircle((int)(x + K(0.2f)), (int)(hy + K(5.9f)), K(0.7f), skShade);                                          /* nose */
+        DrawRing((Vector2) { x, hy + K(6.9f) }, K(1.5f), K(2.2f), 30, 150, 8, (Color) { 150, 78, 72, 255 });              /* smile */
         if (L->glasses) { DrawCircleLines((int)(x - K(4)), (int)(hy + K(3)), K(4), ink); DrawCircleLines((int)(x + K(4)), (int)(hy + K(3)), K(4), ink); }
         if (L->hairStyle == 1) {
             DrawRectangle((int)(x - K(12)), (int)(hy + K(1)), (int)K(3), (int)K(17), L->hair);
@@ -3697,9 +4634,22 @@ static void DrawPersonEx(float x, float fy, int dir, float sc, float ph, const L
     }
     else if (dir == 1 || dir == 2) {
         float sg = dir == 1 ? -1.0f : 1.0f;
-        DrawCircle((int)(x + sg * K(3)), (int)(hy + K(2)), K(9), sk);
-        DrawCircle((int)(x + sg * K(7)), (int)(hy + K(3)), K(2), ink);
-        DrawCircle((int)(x + sg * K(6.4f)), (int)(hy + K(2.3f)), K(0.7f), WHITE);
+        DrawEllipse((int)(x + sg * K(2.6f)), (int)(hy + K(2.6f)), K(9.4f) + o * 0.7f, K(9.8f) + o * 0.7f, ink);
+        DrawEllipse((int)(x + sg * K(2.6f)), (int)(hy + K(2.6f)), K(9.4f), K(9.8f), sk);
+        DrawRing((Vector2) { x + sg * K(2.6f), hy + K(2.6f) }, K(8), K(9.5f), sg > 0 ? 330.0f : 90.0f, sg > 0 ? 450.0f : 210.0f, 14, Fade(skShade, 0.7f));
+        DrawCircle((int)(x - sg * K(4.2f)), (int)(hy + K(3.4f)), K(2.4f), skShade);                                       /* ear */
+        DrawEllipse((int)x, (int)(hy - K(6.4f)), K(11.4f), K(5.2f), L->hair);                                            /* fringe */
+        DrawTriangle((Vector2) { x - sg * K(9.5f), hy - K(3.4f) }, (Vector2) { x + sg * K(8.5f), hy - K(3.6f) }, (Vector2) { x + sg * K(4.2f), hy + K(0.2f) }, L->hair);
+        DrawRing((Vector2) { x, hy }, K(7.4f), K(10.4f), 212, 262, 12, Fade(WHITE, 0.24f));
+        DrawLineEx((Vector2) { x + sg * K(5), hy - K(0.4f) }, (Vector2) { x + sg * K(9), hy - K(0.9f) }, K(0.95f), ColorBrightness(L->hair, -0.35f));
+        if (blink) DrawRing((Vector2) { x + sg * K(7), hy + K(2.6f) }, K(1.4f), K(2.2f), 25, 155, 6, ink);
+        else {
+            DrawEllipse((int)(x + sg * K(7)), (int)(hy + K(3.4f)), K(1.8f), K(2.5f), (Color) { 30, 26, 38, 255 });
+            DrawEllipse((int)(x + sg * K(7.2f)), (int)(hy + K(4.0f)), K(1.2f), K(1.4f), iris);
+            DrawCircle((int)(x + sg * K(7.5f)), (int)(hy + K(2.4f)), K(0.8f), WHITE);
+        }
+        DrawEllipse((int)(x + sg * K(6.4f)), (int)(hy + K(6.4f)), K(1.7f), K(1.0f), Fade((Color) { 240, 110, 130, 255 }, 0.40f));
+        DrawRing((Vector2) { x + sg * K(8.2f), hy + K(7.5f) }, K(1.2f), K(1.8f), sg > 0 ? 20.0f : 100.0f, sg > 0 ? 100.0f : 180.0f, 6, (Color) { 150, 78, 72, 255 });
         DrawCircle((int)(x + sg * K(11.5f)), (int)(hy + K(4.5f)), K(1.3f), sk);
         if (L->glasses) DrawCircleLines((int)(x + sg * K(7)), (int)(hy + K(3)), K(4), ink);
     }
@@ -5197,7 +6147,7 @@ enum { LAB_READY, LAB_COMPILING, LAB_OK, LAB_COMPILE_ERR, LAB_RUNTIME_ERR, LAB_T
 static char labBuf[LAB_CAP + 1];
 static int labLen = 0, labCur = 0, labAnc = 0, labWant = -1;
 static int labLang = 0, labEx = 0, labFocus = 0;
-static char labInput[160] = "";
+static char labInput[400] = "";
 static int labInLen = 0;
 static char labOut[LAB_OUTCAP + 1];
 static int labOutLen = 0;
@@ -5617,8 +6567,8 @@ static void LabRequestRun(void)
     if (labPending == 0) { labPending = 1; labStatus = LAB_COMPILING; labOutScroll = 0; }
 }
 
-static char stashBuf[3][LAB_CAP + 1];
-static int stLen[3], stCur[3], stAnc[3], labOwner = 0;           /* labOwner: 0 = Coding Lab, 1 = Farm, 2 = Practice problem */
+static char stashBuf[4][LAB_CAP + 1];
+static int stLen[4], stCur[4], stAnc[4], labOwner = 0;           /* labOwner: 0 = Coding Lab, 1 = Farm, 2 = Practice problem, 3 = Valley Job */
 
 /* the editor buffer is shared; each screen keeps its own text parked while another one uses it */
 static void LabOwn(int o)
@@ -5651,7 +6601,7 @@ static void LabEdit(void)
     while ((ch = GetCharPressed()) > 0) {
         if (ctrl || ch < 32 || ch > 126) continue;
         if (labFocus == 1) {
-            if (labInLen < 150) { labInput[labInLen++] = (char)ch; labInput[labInLen] = 0; }
+            if (labInLen < 390) { labInput[labInLen++] = (char)ch; labInput[labInLen] = 0; }
             continue;
         }
         if (ch == '}' && !HasSel()) {                       /* closing brace steps back one indent */
@@ -5948,8 +6898,9 @@ static void DrawLab(void)
     TxtFit(fMed, TextFormat("%d/%d   %s", labEx + 1, LAB_NEX, LAB_EX[labLang][labEx].title), 282, 95, 17, dirty ? 240 : 290, TXT);
     if (dirty) Txt(fReg, "edited", 596 - 16 - TxtW(fReg, "edited", 14), 99, 14, (Color) { 240, 180, 60, 255 });
     if (Button((Rectangle) { 602, 86, 44, 44 }, ">", SURF2, 20)) LabLoad(labLang, (labEx + 1) % LAB_NEX);
-    if (Button((Rectangle) { 660, 86, 116, 44 }, "Reset", SURF2, 17)) LabLoad(labLang, labEx);
-    if (Button((Rectangle) { 790, 86, 180, 44 }, labBottom ? "Console: Bottom" : "Console: Side", SURF2, 16)) { labBottom = !labBottom; labSX = labSY = labOutScroll = 0; }
+    if (Button((Rectangle) { 660, 86, 96, 44 }, "Reset", SURF2, 17)) LabLoad(labLang, labEx);
+    if (Button((Rectangle) { 764, 86, 128, 44 }, labBottom ? "Console: Bottom" : "Console: Side", SURF2, 16)) { labBottom = !labBottom; labSX = labSY = labOutScroll = 0; }
+    if (Button((Rectangle) { 900, 86, 76, 44 }, "Step", SURF2, 17)) StepOpen(labBuf, labInput, SCR_LAB);
 
     Rectangle rb = { W - 24 - 190, 86, 190, 44 };
     bool busy = labPending != 0;
@@ -6075,21 +7026,94 @@ static void TryIt(const char* code)
 
 /* ---- practice problems: editor, grader, hints, solution ---- */
 #define PCAP 4000
-static char probCode[NPROB][2][PCAP];
-static int probIdx = 0, probTab = 0, probRes = 0, probPass = 0, probPending = 0, probOnly = -1, probFailIdx = -1, probTest[4];
-static char probGot[4][240], probMsg[1400];
+static char probCode[PROBMAX][2][PCAP];
+static int probIdx = 0, probTab = 0, probRes = 0, probPass = 0, probPending = 0, probOnly = -1, probFailIdx = -1, probTest[6];
+static char probGot[6][240], probMsg[1400];
 static bool probDirty = false, probInit = false;
 static float probSaveT = 0, probScroll = 0;
 
 static void ProbStarter(int i, int lg, char* out, int cap)
 {
+    if (PROBS[i].kind == 2) { snprintf(out, (size_t)cap, "%s", PROBS[i].brokenCpp); return; }   /* lab: function stub + test harness */
+    if (PROBS[i].kind == 1) { snprintf(out, (size_t)cap, "%s", lg == 0 ? PROBS[i].brokenC : PROBS[i].brokenCpp); return; }   /* fix-it: start from the broken program */
     if (lg == 0) snprintf(out, (size_t)cap, "#include <stdio.h>\n\nint main(void) {\n    // TODO: %s\n\n    return 0;\n}\n", PROBS[i].todo);
     else snprintf(out, (size_t)cap, "#include <iostream>\n#include <string>\n#include <vector>\nusing namespace std;\n\nint main() {\n    // TODO: %s\n\n    return 0;\n}\n", PROBS[i].todo);
+}
+/* Lab code saved before the layout fix may have very long lines: wrap long comments and long
+   quote-free code lines so everything fits the editor. Only line breaks change, never the meaning. */
+#define LAB_COLS 56
+static void LabRewrap(char* c, int cap)
+{
+    static char out[PCAP * 3 + 8], ln[240];
+    int n = 0;
+    const char* p = c;
+#define LPUT(ch) do { if (n < (int)sizeof out - 2) out[n++] = (char)(ch); } while (0)
+    while (*p) {
+        const char* e = strchr(p, '\n');
+        int len = e ? (int)(e - p) : (int)strlen(p), ind = 0;
+        while (ind < len && p[ind] == ' ') ind++;
+        bool cmt = len - ind >= 2 && p[ind] == '/' && p[ind + 1] == '/';
+        const char* sn = cmt ? strstr(p, "        Student number:") : NULL;
+        if (sn && sn < p + len) {                                   /* the name / student number header */
+            int a = (int)(sn - p); while (a > 0 && p[a - 1] == ' ') a--;
+            for (int i = 0; i < a; i++) LPUT(p[i]);
+            LPUT('\n'); LPUT('/'); LPUT('/'); LPUT(' ');
+            const char* q = sn; while (*q == ' ') q++;
+            for (; q < p + len; q++) LPUT(*q);
+        }
+        else if (cmt && len > LAB_COLS) {                         /* word-wrap a long comment */
+            const char* t = p + ind + 2, * end = p + len;
+            while (t < end && *t == ' ') t++;
+            int lnl = 0;
+            while (t < end) {
+                const char* w = t; while (w < end && *w != ' ') w++;
+                int wl = (int)(w - t);
+                if (lnl > 0 && ind + 3 + lnl + 1 + wl > LAB_COLS) {
+                    for (int i = 0; i < ind; i++) LPUT(' ');
+                    LPUT('/'); LPUT('/'); LPUT(' ');
+                    for (int i = 0; i < lnl; i++) LPUT(ln[i]);
+                    LPUT('\n'); lnl = 0;
+                }
+                if (lnl > 0 && lnl < 230) ln[lnl++] = ' ';
+                for (int i = 0; i < wl && lnl < 230; i++) ln[lnl++] = t[i];
+                t = w; while (t < end && *t == ' ') t++;
+            }
+            for (int i = 0; i < ind; i++) LPUT(' ');
+            LPUT('/'); LPUT('/'); LPUT(' ');
+            for (int i = 0; i < lnl; i++) LPUT(ln[i]);
+        }
+        else if (!cmt && len > LAB_COLS && !memchr(p, '"', (size_t)len) && !memchr(p, '\'', (size_t)len)) {
+            const char* s2 = p; int rem = len, pw = 0, first = 1;     /* break a long code line after a comma or before && / || */
+            while (pw + rem > LAB_COLS) {
+                int best = -1, lo = first ? ind + 8 : 8;
+                for (int i = lo; i < LAB_COLS - pw && i + 2 < rem; i++) {
+                    if (s2[i] == ',' && s2[i + 1] == ' ') best = i + 2;
+                    else if (s2[i] == ' ' && ((s2[i + 1] == '&' && s2[i + 2] == '&') || (s2[i + 1] == '|' && s2[i + 2] == '|'))) best = i + 1;
+                }
+                if (best < 0) break;
+                int a = best; while (a > 0 && s2[a - 1] == ' ') a--;
+                if (!first) for (int i = 0; i < ind + 8; i++) LPUT(' ');
+                for (int i = 0; i < a; i++) LPUT(s2[i]);
+                LPUT('\n');
+                s2 += best; rem -= best; while (rem > 0 && *s2 == ' ') { s2++; rem--; }
+                first = 0; pw = ind + 8;
+            }
+            if (!first) for (int i = 0; i < ind + 8; i++) LPUT(' ');
+            for (int i = 0; i < rem; i++) LPUT(s2[i]);
+        }
+        else for (int i = 0; i < len; i++) LPUT(p[i]);
+        if (e) { LPUT('\n'); p = e + 1; }
+        else break;
+    }
+#undef LPUT
+    out[n] = 0;
+    if (n < cap - 1 && strcmp(out, c) != 0) memcpy(c, out, (size_t)n + 1);
 }
 static void ProbLoad(void)
 {
     char* c = probCode[probIdx][lang];
     if (!c[0]) ProbStarter(probIdx, lang, c, PCAP);
+    if (PROBS[probIdx].kind == 2) LabRewrap(c, PCAP);
     int n = (int)strlen(c);
     memcpy(labBuf, c, (size_t)n + 1); labLen = n; labCur = labAnc = 0; labSX = labSY = 0; labErrN = 0;
     probRes = 0; probPass = 0; probFailIdx = -1; probPending = 0; probMsg[0] = 0; memset(probTest, 0, sizeof probTest);
@@ -6111,8 +7135,9 @@ static void SaveProbCode(void)
 static void StartProblem(int idx)
 {
     LabOwn(2);
-    if (!probInit) { probInit = true; FILE* f = fopen("problems.dat", "rb"); if (f) { if (fread(probCode, sizeof probCode, 1, f) != 1) memset(probCode, 0, sizeof probCode); fclose(f); } }
-    probIdx = idx; probTab = 0; probScroll = 0; menuTab = 1;
+    if (!probInit) { probInit = true; FILE* f = fopen("problems.dat", "rb"); if (f) { if (fread(probCode, 1, sizeof probCode, f) == 0) memset(probCode, 0, sizeof probCode);   /* shorter old files still load */ fclose(f); } }
+    if (PROBS[idx].kind == 2 && lang != 1) SetLang(1);        /* labs are C++ */
+    probIdx = idx; probTab = 0; probScroll = 0; menuTab = 1; pracTab = PROBS[idx].kind == 2 ? 1 : 0;
     ProbLoad();
     labFocus = 0; labPending = 0; labStatus = LAB_READY;
     screen = SCR_PROBLEM;
@@ -6135,6 +7160,47 @@ static bool OutMatch(const char* got, const char* exp)
     return strcmp(a, b) == 0;
 }
 
+/* ---- lab rules: a small check of the assignment rules (comments and strings are ignored) ---- */
+static int LabWords(const char* t, const char* w)
+{
+    int n = 0, wl = (int)strlen(w);
+    for (const char* p = t; *p;) {
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            const char* q = p; while (isalnum((unsigned char)*q) || *q == '_') q++;
+            if ((int)(q - p) == wl && strncmp(p, w, (size_t)wl) == 0) n++;
+            p = q;
+        }
+        else { if (w[0] == '?' && *p == '?') n++; p++; }
+    }
+    return n;
+}
+static const char* LabRuleCheck(const char* code, int rules)
+{
+    static char t[LAB_CAP + 2], msg[200];
+    int n = 0;
+    for (const char* p = code; *p && n < LAB_CAP;) {
+        if (p[0] == '/' && p[1] == '/') { while (*p && *p != '\n') p++; t[n++] = ' '; }
+        else if (p[0] == '/' && p[1] == '*') { p += 2; while (*p && !(p[0] == '*' && p[1] == '/')) p++; if (*p) p += 2; t[n++] = ' '; }
+        else if (*p == '"' || *p == '\'') { char q = *p++; while (*p && *p != q && *p != '\n') { if (*p == '\\' && p[1]) p++; p++; } if (*p == q) p++; t[n++] = ' '; }
+        else t[n++] = *p++;
+    }
+    t[n] = 0;
+    if ((rules & LR_CHARINT) && (LabWords(t, "string") || LabWords(t, "vector"))) return "Lab rule: use only ints and chars. string and vector are not allowed in this task.";
+    if (rules & LR_TWOFOR) {
+        int f = LabWords(t, "for");
+        if (f > 2) { snprintf(msg, sizeof msg, "Lab rule: use only 2 for loops. Your code has %d.", f); return msg; }
+        if (LabWords(t, "while") || LabWords(t, "do")) return "Lab rule: use only for loops (no while or do) in this task.";
+    }
+    if (rules & LR_NOCOND) {
+        if (LabWords(t, "if") || LabWords(t, "else") || LabWords(t, "switch") || LabWords(t, "?")) return "Lab rule: no conditional statements in this task: no if, else, switch or ? :";
+    }
+    if (rules & LR_ONEIF) {
+        if (LabWords(t, "if") > 1 || LabWords(t, "else") > 1) return "Lab rule: use at most 1 if (and 1 else) in this task.";
+        if (LabWords(t, "switch") || LabWords(t, "?")) return "Lab rule: use at most 1 if (and 1 else). switch and ? : are not allowed.";
+    }
+    return NULL;
+}
+
 /* only < 0: run every test (a submission); otherwise just that one test (a trial run) */
 static void ProbGrade(int only)
 {
@@ -6142,6 +7208,7 @@ static void ProbGrade(int only)
     memset(probTest, 0, sizeof probTest); memset(probGot, 0, sizeof probGot);
     probMsg[0] = 0; probPass = 0; probFailIdx = -1; labErrN = 0;
     labLang = lang;
+    if (P->rules) { const char* rm = LabRuleCheck(labBuf, P->rules); if (rm) { probRes = 8; snprintf(probMsg, sizeof probMsg, "%s", rm); labStatus = LAB_READY; return; } }
     int first = only >= 0 ? only : 0, last = only >= 0 ? only : P->nt - 1, kind = 1;
     for (int t = first; t <= last; t++) {
         snprintf(labInput, sizeof labInput, "%s", P->t[t].in); labInLen = (int)strlen(labInput);
@@ -6215,11 +7282,32 @@ static void ProbLeft(Rectangle L, Color accent)
         Pill(P->topic, cv.x + TxtW(fMed, DIFF_NAME[P->diff], 14) + 36, y, DIM);
         if (pro.solved[lang][probIdx]) Pill("Solved", cv.x + w - TxtW(fMed, "Solved", 14) - 28, y, GOOD);
         y += 42;
-        y += Wrapped(fReg, P->desc, cv.x, y, w, 17, (Color) { 231, 223, 201, 255 }) + 10;
+        if (P->kind == 1) {
+            const char* bn = "Debugging challenge. The code in the editor already compiles and runs, but it has a bug. Run it, compare the output with what is expected, then find and fix the mistake. The Step through button shows what every line does.";
+            float bh = (float)WrapH(fReg, bn, w - 28, 14) + 20;
+            DrawRectangleRounded((Rectangle) { cv.x, y, w, bh }, 0.12f, 8, Fade((Color) { 240, 92, 104, 255 }, 0.14f));
+            DrawRectangle((int)cv.x, (int)y + 6, 3, (int)bh - 12, (Color) { 240, 92, 104, 255 });
+            Wrapped(fReg, bn, cv.x + 14, y + 10, w - 28, 14, (Color) { 239, 220, 214, 255 });
+            y += bh + 12;
+        }
+        if (P->kind == 2) {
+            static char bn[700];
+            snprintf(bn, sizeof bn, "Lab task (C++). Write the function at the top of the editor. The test harness underneath reads the input, calls your function and prints the result, so leave it as it is.%s%s%s%s",
+                (P->rules & LR_CHARINT) ? " Use only ints and chars (no string or vector)." : "",
+                (P->rules & LR_TWOFOR) ? " Only 2 for loops." : "",
+                (P->rules & LR_NOCOND) ? " No if, else, switch or ? :." : "",
+                (P->rules & LR_ONEIF) ? " At most 1 if and an else." : "");
+            float bh = (float)WrapH(fReg, bn, w - 28, 14) + 20;
+            DrawRectangleRounded((Rectangle) { cv.x, y, w, bh }, 0.12f, 8, Fade((Color) { 90, 160, 240, 255 }, 0.14f));
+            DrawRectangle((int)cv.x, (int)y + 6, 3, (int)bh - 12, (Color) { 90, 160, 240, 255 });
+            Wrapped(fReg, bn, cv.x + 14, y + 10, w - 28, 14, (Color) { 214, 226, 239, 255 });
+            y += bh + 12;
+        }
+        y = (float)Wrapped(fReg, P->desc, cv.x, y, w, 17, (Color) { 231, 223, 201, 255 }) + 10;
         Txt(fBold, "INPUT / OUTPUT", cv.x, y, 12, DIM); y += 22;
         y = ProbBox("", P->fmt, cv.x, y, w, 6);
         for (int e = 0; e < 2; e++) {
-            char in[200]; ProbText(P->t[e].in, in, sizeof in);
+            char in[600]; ProbText(P->t[e].in, in, sizeof in);
             Txt(fBold, TextFormat("EXAMPLE %d", e + 1), cv.x, y, 12, DIM); y += 22;
             y = ProbBox("Input", in, cv.x, y, w, 6);
             y = ProbBox("Output", P->t[e].out, cv.x, y, w, 6);
@@ -6228,7 +7316,7 @@ static void ProbLeft(Rectangle L, Color accent)
         y += 80;
     }
     else if (probTab == 1) {
-        y += Wrapped(fReg, "Stuck? Try the problem first, then reveal hints one at a time. Each one is more specific than the last.", cv.x, y, w, 15, DIM) + 10;
+        y = (float)Wrapped(fReg, "Stuck? Try the problem first, then reveal hints one at a time. Each one is more specific than the last.", cv.x, y, w, 15, DIM) + 10;
         for (int h = 0; h < 3; h++) {
             bool shown = h < pro.hints[probIdx];
             Rectangle c = { cv.x, y, w, shown ? (float)WrapH(fReg, P->hint[h], w - 32, 16) + 56 : 64 };
@@ -6252,7 +7340,7 @@ static void ProbLeft(Rectangle L, Color accent)
             y += 160;
         }
         else {
-            y += Wrapped(fReg, P->why, cv.x, y, w, 16, (Color) { 231, 223, 201, 255 }) + 14;
+            y = (float)Wrapped(fReg, P->why, cv.x, y, w, 16, (Color) { 231, 223, 201, 255 }) + 14;
             y = (float)DrawCode(lang == 0 ? P->solC : P->solCpp, cv.x, y, w, 12.5f, lang == 0 ? "solution.c" : "solution.cpp") + 14;
             Wrapped(fReg, "Compare this with your own code. Is yours shorter, clearer or handling more cases? Try rewriting it from memory tomorrow.", cv.x, y, w, 14, DIM);
             y += 70;
@@ -6273,15 +7361,17 @@ static void ProbResults(Rectangle R)
     if (probPending) { CenterTxt(fBold, "Compiling and running your code...", R.x + R.width / 2, R.y + R.height / 2 - 14, 20, DIM); return; }
     if (probRes == 0) {
         Txt(fBold, "Test results", x, y, 18, TXT);
-        Wrapped(fReg, "Write your solution, press Run sample to try the first example, then Submit to check it against all test cases. Read the error messages carefully - they are the fastest teacher.", x, y + 34, w, 15, DIM);
-        for (int t = 0; t < 4; t++) { DrawRectangleRounded((Rectangle) { x + t * 78.0f, R.y + R.height - 54, 70, 34 }, 0.3f, 8, CODEBG); CenterTxt(fReg, TextFormat("Test %d", t + 1), x + t * 78.0f + 35, R.y + R.height - 48, 14, DIM); }
+        Wrapped(fReg, P->kind == 1 ? "Press Run sample to see what the broken program does, compare it with the expected output, fix the bug, then Submit. Step through shows each line running." : "Write your solution, press Run sample to try the first example, then Submit to check it against all test cases. Read the error messages carefully - they are the fastest teacher.", x, y + 34, w, 15, DIM);
+        for (int t = 0; t < P->nt; t++) { DrawRectangleRounded((Rectangle) { x + t * 78.0f, R.y + R.height - 54, 70, 34 }, 0.3f, 8, CODEBG); CenterTxt(fReg, TextFormat("Test %d", t + 1), x + t * 78.0f + 35, R.y + R.height - 48, 14, DIM); }
         return;
     }
-    static const char* vn[8] = { "", "Accepted", "Wrong Answer", "Compile Error", "Runtime Error", "Time Limit Exceeded", "No compiler found", "Sample passed" };
+    static const char* vn[9] = { "", "Accepted", "Wrong Answer", "Compile Error", "Runtime Error", "Time Limit Exceeded", "No compiler found", "Sample passed", "Lab rule broken" };
     Color vc = probRes == 1 || probRes == 7 ? GOOD : probRes == 5 ? (Color) { 255, 184, 64, 255 } : BAD;
-    Txt(fBold, vn[probRes], x, y - 2, 26, vc);
+    if (probOnly < 0 && probFailIdx >= 0 && (probRes == 2 || probRes == 4 || probRes == 5)) Txt(fBold, TextFormat("%s on test %d", vn[probRes], probFailIdx + 1), x, y - 2, 26, vc);
+    else Txt(fBold, vn[probRes], x, y - 2, 26, vc);
     if (probRes <= 5 && probRes != 3) Txt(fBold, TextFormat("%d / %d tests passed", probPass, probOnly >= 0 ? 1 : P->nt), x + w - 190, y + 6, 16, DIM);
     y += 40;
+    if (probRes == 8) { y = (float)Wrapped(fReg, probMsg, x, y, w, 16, (Color) { 231, 223, 201, 255 }) + 10; Wrapped(fReg, "Your tests were not run. Change the code to follow the rule and press Submit again.", x, y, w, 14, DIM); return; }
     if (probRes == 3 || probRes == 6) {
         char t[1400]; snprintf(t, sizeof t, "%s", probMsg);
         const char* p = strstr(t, "error"); if (p) { while (p > t && p[-1] != '\n') p--; }
@@ -6299,13 +7389,14 @@ static void ProbResults(Rectangle R)
     }
     if (probRes == 1) {
         Wrapped(fReg, TextFormat("All %d tests passed. Nice work - +%d credits the first time you solve it. Open the Solution tab to compare approaches.", P->nt, DIFF_CR[P->diff]), x, y, w, 15, (Color) { 231, 223, 201, 255 });
-        int nx = -1; for (int k = 1; k <= NPROB; k++) { int j = (probIdx + k) % NPROB; if (!pro.solved[lang][j]) { nx = j; break; } }
-        if (nx >= 0 && Button((Rectangle) { R.x + R.width - 220, R.y + R.height - 58, 200, 42 }, "Next problem >", GOOD, 15)) StartProblem(nx);
+        int lo = P->kind == 2 ? NPROB_STD : 0, cnt = P->kind == 2 ? NPROB - NPROB_STD : NPROB_STD;
+        int nx = -1; for (int k = 1; k <= cnt; k++) { int j = lo + (probIdx - lo + k) % cnt; if (!pro.solved[lang][j]) { nx = j; break; } }
+        if (nx >= 0 && Button((Rectangle) { R.x + R.width - 220, R.y + R.height - 58, 200, 42 }, P->kind == 2 ? "Next lab task >" : "Next problem >", GOOD, 15)) StartProblem(nx);
         return;
     }
     if (probRes == 7) { Wrapped(fReg, "The first example matches. Press Submit to try every test case, including tricky edge cases.", x, y, w, 15, DIM); return; }
     int t = probFailIdx >= 0 ? probFailIdx : 0;
-    char in[200]; ProbText(P->t[t].in, in, sizeof in);
+    char in[600]; ProbText(P->t[t].in, in, sizeof in);
     float cw3 = (w - 20) / 3;
     ProbBox("Input", in, x, y, cw3, 4);
     ProbBox("Expected", P->t[t].out, x + cw3 + 10, y, cw3, 4);
@@ -6332,7 +7423,8 @@ static void DrawProblem(Color accent)
     Pill(DIFF_NAME[P->diff], px, 15, DIFF_COL[P->diff]);
     if (pro.solved[lang][probIdx]) Pill("Solved", px + TxtW(fMed, DIFF_NAME[P->diff], 14) + 36, 15, GOOD);
     Panel((Rectangle) { W - 12 - 150, 8, 150, 42 }, 0.3f, SURF2, BORDER);
-    for (int l = 0; l < 2; l++) {
+    if (P->kind == 2) CenterTxt(fMed, "Lab", W - 12 - 148.0f + 36, 17, 17, DIM);
+    for (int l = P->kind == 2 ? 1 : 0; l < 2; l++) {
         Rectangle r = { W - 12 - 148.0f + l * 74, 10, 72, 38 };
         bool hov = CheckCollisionPointRec(GetMousePosition(), r);
         if (hov) hand = true;
@@ -6351,6 +7443,7 @@ static void DrawProblem(Color accent)
     if (Button((Rectangle) { ex + 6, 70, 130, 36 }, "Run sample", SURF2, 15) && !busy) { probOnly = 0; probPending = 1; }
     if (Button((Rectangle) { ex + 144, 70, 120, 36 }, "Submit", GOOD, 16) && !busy) { probOnly = -1; probPending = 1; }
     if (Button((Rectangle) { ex + 272, 70, 120, 36 }, "Reset code", SURF2, 14)) { probCode[probIdx][lang][0] = 0; ProbLoad(); labEnsure = true; }
+    if (Button((Rectangle) { ex + 400, 70, 116, 36 }, "Step through", SURF2, 14) && !busy) StepOpen(labBuf, P->t[0].in, SCR_PROBLEM);
     Txt(fReg, "F5 = run sample", ex + 640 - 8 - TxtW(fReg, "F5 = run sample", 13), 80, 13, DIM);
     labX = (int)ex; labY = 108; labW = 640; labH = 330;
     float cw = MeasureTextEx(fCode, "M", LAB_FS, 0).x;
@@ -6642,7 +7735,7 @@ static void FarmDrawMower(float cx, float fy, int dir, float sc, float blade, fl
 #pragma GCC diagnostic ignored "-Wmisleading-indentation"
 #endif
 /*  Clockwork Farm: a programming game. You never farm by hand - you   */
-/*  write code (a small Python-like language) that drives the mower.   */
+/*  write code (a small C / C++) that drives the mower.               */
 /* ------------------------------------------------------------------ */
 enum { IT_HAY, IT_WOOD, IT_CARROT, IT_PUMPKIN, IT_POWER, IT_GOLD, IT_WATER, IT_N };
 enum { E_NONE, E_GRASS, E_BUSH, E_CARROT, E_TREE, E_PUMPKIN, E_SUNFLOWER };
@@ -6658,17 +7751,17 @@ static const float F_SPEEDM[6] = { 1, 0.7f, 0.5f, 0.35f, 0.22f, 0.14f };
 typedef struct { const char* name, * desc; int cost[IT_N]; int req[2]; } FUpg;
 static const FUpg FUPG[U_N] = {
     { "Drone Speed I",  "Every action is 30% faster.",                          { 40 },                         { -1, -1 } },
-    { "Bushes",         "plant(Entities.Bush) gives 2 Wood.",                    { 60 },                         { -1, -1 } },
-    { "Loops",          "Unlocks for i in range(n): loops.",                     { 100 },                        { -1, -1 } },
+    { "Bushes",         "plant(ENT_BUSH) gives 2 Wood.",                    { 60 },                         { -1, -1 } },
+    { "Loops",          "Unlocks for (int i = 0; i < n; i++) loops.",                     { 100 },                        { -1, -1 } },
     { "Farm 4 x 4",     "Grow the plot to 16 tiles.",                            { 150 },                        { -1, -1 } },
     { "Soil",           "till() and get_ground_type().",                         { 200, 50 },                    { U_BUSHES, -1 } },
-    { "Functions",      "Write your own def name(): functions.",                 { 150, 60 },                    { U_LOOPS, -1 } },
+    { "Functions",      "Write your own functions, like void tend().",                 { 150, 60 },                    { U_LOOPS, -1 } },
     { "Drone Speed II", "Actions take half the time.",                           { 300, 100 },                   { U_SPEED1, -1 } },
     { "Carrots",        "Carrots on soil. Cost 1 Hay + 1 Wood, give 2.",         { 400, 200 },                   { U_SOIL, -1 } },
     { "Farm 6 x 6",     "Grow the plot to 36 tiles.",                            { 500, 150 },                   { U_FARM4, -1 } },
-    { "Lists",          "Lists with [ ], indexing, append() and pop().",         { 0, 250, 100 },                { U_CARROTS, U_FUNCS } },
+    { "Lists",          "Arrays and vectors: [ ], append(), push_back().",         { 0, 250, 100 },                { U_CARROTS, U_FUNCS } },
     { "Trees",          "Give 5 Wood. Slower next to other trees.",              { 0, 400, 120 },               { U_CARROTS, -1 } },
-    { "Watering",       "use_item(Items.Water) halves the wait.",                { 0, 300, 200 },               { U_CARROTS, -1 } },
+    { "Watering",       "use_item(ITEM_WATER) halves the wait.",                { 0, 300, 200 },               { U_CARROTS, -1 } },
     { "Sharp Blades",   "Every grass harvest gives +1 Hay.",                     { 600, 300 },                   { U_SPEED2, -1 } },
     { "Drone Speed III","Actions take about a third of the time.",               { 1500, 800, 400 },             { U_SPEED2, -1 } },
     { "Farm 8 x 8",     "Grow the plot to 64 tiles.",                            { 0, 600, 300 },               { U_FARM6, -1 } },
@@ -6889,8 +7982,13 @@ static int FPlant(int ent)
     static const int req[6] = { -1, U_BUSHES, U_CARROTS, U_TREES, U_PUMPKINS, U_SUN };
     static const char* nm[6] = { "grass", "bush", "carrot", "tree", "pumpkin", "sunflower" };
     static const int cost[6][IT_N] = { { 0 }, { 0 }, { 1, 1 }, { 2 }, { 1, 0, 1 }, { 0, 0, 1 } };
-    if (ent < 0 || ent > 5) { snprintf(fErr, sizeof fErr, "That can't be planted. Try Grass, Bush, Carrot, Tree, Pumpkin or Sunflower"); return -1; }
-    if (req[ent] >= 0 && !fsv.unl[req[ent]]) { snprintf(fErr, sizeof fErr, "Entities.%c%s is locked. Unlock \"%s\" in the upgrades (the + button).", nm[ent][0] - 32, nm[ent] + 1, FUPG[req[ent]].name); return -1; }
+    if (ent < 0 || ent > 5) { snprintf(fErr, sizeof fErr, "That can't be planted. Try ENT_GRASS, ENT_BUSH, ENT_CARROT, ENT_TREE, ENT_PUMPKIN or ENT_SUNFLOWER"); return -1; }
+    if (req[ent] >= 0 && !fsv.unl[req[ent]]) {
+        {
+            char up[24]; int q = 0; for (; nm[ent][q] && q < 20; q++) up[q] = (char)toupper((unsigned char)nm[ent][q]); up[q] = 0;
+            snprintf(fErr, sizeof fErr, "ENT_%s is locked. Unlock \"%s\" in the upgrades (the + button).", up, FUPG[req[ent]].name); return -1;
+        }
+    }
     if (fMaze.on) { FMsg("You cannot plant while the maze is growing."); fCost *= 0.2; return 0; }
     FTile* t = &fT[fD.x][fD.y]; int ty = type[ent]; bool needSoil = ent == 2 || ent == 4 || ent == 5;
     if (needSoil && !t->soil) { FMsg("A %s needs tilled soil. Use till() first.", nm[ent]); fCost *= 0.3; return 0; }
@@ -6945,28 +8043,32 @@ static bool FGenMaze(void)
 }
 
 
-/* ================= the farm language: a small Python-like script, compiled to bytecode ================= */
+/* ================= the farm language: a small C / C++, compiled to bytecode ================= */
 typedef enum { V_UNDEF, V_NONE, V_BOOL, V_NUM, V_STR, V_LIST, V_ENUM, V_FUNC, V_BUILTIN } PVT;
 typedef struct PList PList;
-typedef struct { unsigned char t; int a; union { double n; const char* s; PList* l; } u; } PV;
+typedef struct { unsigned char t; int a; union { double n; const char* s; PList* l; } u; } PV;   /* a: for numbers 1 = double, 0 = int */
 struct PList { int n, cap; PV* v; };
 
 enum {
     BI_MOVE, BI_HARVEST, BI_CANHARV, BI_PLANT, BI_TILL, BI_ENTITY, BI_GROUND, BI_POSX, BI_POSY, BI_WSIZE, BI_NUMITEMS, BI_USEITEM, BI_MEASURE,
-    BI_MAZE, BI_CANMOVE, BI_FLIP, BI_PRINT, BI_LEN, BI_RANGE, BI_STR, BI_INT, BI_ABS, BI_ROUND, BI_MIN, BI_MAX, BI_RANDOM, BI_RANDINT, BI_N
+    BI_MAZE, BI_CANMOVE, BI_FLIP, BI_PRINTF, BI_PUTS, BI_COUT, BI_LEN, BI_APPEND, BI_POP, BI_TOSTR, BI_ATOI, BI_ABS, BI_FABS, BI_SQRT, BI_POW,
+    BI_ROUND, BI_MIN, BI_MAX, BI_RAND, BI_RANDINT, BI_N
 };
 static const struct { const char* name; bool act; int req; } PBI[BI_N] = {
     { "move", 1, -1 }, { "harvest", 1, -1 }, { "can_harvest", 1, -1 }, { "plant", 1, -1 }, { "till", 1, U_SOIL }, { "get_entity_type", 1, -1 },
     { "get_ground_type", 1, U_SOIL }, { "get_pos_x", 1, -1 }, { "get_pos_y", 1, -1 }, { "get_world_size", 1, -1 }, { "num_items", 1, -1 },
     { "use_item", 1, U_WATER }, { "measure", 1, U_SUN }, { "generate_maze", 1, U_MAZE }, { "can_move", 1, U_MAZE }, { "do_a_flip", 1, -1 },
-    { "print", 0, -1 }, { "len", 0, -1 }, { "range", 0, U_LOOPS }, { "str", 0, -1 }, { "int", 0, -1 }, { "abs", 0, -1 }, { "round", 0, -1 },
-    { "min", 0, -1 }, { "max", 0, -1 }, { "random", 0, -1 }, { "randint", 0, -1 },
+    { "printf", 0, -1 }, { "puts", 0, -1 }, { "__cout", 0, -1 }, { "len", 0, -1 }, { "append", 0, U_LISTS }, { "pop", 0, U_LISTS }, { "to_string", 0, -1 },
+    { "atoi", 0, -1 }, { "abs", 0, -1 }, { "fabs", 0, -1 }, { "sqrt", 0, -1 }, { "pow", 0, -1 }, { "round", 0, -1 }, { "min", 0, -1 }, { "max", 0, -1 },
+    { "rand", 0, -1 }, { "randint", 0, -1 },
 };
-static const char* P_ENTN[8] = { "Grass", "Bush", "Carrot", "Tree", "Pumpkin", "Sunflower", "Dead_Pumpkin", "Treasure" };
-static const char* P_ITEMN[7] = { "Hay", "Wood", "Carrot", "Pumpkin", "Power", "Gold", "Water" };
-static const char* P_DIRN[4] = { "North", "East", "South", "West" };
-static const char* P_GRDN[2] = { "Grassland", "Soil" };
 
+static const struct { const char* n; int code; } PCONST[] = {
+    { "NORTH", 0 }, { "EAST", 1 }, { "SOUTH", 2 }, { "WEST", 3 },
+    { "ENT_GRASS", 16 }, { "ENT_BUSH", 17 }, { "ENT_CARROT", 18 }, { "ENT_TREE", 19 }, { "ENT_PUMPKIN", 20 }, { "ENT_SUNFLOWER", 21 }, { "ENT_DEAD_PUMPKIN", 22 }, { "ENT_TREASURE", 23 },
+    { "ITEM_HAY", 32 }, { "ITEM_WOOD", 33 }, { "ITEM_CARROT", 34 }, { "ITEM_PUMPKIN", 35 }, { "ITEM_POWER", 36 }, { "ITEM_GOLD", 37 }, { "ITEM_WATER", 38 },
+    { "GROUND_GRASSLAND", 48 }, { "GROUND_SOIL", 49 }, { NULL, 0 }
+};
 static int PfCaseCmp(const char* a, const char* b)
 {
     for (; *a && *b; a++, b++) { int x = tolower((unsigned char)*a), y = tolower((unsigned char)*b); if (x != y) return x - y; }
@@ -7006,6 +8108,7 @@ static void PfListPush(PList* l, PV v, int ln)
 /* ---- values ---- */
 static PV VNone(void) { PV v; memset(&v, 0, sizeof v); v.t = V_NONE; return v; }
 static PV VNum(double n) { PV v; memset(&v, 0, sizeof v); v.t = V_NUM; v.u.n = n; return v; }
+static PV VNumD(double n) { PV v = VNum(n); v.a = 1; return v; }
 static PV VBool(int b) { PV v; memset(&v, 0, sizeof v); v.t = V_BOOL; v.u.n = b ? 1 : 0; return v; }
 static PV VStrV(const char* s) { PV v; memset(&v, 0, sizeof v); v.t = V_STR; v.u.s = s; return v; }
 static PV VEnum(int code) { PV v; memset(&v, 0, sizeof v); v.t = V_ENUM; v.a = code; return v; }
@@ -7026,7 +8129,7 @@ static bool VEq(PV a, PV b)
 }
 static const char* VTName(PV v)
 {
-    switch (v.t) { case V_NONE: return "None"; case V_BOOL: return "True/False"; case V_NUM: return "number"; case V_STR: return "text"; case V_LIST: return "list"; case V_ENUM: return "game value"; default: return "function"; }
+    switch (v.t) { case V_NONE: return "NULL"; case V_BOOL: return "bool"; case V_NUM: return v.a ? "double" : "int"; case V_STR: return "text"; case V_LIST: return "array"; case V_ENUM: return "game value"; default: return "function"; }
 }
 static void PfNumStr(char* b, size_t n, double d)
 {
@@ -7036,8 +8139,8 @@ static void VRepr(PV v, char* o, int cap, bool top)
 {
     char t[64];
     switch (v.t) {
-    case V_NONE: case V_UNDEF: snprintf(o, (size_t)cap, "None"); break;
-    case V_BOOL: snprintf(o, (size_t)cap, v.u.n ? "True" : "False"); break;
+    case V_NONE: case V_UNDEF: snprintf(o, (size_t)cap, "NULL"); break;
+    case V_BOOL: snprintf(o, (size_t)cap, v.u.n ? "1" : "0"); break;
     case V_NUM: PfNumStr(t, sizeof t, v.u.n); snprintf(o, (size_t)cap, "%s", t); break;
     case V_STR: if (top) snprintf(o, (size_t)cap, "%s", v.u.s); else snprintf(o, (size_t)cap, "'%s'", v.u.s); break;
     case V_LIST: {
@@ -7046,22 +8149,23 @@ static void VRepr(PV v, char* o, int cap, bool top)
         if (p < cap - 2) { o[p++] = ']'; o[p] = 0; } break;
     }
     case V_ENUM: {
-        int k = v.a >> 4, i = v.a & 15;
-        if (k == 0) snprintf(o, (size_t)cap, "%s", P_DIRN[i & 3]); else if (k == 1) snprintf(o, (size_t)cap, "Entities.%s", P_ENTN[i & 7]);
-        else if (k == 2) snprintf(o, (size_t)cap, "Items.%s", P_ITEMN[i % 7]); else snprintf(o, (size_t)cap, "Grounds.%s", P_GRDN[i & 1]); break;
+        const char* nm = "?";
+        for (int i = 0; PCONST[i].n; i++) if (PCONST[i].code == v.a) nm = PCONST[i].n;
+        snprintf(o, (size_t)cap, "%s", nm); break;
     }
     default: snprintf(o, (size_t)cap, "<function>"); break;
     }
 }
 
-/* ---- tokenizer ---- */
-enum { T_NUM, T_STR, T_NAME, T_KW, T_OP, T_NL, T_IND, T_DED, T_EOF };
-typedef struct { unsigned char t; int ln; double n; char s[32]; } PTok;
-#define PT_MAX 7000
+/* ---- tokenizer: C and C++ source ---- */
+enum { T_NUM, T_STR, T_NAME, T_KW, T_OP, T_EOF };
+typedef struct { unsigned char t, dbl; int ln; double n; char s[32]; } PTok;
+#define PT_MAX 9000
 static PTok pt[PT_MAX]; static int ptn = 0, ptp = 0;
 static bool PfIsKw(const char* w)
 {
-    static const char* kw[] = { "if", "elif", "else", "while", "for", "in", "def", "return", "pass", "break", "continue", "and", "or", "not", "True", "False", "None", "global", NULL };
+    static const char* kw[] = { "if", "else", "while", "for", "do", "return", "break", "continue", "true", "false", "NULL", "nullptr", "using", "namespace",
+                                "switch", "case", "default", "goto", "struct", "class", "enum", "typedef", "union", "new", "delete", "template", "sizeof", NULL };
     for (int i = 0; kw[i]; i++) if (!strcmp(w, kw[i])) return true;
     return false;
 }
@@ -7070,61 +8174,72 @@ static PTok* PtAdd(int t, int ln)
     if (ptn >= PT_MAX - 2) PfFail(ln, "This program is too long");
     PTok* k = &pt[ptn++]; memset(k, 0, sizeof * k); k->t = (unsigned char)t; k->ln = ln; return k;
 }
+static int PEscape(const char** pp)                 /* reads the character after a backslash */
+{
+    const char* p = *pp; int c = *p;
+    switch (c) { case 'n': c = '\n'; break; case 't': c = '\t'; break; case 'r': c = '\r'; break; case '0': c = 0; break; case 'a': c = 7; break; default: break; }
+                         *pp = p + 1; return c;
+}
 static void PfLex(const char* src)
 {
-    int ind[64], ni = 1, ln = 1; ind[0] = 0; ptn = 0; const char* p = src; int lastLn = 1;
+    int ln = 1; const char* p = src; ptn = 0;
     while (*p) {
-        const char* ls = p; int col = 0;
-        while (*p == ' ' || *p == '\t') { col += *p == '\t' ? 4 : 1; p++; }
-        if (*p == '\r') p++;
-        if (*p == '\n' || *p == '#' || *p == 0) { while (*p && *p != '\n') p++; if (*p == '\n') p++; ln++; (void)ls; continue; }
-        lastLn = ln;
-        if (col > ind[ni - 1]) { if (ni >= 60) PfFail(ln, "Too many nested blocks"); ind[ni++] = col; PtAdd(T_IND, ln); }
-        else {
-            while (col < ind[ni - 1]) { ni--; PtAdd(T_DED, ln); }
-            if (col != ind[ni - 1]) PfFail(ln, "This line is indented differently from the lines above it");
+        char c = *p;
+        if (c == '\n') { ln++; p++; continue; }
+        if (c == ' ' || c == '\t' || c == '\r') { p++; continue; }
+        if (c == '/' && p[1] == '/') { while (*p && *p != '\n') p++; continue; }
+        if (c == '/' && p[1] == '*') {
+            int start = ln; p += 2;
+            while (*p && !(p[0] == '*' && p[1] == '/')) { if (*p == '\n') ln++; p++; }
+            if (!*p) PfFail(start, "This /* comment is never closed with */");
+            p += 2; continue;
         }
-        while (*p && *p != '\n') {
-            char c = *p;
-            if (c == ' ' || c == '\t' || c == '\r') { p++; continue; }
-            if (c == '#') { while (*p && *p != '\n') p++; break; }
-            if (isdigit((unsigned char)c) || (c == '.' && isdigit((unsigned char)p[1]))) {
-                char* e; double v = strtod(p, &e); PTok* k = PtAdd(T_NUM, ln); k->n = v; p = e; continue;
-            }
-            if (isalpha((unsigned char)c) || c == '_') {
-                int n = 0; char w[40];
-                while (isalnum((unsigned char)*p) || *p == '_') { if (n < 31) w[n++] = *p; p++; }
-                w[n] = 0; PTok* k = PtAdd(PfIsKw(w) ? T_KW : T_NAME, ln); memcpy(k->s, w, (size_t)n + 1); continue;
-            }
-            if (c == '"' || c == '\'') {
-                char buf[500]; int n = 0; p++;
-                while (*p && *p != '\n' && *p != c) {
-                    if (*p == '\\' && p[1]) { p++; buf[n++] = *p == 'n' ? '\n' : *p == 't' ? '\t' : *p; p++; }
-                    else buf[n++] = *p++;
-                    if (n > 480) PfFail(ln, "That text is too long");
-                }
-                if (*p != c) PfFail(ln, "This text is missing its closing quote (%c)", c);
-                p++; PTok* k = PtAdd(T_STR, ln); k->n = (double)(PfStr(buf, n, ln) - pfStrBuf); continue;
-            }
-            static const char* two[] = { "**", "//", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", NULL };
-            PTok* k = NULL;
-            if (!strncmp(p, "//=", 3)) { k = PtAdd(T_OP, ln); strcpy(k->s, "//="); p += 3; continue; }
-            for (int i = 0; two[i]; i++) if (!strncmp(p, two[i], 2)) { k = PtAdd(T_OP, ln); strcpy(k->s, two[i]); p += 2; break; }
-            if (k) continue;
-            if (strchr("+-*/%<>=()[],:.", c)) { k = PtAdd(T_OP, ln); k->s[0] = c; p++; continue; }
-            PfFail(ln, "I don't understand the character '%c'", c);
+        if (c == '#') {
+            const char* q = p + 1; while (*q == ' ') q++;
+            if (strncmp(q, "include", 7) != 0) PfFail(ln, "Only #include lines are supported here, and the farm does not need them");
+            while (*p && *p != '\n') p++;
+            continue;
         }
-        PtAdd(T_NL, ln); if (*p == '\n') p++; ln++;
+        if (isdigit((unsigned char)c) || (c == '.' && isdigit((unsigned char)p[1]))) {
+            const char* s0 = p; char* e; double v = strtod(p, &e); bool hex = (s0[0] == '0' && (s0[1] == 'x' || s0[1] == 'X'));
+            bool dbl = false; if (!hex) for (const char* q = s0; q < e; q++) if (*q == '.' || *q == 'e' || *q == 'E') dbl = true;
+            p = e;
+            while (*p == 'f' || *p == 'F' || *p == 'l' || *p == 'L' || *p == 'u' || *p == 'U') { if (*p == 'f' || *p == 'F') dbl = true; p++; }
+            if (isalpha((unsigned char)*p) || *p == '_') PfFail(ln, "A name cannot start with a number. Did you forget an operator?");
+            PTok* k = PtAdd(T_NUM, ln); k->n = v; k->dbl = dbl ? 1 : 0; continue;
+        }
+        if (isalpha((unsigned char)c) || c == '_') {
+            int n = 0; char w[40];
+            while (isalnum((unsigned char)*p) || *p == '_') { if (n < 31) w[n++] = *p; p++; }
+            w[n] = 0; PTok* k = PtAdd(PfIsKw(w) ? T_KW : T_NAME, ln); memcpy(k->s, w, (size_t)n + 1); continue;
+        }
+        if (c == '"' || c == '\'') {
+            char buf[500]; int n = 0; p++;
+            while (*p && *p != '\n' && *p != c) {
+                if (*p == '\\' && p[1]) { p++; buf[n++] = (char)PEscape(&p); }
+                else buf[n++] = *p++;
+                if (n > 480) PfFail(ln, "That text is too long");
+            }
+            if (*p != c) PfFail(ln, c == '"' ? "This text is missing its closing quote (\")" : "This character is missing its closing quote (')");
+            if (c == '\'' && n != 1) PfFail(ln, "A character in single quotes must be exactly one character, like 'a'. Use double quotes for text");
+            p++; PTok* k = PtAdd(T_STR, ln); k->n = (double)(PfStr(buf, n, ln) - pfStrBuf); continue;
+        }
+        static const char* two[] = { "<<", ">>", "<=", ">=", "==", "!=", "&&", "||", "++", "--", "+=", "-=", "*=", "/=", "%=", "::", "->", NULL };
+        PTok* k = NULL;
+        for (int i = 0; two[i]; i++) if (!strncmp(p, two[i], 2)) { k = PtAdd(T_OP, ln); strcpy(k->s, two[i]); p += 2; break; }
+        if (k) continue;
+        if (strchr("+-*/%<>=!()[]{},;.:?&|^~", c)) { k = PtAdd(T_OP, ln); k->s[0] = c; p++; continue; }
+        PfFail(ln, "I don't understand the character '%c'", c);
     }
-    while (ni > 1) { ni--; PtAdd(T_DED, lastLn); }
-    PtAdd(T_EOF, lastLn);
+    PtAdd(T_EOF, ln);
 }
 
 /* ---- compiler: tokens -> bytecode ---- */
 enum {
     OP_NUM, OP_STR, OP_NONE, OP_TRUE, OP_FALSE, OP_ENUM, OP_LOADG, OP_STOREG, OP_LOADL, OP_STOREL, OP_BUILTIN, OP_POP, OP_DUP2,
     OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_IDIV, OP_MOD, OP_POW, OP_EQ, OP_NE, OP_LT, OP_GT, OP_LE, OP_GE, OP_IN, OP_NOTIN, OP_NOT, OP_NEG,
-    OP_JMP, OP_JF, OP_JFK, OP_JTK, OP_LIST, OP_INDEX, OP_SETINDEX, OP_CALL, OP_METHOD, OP_RET, OP_FUNC, OP_TOLIST, OP_LEN, OP_END
+    OP_JMP, OP_JF, OP_JFK, OP_JTK, OP_LIST, OP_INDEX, OP_SETINDEX, OP_CALL, OP_METHOD, OP_RET, OP_FUNC, OP_TOLIST, OP_LEN, OP_END,
+    OP_NUMD, OP_TOINT, OP_TODBL, OP_TOBOOL, OP_FILL
 };
 typedef struct { short op; int a; int ln; } PIns;
 static PIns pcode[24000]; static int pcn = 0;
@@ -7132,9 +8247,14 @@ static double pnum[3000]; static int pnn = 0;
 static char pgName[300][32]; static int pgn = 0;
 typedef struct { int entry, np, nl; } PFn;
 static PFn pfn[64]; static int pfnn = 0;
-static bool pInFn = false; static char pLoc[64][32]; static int pLocN = 0; static char pGd[16][32]; static int pGdN = 0;
+static bool pInFn = false, pHasMain = false; static char pLoc[64][32]; static int pLocN = 0;
 typedef struct { int brk[64], nb, cont[64], nc; } PLoopC;
 static PLoopC plp[20]; static int plpn = 0, pLoopBase = 0, pHid = 0;
+enum { K_INT, K_DBL, K_BOOL, K_STR, K_VOID, K_VEC, K_AUTO };          /* the declared type of a variable */
+static unsigned char pgKind[300], pgElem[300], pLocKind[64], pLocElem[64];
+static int pRetK = K_VOID;
+
+static int PConstCode(const char* nm) { for (int i = 0; PCONST[i].n; i++) if (!strcmp(PCONST[i].n, nm)) return PCONST[i].code; return -1; }
 
 static int PEmit(int op, int a, int ln)
 {
@@ -7146,44 +8266,101 @@ static int PAddG(const char* nm, int ln)
 {
     int i = PFindG(nm); if (i >= 0) return i;
     if (pgn >= 299) PfFail(ln, "Too many different variable names");
-    snprintf(pgName[pgn], 32, "%s", nm); return pgn++;
+    snprintf(pgName[pgn], 32, "%s", nm); pgKind[pgn] = K_AUTO; pgElem[pgn] = K_AUTO; return pgn++;
 }
 static int PFindL(const char* nm) { for (int i = 0; i < pLocN; i++) if (!strcmp(pLoc[i], nm)) return i; return -1; }
-static bool PIsGd(const char* nm) { for (int i = 0; i < pGdN; i++) if (!strcmp(pGd[i], nm)) return true; return false; }
 static int PBuiltinId(const char* nm) { for (int i = 0; i < BI_N; i++) if (!strcmp(PBI[i].name, nm)) return i; return -1; }
+static void PEmitNum(double v, bool dbl, int ln)
+{
+    if (pnn >= 2999) PfFail(ln, "Too many numbers");
+    pnum[pnn] = v; PEmit(dbl ? OP_NUMD : OP_NUM, pnn++, ln);
+}
+static void PEmitText(const char* s, int ln) { PEmit(OP_STR, (int)(PfStr(s, (int)strlen(s), ln) - pfStrBuf), ln); }
+static void PCoerce(int kind, int ln)
+{
+    if (kind == K_INT) PEmit(OP_TOINT, 0, ln); else if (kind == K_DBL) PEmit(OP_TODBL, 0, ln); else if (kind == K_BOOL) PEmit(OP_TOBOOL, 0, ln);
+}
+static void PEmitDefault(int kind, int ln)       /* what a variable holds before you give it a value */
+{
+    if (kind == K_DBL) PEmitNum(0, true, ln); else if (kind == K_BOOL) PEmit(OP_FALSE, 0, ln); else if (kind == K_STR) PEmitText("", ln); else PEmitNum(0, false, ln);
+}
+typedef struct { int where, idx, kind, ek; } PRefT;     /* where: 0 unknown, 1 local, 2 global, 3 built-in, 4 constant */
+static PRefT PResolve(const char* nm)
+{
+    PRefT r; r.where = 0; r.idx = 0; r.kind = K_AUTO; r.ek = K_AUTO; int s;
+    if (pInFn && (s = PFindL(nm)) >= 0) { r.where = 1; r.idx = s; r.kind = pLocKind[s]; r.ek = pLocElem[s]; return r; }
+    if ((s = PFindG(nm)) >= 0) { r.where = 2; r.idx = s; r.kind = pgKind[s]; r.ek = pgElem[s]; return r; }
+    if ((s = PBuiltinId(nm)) >= 0) { r.where = 3; r.idx = s; return r; }
+    if ((s = PConstCode(nm)) >= 0) { r.where = 4; r.idx = s; return r; }
+    return r;
+}
+static const char* PSuggest(const char* nm)
+{
+    for (int i = 0; i < BI_N; i++) if (!PfCaseCmp(PBI[i].name, nm) && strcmp(PBI[i].name, nm)) return PBI[i].name;
+    for (int i = 0; PCONST[i].n; i++) if (!PfCaseCmp(PCONST[i].n, nm) && strcmp(PCONST[i].n, nm)) return PCONST[i].n;
+    for (int i = 0; i < pgn; i++) if (!PfCaseCmp(pgName[i], nm) && strcmp(pgName[i], nm)) return pgName[i];
+    if (pInFn) for (int i = 0; i < pLocN; i++) if (!PfCaseCmp(pLoc[i], nm) && strcmp(pLoc[i], nm)) return pLoc[i];
+    return NULL;
+}
+static void PUndeclared(const char* nm, int ln)
+{
+    const char* h = PSuggest(nm);
+    if (h) PfFail(ln, "'%s' has not been declared. Did you mean '%s'? (C is case sensitive)", nm, h);
+    PfFail(ln, "'%s' has not been declared. Check the spelling, or declare it first, for example:  int %s = 0;", nm, nm);
+}
 static void PEmitLoad(const char* nm, int ln)
 {
-    if (pInFn) { if (PIsGd(nm)) { PEmit(OP_LOADG, PAddG(nm, ln), ln); return; } int s = PFindL(nm); if (s >= 0) { PEmit(OP_LOADL, s, ln); return; } }
-    int g = PFindG(nm); if (g >= 0) { PEmit(OP_LOADG, g, ln); return; }
-    int b = PBuiltinId(nm); if (b >= 0) { PEmit(OP_BUILTIN, b, ln); return; }
-    PEmit(OP_LOADG, PAddG(nm, ln), ln);
+    PRefT r = PResolve(nm);
+    if (r.where == 1) PEmit(OP_LOADL, r.idx, ln);
+    else if (r.where == 2) PEmit(OP_LOADG, r.idx, ln);
+    else if (r.where == 3) PEmit(OP_BUILTIN, r.idx, ln);
+    else if (r.where == 4) { if (r.idx < 16) PEmitNum(r.idx, false, ln); else PEmit(OP_ENUM, r.idx, ln); }      /* NORTH..WEST are plain ints 0..3 */
+    else PUndeclared(nm, ln);
 }
-static void PEmitStore(const char* nm, int ln)
+static void PEmitStoreVar(const char* nm, int ln)       /* stores into a variable that must already exist */
 {
-    if (pInFn && !PIsGd(nm)) {
+    PRefT r = PResolve(nm);
+    if (r.where == 1) PEmit(OP_STOREL, r.idx, ln);
+    else if (r.where == 2) PEmit(OP_STOREG, r.idx, ln);
+    else if (r.where == 0) PUndeclared(nm, ln);
+    else PfFail(ln, "'%s' is built in, so you cannot give it a new value", nm);
+}
+static void PEmitDeclare(const char* nm, int kind, int ek, int ln)   /* declares a variable and stores the value on the stack */
+{
+    if (pInFn) {
         int s = PFindL(nm);
         if (s < 0) { if (pLocN >= 60) PfFail(ln, "Too many variables in this function"); snprintf(pLoc[pLocN], 32, "%s", nm); s = pLocN++; }
-        PEmit(OP_STOREL, s, ln); return;
+        pLocKind[s] = (unsigned char)kind; pLocElem[s] = (unsigned char)ek; PEmit(OP_STOREL, s, ln);
     }
-    PEmit(OP_STOREG, PAddG(nm, ln), ln);
+    else {
+        int g = PAddG(nm, ln); pgKind[g] = (unsigned char)kind; pgElem[g] = (unsigned char)ek; PEmit(OP_STOREG, g, ln);
+    }
 }
 static void PNeed(int id, const char* what, int ln)
 {
     if (!fsv.unl[id]) PfFail(ln, "%s locked. Unlock \"%s\" in the upgrades (the + button).", what, FUPG[id].name);
 }
 static bool PIsOp(const char* s) { return pt[ptp].t == T_OP && !strcmp(pt[ptp].s, s); }
+static bool PIsOpAt(int q, const char* s) { return pt[q].t == T_OP && !strcmp(pt[q].s, s); }
 static bool PKw(const char* s) { return pt[ptp].t == T_KW && !strcmp(pt[ptp].s, s); }
+static bool PName(const char* s) { return pt[ptp].t == T_NAME && !strcmp(pt[ptp].s, s); }
 static const char* PDesc(const PTok* k)
 {
     static char b[64];
-    switch (k->t) {
-    case T_NL: return "the end of the line"; case T_EOF: return "the end of the program"; case T_IND: return "extra indentation"; case T_DED: return "a dedent";
-    case T_NUM: snprintf(b, sizeof b, "the number %g", k->n); return b; case T_STR: return "some text"; default: snprintf(b, sizeof b, "'%s'", k->s); return b;
-    }
+    switch (k->t) { case T_EOF: return "the end of the program"; case T_NUM: snprintf(b, sizeof b, "the number %g", k->n); return b; case T_STR: return "some text"; default: snprintf(b, sizeof b, "'%s'", k->s); return b; }
+}
+static void PCppOnly(const char* what, int ln)
+{
+    if (lang == 0) PfFail(ln, "%s is C++, not C. Switch to C++ with the toggle on the menu, or write it the C way.", what);
 }
 static void PExpectOp(const char* s, const char* what)
 {
-    if (!PIsOp(s)) PfFail(pt[ptp].ln, "Expected '%s'%s%s but found %s", s, what ? " " : "", what ? what : "", PDesc(&pt[ptp]));
+    if (!PIsOp(s)) {
+        int ln = pt[ptp].ln;
+        if (!strcmp(s, ";") && ptp > 0) ln = pt[ptp - 1].ln;                           /* a missing ; belongs to the line before */
+        if (!strcmp(s, ")") && PIsOp("=")) PfFail(ln, "Found a single '=' where a condition was expected. '=' stores a value; use '==' to compare");
+        PfFail(ln, "Expected '%s'%s%s but found %s", s, what ? " " : "", what ? what : "", PDesc(&pt[ptp]));
+    }
     ptp++;
 }
 static void PExpr(void);
@@ -7194,36 +8371,107 @@ static void PArgs(int* argc)
     if (!PIsOp(")")) PfFail(pt[ptp].ln, "Expected ')' to close this call but found %s", PDesc(&pt[ptp]));
     ptp++;
 }
-static int PNamespaceMember(const char* ns, const char* mem, int ln)
+
+/* ---- types ---- */
+static bool PIsTypeWord(const char* w)
 {
-    int k = !strcmp(ns, "Entities") ? 1 : !strcmp(ns, "Items") ? 2 : 3, n = k == 1 ? 8 : k == 2 ? 7 : 2;
-    const char** tab = k == 1 ? P_ENTN : k == 2 ? P_ITEMN : P_GRDN;
-    for (int i = 0; i < n; i++) if (!strcmp(tab[i], mem)) return (k << 4) | i;
-    char list[200]; list[0] = 0;
-    for (int i = 0; i < n; i++) { strcat(list, tab[i]); if (i < n - 1) strcat(list, ", "); }
-    PfFail(ln, "%s has no '%s'. Try: %s", ns, mem, list); return 0;
+    static const char* t[] = { "int", "long", "short", "unsigned", "signed", "char", "float", "double", "bool", "void", "auto", "string", "vector", "size_t", "const", "static", NULL };
+    for (int i = 0; t[i]; i++) if (!strcmp(w, t[i])) return true;
+    return false;
 }
+static bool PAtType(void)
+{
+    if (pt[ptp].t != T_NAME) return false;
+    if (!strcmp(pt[ptp].s, "std")) return PIsOpAt(ptp + 1, "::") && pt[ptp + 2].t == T_NAME && (!strcmp(pt[ptp + 2].s, "string") || !strcmp(pt[ptp + 2].s, "vector"));
+    return PIsTypeWord(pt[ptp].s);
+}
+/* reads a type like  const unsigned long long  or  vector<double>;  kind and element kind come back */
+static void PParseType(int* kind, int* ek)
+{
+    int ln = pt[ptp].ln; bool sawMod = false; *kind = K_INT; *ek = K_AUTO;
+    for (;;) {
+        if (pt[ptp].t != T_NAME) break;
+        const char* w = pt[ptp].s;
+        if (!strcmp(w, "std") && PIsOpAt(ptp + 1, "::")) { PCppOnly("'std::'", ln); ptp += 2; continue; }
+        if (!strcmp(w, "const") || !strcmp(w, "static") || !strcmp(w, "unsigned") || !strcmp(w, "signed") || !strcmp(w, "long") || !strcmp(w, "short")) {
+            if (!strcmp(w, "unsigned") || !strcmp(w, "signed") || !strcmp(w, "long") || !strcmp(w, "short")) sawMod = true;
+            ptp++; continue;
+        }
+        break;
+    }
+    if (pt[ptp].t == T_NAME) {
+        const char* w = pt[ptp].s;
+        if (!strcmp(w, "int") || !strcmp(w, "size_t")) { *kind = K_INT; ptp++; sawMod = false; }
+        else if (!strcmp(w, "char")) { *kind = K_STR; ptp++; sawMod = false; }
+        else if (!strcmp(w, "float") || !strcmp(w, "double")) { *kind = K_DBL; ptp++; sawMod = false; if (pt[ptp].t == T_NAME && !strcmp(pt[ptp].s, "double")) ptp++; }
+        else if (!strcmp(w, "bool")) { *kind = K_BOOL; ptp++; }
+        else if (!strcmp(w, "void")) { *kind = K_VOID; ptp++; }
+        else if (!strcmp(w, "auto")) { PCppOnly("'auto'", ln); *kind = K_AUTO; ptp++; }
+        else if (!strcmp(w, "string")) { PCppOnly("'string'", ln); *kind = K_STR; ptp++; }
+        else if (!strcmp(w, "vector")) {
+            PCppOnly("'vector'", ln); ptp++;
+            if (!PIsOp("<")) PfFail(ln, "A vector needs its item type, like vector<int>");
+            ptp++; int k2, e2; PParseType(&k2, &e2);
+            if (k2 == K_VEC) PfFail(ln, "A vector of vectors is not supported in the farm");
+            if (k2 == K_VOID) PfFail(ln, "A vector cannot hold void");
+            if (PIsOp(">>")) PfFail(ln, "Nested vectors are not supported in the farm");
+            PExpectOp(">", "to close vector<...>");
+            *kind = K_VEC; *ek = k2;
+        }
+        else if (!sawMod) PfFail(ln, "Expected a type like int or double but found '%s'", w);
+    }
+    else if (!sawMod) PfFail(ln, "Expected a type like int or double but found %s", PDesc(&pt[ptp]));
+}
+
+/* ---- expressions ---- */
+static void PAtom(void);
+static int PMethodId(const char* nm)
+{
+    static const char* m[] = { "push_back", "pop_back", "size", "empty", "back", "front", "clear", "length", NULL };
+    for (int i = 0; m[i]; i++) if (!strcmp(nm, m[i])) return i == 7 ? 2 : i;
+    return -1;
+}
+static bool PAtCast(void)             /* is this '(' the start of a cast such as (int)? */
+{
+    if (!PIsOp("(")) return false;
+    if (pt[ptp + 1].t != T_NAME) return false;
+    return PIsTypeWord(pt[ptp + 1].s) && strcmp(pt[ptp + 1].s, "static") != 0;
+}
+static void PUnary(void);
 static void PAtom(void)
 {
     PTok* k = &pt[ptp]; int ln = k->ln;
-    if (k->t == T_NUM) { if (pnn >= 2999) PfFail(ln, "Too many numbers"); pnum[pnn] = k->n; PEmit(OP_NUM, pnn++, ln); ptp++; return; }
+    if (k->t == T_NUM) { PEmitNum(k->n, k->dbl != 0, ln); ptp++; return; }
     if (k->t == T_STR) { PEmit(OP_STR, (int)k->n, ln); ptp++; return; }
+    if (k->t == T_KW) {
+        if (!strcmp(k->s, "true")) { PEmit(OP_TRUE, 0, ln); ptp++; return; }
+        if (!strcmp(k->s, "false")) { PEmit(OP_FALSE, 0, ln); ptp++; return; }
+        if (!strcmp(k->s, "NULL")) { PEmit(OP_NONE, 0, ln); ptp++; return; }
+        if (!strcmp(k->s, "nullptr")) { PCppOnly("'nullptr'", ln); PEmit(OP_NONE, 0, ln); ptp++; return; }
+        if (!strcmp(k->s, "sizeof")) PfFail(ln, "sizeof is not available in the farm. Use len(array) to count the items");
+        PfFail(ln, "Unexpected '%s' here", k->s);
+    }
     if (k->t == T_NAME) {
-        char nm[32]; snprintf(nm, 32, "%s", k->s); ptp++;
-        if ((!strcmp(nm, "Entities") || !strcmp(nm, "Items") || !strcmp(nm, "Grounds")) && PIsOp(".")) {
-            ptp++; if (pt[ptp].t != T_NAME) PfFail(ln, "Expected a name after '%s.'", nm);
-            PEmit(OP_ENUM, PNamespaceMember(nm, pt[ptp].s, ln), ln); ptp++; return;
+        if (!strcmp(k->s, "std") && PIsOpAt(ptp + 1, "::")) { PCppOnly("'std::'", ln); ptp += 2; k = &pt[ptp]; }
+        if (k->t != T_NAME) PfFail(ln, "Expected a name after 'std::'");
+        char nm[32]; snprintf(nm, 32, "%s", k->s);
+        if (!strcmp(nm, "endl")) { PCppOnly("'endl'", ln); PEmitText("\n", ln); ptp++; return; }
+        if (!strcmp(nm, "static_cast")) {
+            PCppOnly("static_cast", ln); ptp++; PExpectOp("<", NULL); int kd, ek; PParseType(&kd, &ek); PExpectOp(">", NULL);
+            PExpectOp("(", NULL); PExpr(); PExpectOp(")", NULL); PCoerce(kd, ln); return;
         }
-        for (int d = 0; d < 4; d++) if (!strcmp(nm, P_DIRN[d])) { PEmit(OP_ENUM, d, ln); return; }
-        PEmitLoad(nm, ln); return;
+        if (PIsTypeWord(nm) && PIsOpAt(ptp + 1, "(") && strcmp(nm, "const") && strcmp(nm, "static")) {            /* int(x), double(x) */
+            PCppOnly("A function-style cast", ln); int kd, ek; PParseType(&kd, &ek); PExpectOp("(", NULL); PExpr(); PExpectOp(")", NULL); PCoerce(kd, ln); return;
+        }
+        ptp++; PEmitLoad(nm, ln); return;
     }
-    if (k->t == T_KW && (!strcmp(k->s, "True") || !strcmp(k->s, "False") || !strcmp(k->s, "None"))) { PEmit(k->s[0] == 'T' ? OP_TRUE : k->s[0] == 'F' ? OP_FALSE : OP_NONE, 0, ln); ptp++; return; }
+    if (PAtCast()) {
+        ptp++; int kd, ek; PParseType(&kd, &ek);
+        if (PIsOp("*")) PfFail(ln, "Pointers are not available in the farm");
+        PExpectOp(")", "to finish the cast"); PUnary(); PCoerce(kd, ln); return;
+    }
     if (PIsOp("(")) { ptp++; PExpr(); PExpectOp(")", NULL); return; }
-    if (PIsOp("[")) {
-        PNeed(U_LISTS, "Lists are", ln); ptp++; int n = 0;
-        while (!PIsOp("]")) { PExpr(); n++; if (PIsOp(",")) ptp++; else break; }
-        PExpectOp("]", "to close the list"); PEmit(OP_LIST, n, ln); return;
-    }
+    if (PIsOp("{")) PfFail(ln, "A { } list can only be used to give an array or vector its starting values");
     PfFail(ln, "Unexpected %s here", PDesc(k));
 }
 static void PPostfix(void)
@@ -7234,33 +8482,35 @@ static void PPostfix(void)
         if (PIsOp("(")) { ptp++; int argc; PArgs(&argc); PEmit(OP_CALL, argc, ln); }
         else if (PIsOp("[")) { PNeed(U_LISTS, "Indexing with [ ] is", ln); ptp++; PExpr(); PExpectOp("]", NULL); PEmit(OP_INDEX, 0, ln); }
         else if (PIsOp(".")) {
+            PCppOnly("A method call such as v.size()", ln);
             ptp++; if (pt[ptp].t != T_NAME) PfFail(ln, "Expected a name after '.'");
-            int id = !strcmp(pt[ptp].s, "append") ? 0 : !strcmp(pt[ptp].s, "pop") ? 1 : -1;
-            if (id < 0) PfFail(ln, "This value has no attribute '%s'. Lists have append() and pop()", pt[ptp].s);
-            PNeed(U_LISTS, "Lists are", ln); ptp++;
-            if (!PIsOp("(")) PfFail(ln, "Expected '(' after .%s", id ? "pop" : "append");
+            int id = PMethodId(pt[ptp].s);
+            if (id < 0) PfFail(ln, "'%s' is not available here. Arrays and vectors have push_back(), pop_back(), size(), empty(), back(), front() and clear()", pt[ptp].s);
+            if (id != 2 && id != 3) PNeed(U_LISTS, "Vectors are", ln);
+            ptp++;
+            if (!PIsOp("(")) PfFail(ln, "Expected '(' after .%s", pt[ptp - 1].s);
             ptp++; int argc; PArgs(&argc); PEmit(OP_METHOD, (argc << 4) | id, ln);
         }
+        else if (PIsOp("++") || PIsOp("--")) PfFail(ln, "'%s' can only be used as a statement on its own line here, not inside another expression", pt[ptp].s);
         else break;
     }
 }
-static void PUnary(void);
-static void PPow(void)
-{
-    PPostfix();
-    if (PIsOp("**")) { int ln = pt[ptp].ln; ptp++; PUnary(); PEmit(OP_POW, 0, ln); }
-}
 static void PUnary(void)
 {
-    if (PIsOp("-")) { int ln = pt[ptp].ln; ptp++; PUnary(); PEmit(OP_NEG, 0, ln); return; }
+    int ln = pt[ptp].ln;
+    if (PIsOp("-")) { ptp++; PUnary(); PEmit(OP_NEG, 0, ln); return; }
     if (PIsOp("+")) { ptp++; PUnary(); return; }
-    PPow();
+    if (PIsOp("!")) { ptp++; PUnary(); PEmit(OP_NOT, 0, ln); return; }
+    if (PIsOp("&") || PIsOp("*")) PfFail(ln, "Pointers and addresses are not available in the farm");
+    if (PIsOp("++") || PIsOp("--")) PfFail(ln, "'%s' can only be used as a statement on its own line here", pt[ptp].s);
+    if (PIsOp("~") || PIsOp("|") || PIsOp("^")) PfFail(ln, "Bitwise operators are not available in the farm");
+    PPostfix();
 }
 static void PTerm(void)
 {
     PUnary();
     for (;;) {
-        int op = PIsOp("*") ? OP_MUL : PIsOp("/") ? OP_DIV : PIsOp("//") ? OP_IDIV : PIsOp("%") ? OP_MOD : -1;
+        int op = PIsOp("*") ? OP_MUL : PIsOp("/") ? OP_DIV : PIsOp("%") ? OP_MOD : -1;
         if (op < 0) break; int ln = pt[ptp].ln; ptp++; PUnary(); PEmit(op, 0, ln);
     }
 }
@@ -7269,65 +8519,72 @@ static void PArith(void)
     PTerm();
     while (PIsOp("+") || PIsOp("-")) { int op = PIsOp("+") ? OP_ADD : OP_SUB, ln = pt[ptp].ln; ptp++; PTerm(); PEmit(op, 0, ln); }
 }
-static void PCmp(void)
+static void PRel(void)
 {
     PArith();
     for (;;) {
         int ln = pt[ptp].ln, op = -1;
-        if (PIsOp("==")) op = OP_EQ; else if (PIsOp("!=")) op = OP_NE; else if (PIsOp("<")) op = OP_LT; else if (PIsOp(">")) op = OP_GT;
-        else if (PIsOp("<=")) op = OP_LE; else if (PIsOp(">=")) op = OP_GE; else if (PKw("in")) op = OP_IN;
-        else if (PKw("not") && pt[ptp + 1].t == T_KW && !strcmp(pt[ptp + 1].s, "in")) { op = OP_NOTIN; ptp++; }
+        if (PIsOp("<")) op = OP_LT; else if (PIsOp(">")) op = OP_GT; else if (PIsOp("<=")) op = OP_LE; else if (PIsOp(">=")) op = OP_GE;
         if (op < 0) break; ptp++; PArith(); PEmit(op, 0, ln);
     }
 }
-static void PNot(void) { if (PKw("not")) { int ln = pt[ptp].ln; ptp++; PNot(); PEmit(OP_NOT, 0, ln); } else PCmp(); }
+static void PEq(void)
+{
+    PRel();
+    for (;;) {
+        int ln = pt[ptp].ln, op = PIsOp("==") ? OP_EQ : PIsOp("!=") ? OP_NE : -1;
+        if (op < 0) break; ptp++; PRel(); PEmit(op, 0, ln);
+    }
+}
 static void PAnd(void)
 {
-    PNot(); int pl[16], n = 0;
-    while (PKw("and")) { int ln = pt[ptp].ln; ptp++; if (n < 16) pl[n++] = PEmit(OP_JFK, 0, ln); PNot(); }
+    PEq(); int pl[16], n = 0;
+    while (PIsOp("&&")) { int ln = pt[ptp].ln; ptp++; if (n < 16) pl[n++] = PEmit(OP_JFK, 0, ln); PEq(); }
     for (int i = 0; i < n; i++) pcode[pl[i]].a = pcn;
+    if (n) PEmit(OP_TOBOOL, 0, pt[ptp].ln);
 }
 static void POr(void)
 {
     PAnd(); int pl[16], n = 0;
-    while (PKw("or")) { int ln = pt[ptp].ln; ptp++; if (n < 16) pl[n++] = PEmit(OP_JTK, 0, ln); PAnd(); }
+    while (PIsOp("||")) { int ln = pt[ptp].ln; ptp++; if (n < 16) pl[n++] = PEmit(OP_JTK, 0, ln); PAnd(); }
     for (int i = 0; i < n; i++) pcode[pl[i]].a = pcn;
+    if (n) PEmit(OP_TOBOOL, 0, pt[ptp].ln);
 }
-static void PExpr(void) { POr(); }
-
-static void PStmt(void);
-static void PEndLine(void)
+static void PExpr(void)
 {
-    if (pt[ptp].t == T_NL) ptp++;
-    else if (pt[ptp].t != T_EOF && pt[ptp].t != T_DED) PfFail(pt[ptp].ln, "Unexpected %s - expected the end of the line", PDesc(&pt[ptp]));
+    POr();
+    if (PIsOp("?")) {
+        int ln = pt[ptp].ln; ptp++; int jf = PEmit(OP_JF, 0, ln); PExpr(); int jend = PEmit(OP_JMP, 0, ln);
+        PExpectOp(":", "in the ? : expression"); pcode[jf].a = pcn; PExpr(); pcode[jend].a = pcn;
+    }
 }
+
+/* ---- statements ---- */
+static void PStmt(void);
+static void PEndStmt(void) { PExpectOp(";", "at the end of this statement"); }
 static void PBlock(void)
 {
-    PExpectOp(":", "at the end of this line");
-    if (pt[ptp].t == T_NL) {
-        ptp++;
-        if (pt[ptp].t != T_IND) PfFail(pt[ptp].ln, "Expected an indented block here (press Tab to indent)");
-        ptp++;
-        while (pt[ptp].t != T_DED && pt[ptp].t != T_EOF) PStmt();
-        if (pt[ptp].t == T_DED) ptp++;
-        return;
+    int ln = pt[ptp].ln; PExpectOp("{", NULL);
+    while (!PIsOp("}")) {
+        if (pt[ptp].t == T_EOF) PfFail(ln, "This { is never closed. Add a } to finish the block");
+        PStmt();
     }
-    PStmt();
+    ptp++;
 }
-static int PAssignOp(const PTok* k)
+static int PAssignOp(const PTok* k)          /* -2 plain =,  -3 ++,  -4 --,  an opcode for +=, -= ..., or -1 */
 {
     if (k->t != T_OP) return -1;
-    static const char* o[] = { "=", "+=", "-=", "*=", "/=", "//=", "%=" }; static const int c[] = { -2, OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_IDIV, OP_MOD };
-    for (int i = 0; i < 7; i++) if (!strcmp(k->s, o[i])) return c[i];
+    static const char* o[] = { "=", "+=", "-=", "*=", "/=", "%=", "++", "--" }; static const int c[] = { -2, OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, -3, -4 };
+    for (int i = 0; i < 8; i++) if (!strcmp(k->s, o[i])) return c[i];
     return -1;
 }
 static bool PIsIndexAssign(void)
 {
     int q = ptp + 1;
-    if (pt[ptp].t != T_NAME || !(pt[q].t == T_OP && !strcmp(pt[q].s, "["))) return false;
-    while (pt[q].t == T_OP && !strcmp(pt[q].s, "[")) {
+    if (pt[ptp].t != T_NAME || !PIsOpAt(q, "[")) return false;
+    while (PIsOpAt(q, "[")) {
         int d = 0;
-        for (; pt[q].t != T_NL && pt[q].t != T_EOF; q++) { if (pt[q].t == T_OP && !strcmp(pt[q].s, "[")) d++; else if (pt[q].t == T_OP && !strcmp(pt[q].s, "]")) { d--; if (!d) { q++; break; } } }
+        for (; pt[q].t != T_EOF && !PIsOpAt(q, ";"); q++) { if (PIsOpAt(q, "[")) d++; else if (PIsOpAt(q, "]")) { d--; if (!d) { q++; break; } } }
     }
     return PAssignOp(&pt[q]) != -1;
 }
@@ -7338,106 +8595,307 @@ static void PLoopEnd(int contTarget, int brkTarget)
     for (int i = 0; i < l->nb; i++) pcode[l->brk[i]].a = brkTarget;
     plpn--;
 }
+static void PLoopBegin(int ln) { if (plpn >= 19) PfFail(ln, "Too many nested loops"); memset(&plp[plpn++], 0, sizeof(PLoopC)); }
+
+/* an assignment, ++ or -- with no trailing ';'  (used by statements and by for headers) */
+static void PAssign(void)
+{
+    PTok* t = &pt[ptp]; int ln = t->ln;
+    if (PIsIndexAssign()) {
+        PNeed(U_LISTS, "Changing array items is", ln);
+        PRefT r = PResolve(t->s); int ek = r.ek;
+        PEmitLoad(t->s, ln); ptp++; int depth = 0;
+        for (;;) { PExpectOp("[", NULL); PExpr(); PExpectOp("]", NULL); depth++; if (PIsOp("[")) PEmit(OP_INDEX, 0, ln); else break; }
+        if (depth > 1) ek = K_AUTO;
+        int op = PAssignOp(&pt[ptp]); ptp++;
+        if (op != -2) { PEmit(OP_DUP2, 0, ln); PEmit(OP_INDEX, 0, ln); }
+        if (op == -3 || op == -4) { PEmitNum(1, false, ln); PEmit(op == -3 ? OP_ADD : OP_SUB, 0, ln); }
+        else { PExpr(); if (op != -2) PEmit(op, 0, ln); }
+        PCoerce(ek, ln); PEmit(OP_SETINDEX, 0, ln); return;
+    }
+    if (PIsOp("++") || PIsOp("--")) {                       /* ++i */
+        int sub = PIsOp("++") ? OP_ADD : OP_SUB; ptp++;
+        if (pt[ptp].t != T_NAME) PfFail(ln, "Expected a variable after '%s'", pt[ptp - 1].s);
+        PRefT r = PResolve(pt[ptp].s); char nm[32]; snprintf(nm, 32, "%s", pt[ptp].s); ptp++;
+        PEmitLoad(nm, ln); PEmitNum(1, false, ln); PEmit(sub, 0, ln); PCoerce(r.kind, ln); PEmitStoreVar(nm, ln); return;
+    }
+    char nm[32]; snprintf(nm, 32, "%s", t->s); ptp++;
+    int aop = PAssignOp(&pt[ptp]); ptp++;
+    PRefT r = PResolve(nm);
+    if (aop == -3 || aop == -4) { PEmitLoad(nm, ln); PEmitNum(1, false, ln); PEmit(aop == -3 ? OP_ADD : OP_SUB, 0, ln); PCoerce(r.kind, ln); PEmitStoreVar(nm, ln); return; }
+    if (aop != -2) PEmitLoad(nm, ln);
+    else if (r.where == 0) PUndeclared(nm, ln);
+    PExpr(); if (aop != -2) PEmit(aop, 0, ln);
+    PCoerce(r.kind == K_VEC ? K_AUTO : r.kind, ln); PEmitStoreVar(nm, ln);
+}
+static bool PAtAssign(void)
+{
+    if (PIsOp("++") || PIsOp("--")) return true;
+    if (pt[ptp].t != T_NAME) return false;
+    return PAssignOp(&pt[ptp + 1]) != -1 || PIsIndexAssign();
+}
+/* '{ a, b, c }' for an array or vector; returns how many values were pushed */
+static int PBraceList(int ek, int ln)
+{
+    PExpectOp("{", NULL); int n = 0;
+    while (!PIsOp("}")) { PExpr(); PCoerce(ek, ln); n++; if (PIsOp(",")) ptp++; else break; }
+    PExpectOp("}", "to close the list of values");
+    return n;
+}
+/* one or more declarators after the type has been read; the caller reads the ';' */
+static void PDeclList(int kind, int ek0, int ln)
+{
+    bool plainChar = (kind == K_STR && ptp > 0 && pt[ptp - 1].t == T_NAME && !strcmp(pt[ptp - 1].s, "char"));
+    for (;;) {
+        bool ptr = false; while (PIsOp("*")) { ptr = true; ptp++; }
+        if (ptr && !plainChar) PfFail(ln, "Pointers are not available in the farm");
+        if (PIsOp("&")) PfFail(ln, "References are only available for function parameters of vector type in the farm");
+        if (pt[ptp].t != T_NAME) PfFail(pt[ptp].ln, "Expected a variable name here but found %s", PDesc(&pt[ptp]));
+        char nm[32]; snprintf(nm, 32, "%s", pt[ptp].s); ptp++;
+        int vk = kind, ve = ek0;
+        if (PIsOp("[")) {                                                    /* int a[5];  int a[] = { ... };  char s[] = "abc"; */
+            ptp++;
+            if (plainChar) {
+                while (!PIsOp("]") && !PIsOp(";") && pt[ptp].t != T_EOF) ptp++;
+                PExpectOp("]", NULL);
+                if (!(PIsOp("=") && pt[ptp + 1].t == T_STR)) PfFail(ln, "Character buffers are not available in the farm. Use  char name[] = \"text\";  (or a string in C++)");
+                ptp++; PEmit(OP_STR, (int)pt[ptp].n, ln); ptp++; vk = K_STR; ve = K_AUTO;
+            }
+            else {
+                PNeed(U_LISTS, "Arrays are", ln);
+                bool known = false, sized = false; int size = 0;
+                if (!PIsOp("]")) {
+                    if (pt[ptp].t == T_NUM && PIsOpAt(ptp + 1, "]")) { known = true; size = (int)pt[ptp].n; ptp++; if (size < 0 || size > 100000) PfFail(ln, "That array size is not allowed"); }
+                    else { PEmitDefault(kind, ln); PExpr(); PEmit(OP_FILL, 0, ln); sized = true; }
+                }
+                PExpectOp("]", NULL);
+                if (PIsOp("[")) PfFail(ln, "Two-dimensional arrays are not supported in the farm");
+                if (PIsOp("=")) {
+                    if (sized) PfFail(ln, "An array whose size is a variable cannot also have a list of starting values");
+                    ptp++; int n = PBraceList(kind, ln);
+                    if (known) {
+                        if (n > size) PfFail(ln, "Too many values in the list: the array holds only %d", size);
+                        PEmit(OP_LIST, n, ln);
+                        if (n < size) { PEmitDefault(kind, ln); PEmitNum(size, false, ln); PEmit(OP_FILL, 3, ln); }
+                    }
+                    else {
+                        if (n == 0) PfFail(ln, "An array with no size needs at least one starting value");
+                        PEmit(OP_LIST, n, ln);
+                    }
+                }
+                else if (known) { PEmitDefault(kind, ln); PEmitNum(size, false, ln); PEmit(OP_FILL, 0, ln); }
+                else if (!sized) PfFail(ln, "An array needs a size, like  int a[10];");
+                vk = K_VEC; ve = kind;
+            }
+        }
+        else if (kind == K_VEC) {                                         /* vector<int> v;  v(n);  v(n, x);  v = { ... };  v{ ... } */
+            PNeed(U_LISTS, "Vectors are", ln);
+            if (PIsOp("(")) {
+                ptp++; PExpr();
+                if (PIsOp(",")) { ptp++; PExpr(); PCoerce(ek0, ln); }
+                else PEmitDefault(ek0, ln);
+                PEmit(OP_FILL, 1, ln); PExpectOp(")", NULL);
+            }
+            else if (PIsOp("=")) {
+                ptp++;
+                if (PIsOp("{")) { int n = PBraceList(ek0, ln); PEmit(OP_LIST, n, ln); }
+                else PExpr();
+            }
+            else if (PIsOp("{")) { int n = PBraceList(ek0, ln); PEmit(OP_LIST, n, ln); }
+            else PEmit(OP_LIST, 0, ln);
+            vk = K_VEC; ve = ek0;
+        }
+        else {                                                              /* int x = 5;   int x;   double d = 1; */
+            if (kind == K_VOID) PfFail(ln, "A variable cannot have the type void");
+            if (PIsOp("=")) { ptp++; PExpr(); PCoerce(kind, ln); }
+            else {
+                if (kind == K_AUTO) PfFail(ln, "'auto' needs a starting value so it knows its type, like  auto x = 5;");
+                PEmitDefault(kind, ln);
+            }
+        }
+        PEmitDeclare(nm, vk, ve, ln);
+        if (PIsOp(",")) { ptp++; continue; }
+        break;
+    }
+}
+
+static void PCoutStmt(void)
+{
+    int ln = pt[ptp].ln; PCppOnly("'cout'", ln); ptp++;
+    if (!PIsOp("<<")) PfFail(ln, "Use cout with <<, like:  cout << \"hello\" << endl;");
+    while (PIsOp("<<")) {
+        ptp++; int bi = PBuiltinId("__cout");
+        PEmit(OP_BUILTIN, bi, ln); PExpr(); PEmit(OP_CALL, 1, ln); PEmit(OP_POP, 0, ln);
+    }
+    PEndStmt();
+}
 static void PStmt(void)
 {
     PTok* t = &pt[ptp]; int ln = t->ln;
-    if (t->t == T_IND) PfFail(ln, "This line is indented but nothing above it asks for a block");
+    if (t->t == T_OP && !strcmp(t->s, "{")) { PBlock(); return; }
+    if (t->t == T_OP && !strcmp(t->s, ";")) { ptp++; return; }
+    if (t->t == T_OP && !strcmp(t->s, "}")) PfFail(ln, "This } has no matching { before it");
     if (t->t == T_KW) {
         const char* k = t->s;
         if (!strcmp(k, "if")) {
-            ptp++; int ends[40], ne = 0; PExpr(); int jf = PEmit(OP_JF, 0, ln); PBlock();
-            for (;;) {
-                if (PKw("elif")) { int l2 = pt[ptp].ln; ptp++; if (ne < 39) ends[ne++] = PEmit(OP_JMP, 0, l2); pcode[jf].a = pcn; PExpr(); jf = PEmit(OP_JF, 0, l2); PBlock(); }
-                else if (PKw("else")) { int l2 = pt[ptp].ln; ptp++; if (ne < 39) ends[ne++] = PEmit(OP_JMP, 0, l2); pcode[jf].a = pcn; jf = -1; PBlock(); break; }
-                else break;
-            }
-            if (jf >= 0) pcode[jf].a = pcn;
-            for (int i = 0; i < ne; i++) pcode[ends[i]].a = pcn;
+            ptp++; PExpectOp("(", "after if"); PExpr(); PExpectOp(")", "to finish the condition");
+            int jf = PEmit(OP_JF, 0, ln); PStmt();
+            if (PKw("else")) { int l2 = pt[ptp].ln; ptp++; int jend = PEmit(OP_JMP, 0, l2); pcode[jf].a = pcn; PStmt(); pcode[jend].a = pcn; }
+            else pcode[jf].a = pcn;
             return;
         }
+        if (!strcmp(k, "else")) PfFail(ln, "This 'else' has no matching 'if' before it");
         if (!strcmp(k, "while")) {
-            ptp++; int top = pcn; PExpr(); int jf = PEmit(OP_JF, 0, ln);
-            if (plpn >= 19) PfFail(ln, "Too many nested loops"); memset(&plp[plpn++], 0, sizeof(PLoopC));
-            PBlock(); PEmit(OP_JMP, top, ln); pcode[jf].a = pcn; PLoopEnd(top, pcn); return;
+            ptp++; int top = pcn; PExpectOp("(", "after while"); PExpr(); PExpectOp(")", "to finish the condition"); int jf = PEmit(OP_JF, 0, ln);
+            PLoopBegin(ln); PStmt(); PEmit(OP_JMP, top, ln); pcode[jf].a = pcn; PLoopEnd(top, pcn); return;
+        }
+        if (!strcmp(k, "do")) {
+            ptp++; int top = pcn; PLoopBegin(ln); PStmt();
+            if (!PKw("while")) PfFail(pt[ptp].ln, "A do loop must end with  while (condition);");
+            ptp++; int cont = pcn; PExpectOp("(", "after while"); PExpr(); PExpectOp(")", "to finish the condition"); PEndStmt();
+            int jf = PEmit(OP_JF, 0, ln); PEmit(OP_JMP, top, ln); pcode[jf].a = pcn; PLoopEnd(cont, pcn); return;
         }
         if (!strcmp(k, "for")) {
-            PNeed(U_LOOPS, "'for' loops are", ln); ptp++;
-            if (pt[ptp].t != T_NAME) PfFail(ln, "A for loop needs a variable name, like: for i in range(3):");
-            char var[32]; snprintf(var, 32, "%s", pt[ptp].s); ptp++;
-            if (!PKw("in")) PfFail(ln, "Expected 'in' after the loop variable"); ptp++;
-            char hl[32], hi[32]; snprintf(hl, 32, "$l%d", pHid); snprintf(hi, 32, "$i%d", pHid); pHid++;
-            PExpr(); PEmit(OP_TOLIST, 0, ln); PEmitStore(hl, ln); int z = pnn; pnum[pnn++] = 0; PEmit(OP_NUM, z, ln); PEmitStore(hi, ln);
-            int top = pcn; PEmitLoad(hi, ln); PEmitLoad(hl, ln); PEmit(OP_LEN, 0, ln); PEmit(OP_LT, 0, ln); int jf = PEmit(OP_JF, 0, ln);
-            PEmitLoad(hl, ln); PEmitLoad(hi, ln); PEmit(OP_INDEX, 0, ln); PEmitStore(var, ln);
-            if (plpn >= 19) PfFail(ln, "Too many nested loops"); memset(&plp[plpn++], 0, sizeof(PLoopC));
-            PBlock();
-            int inc = pcn; int one = pnn; pnum[pnn++] = 1; PEmitLoad(hi, ln); PEmit(OP_NUM, one, ln); PEmit(OP_ADD, 0, ln); PEmitStore(hi, ln); PEmit(OP_JMP, top, ln);
-            pcode[jf].a = pcn; PLoopEnd(inc, pcn); return;
-        }
-        if (!strcmp(k, "def")) {
-            PNeed(U_FUNCS, "'def' functions are", ln); ptp++;
-            if (pInFn) PfFail(ln, "Functions can't be defined inside other functions");
-            if (pt[ptp].t != T_NAME) PfFail(ln, "def needs a function name");
-            char nm[32]; snprintf(nm, 32, "%s", pt[ptp].s); ptp++; int gi = PAddG(nm, ln);
-            PExpectOp("(", NULL); char params[16][32]; int np = 0;
-            while (!PIsOp(")")) { if (pt[ptp].t != T_NAME) PfFail(ln, "Expected a parameter name"); if (np < 16) snprintf(params[np++], 32, "%s", pt[ptp].s); ptp++; if (PIsOp(",")) ptp++; else break; }
-            PExpectOp(")", NULL);
-            int jmp = PEmit(OP_JMP, 0, ln); if (pfnn >= 63) PfFail(ln, "Too many functions"); int fi = pfnn++;
-            pfn[fi].entry = pcn; pfn[fi].np = np; pInFn = true; pLocN = 0; pGdN = 0; pLoopBase = plpn;
-            for (int i = 0; i < np; i++) { snprintf(pLoc[pLocN], 32, "%s", params[i]); pLocN++; }
-            PBlock(); PEmit(OP_NONE, 0, ln); PEmit(OP_RET, 0, ln);
-            pfn[fi].nl = pLocN; pInFn = false; pLoopBase = 0; pcode[jmp].a = pcn;
-            PEmit(OP_FUNC, fi, ln); PEmit(OP_STOREG, gi, ln); return;
+            PNeed(U_LOOPS, "'for' loops are", ln); ptp++; PExpectOp("(", "after for");
+            int save = ptp;
+            if (PAtType()) {                                                   /* range-based:  for (auto x : v) */
+                int kd, ek; PParseType(&kd, &ek); if (PIsOp("&")) ptp++;
+                if (pt[ptp].t == T_NAME && PIsOpAt(ptp + 1, ":")) {
+                    PCppOnly("A range-based for loop", ln);
+                    char var[32]; snprintf(var, 32, "%s", pt[ptp].s); ptp += 2;
+                    char hl[32], hi[32]; snprintf(hl, 32, "$l%d", pHid); snprintf(hi, 32, "$i%d", pHid); pHid++;
+                    PExpr(); PEmit(OP_TOLIST, 0, ln); PEmitDeclare(hl, K_VEC, K_AUTO, ln); PEmitNum(0, false, ln); PEmitDeclare(hi, K_INT, K_AUTO, ln);
+                    PExpectOp(")", "to finish the for loop");
+                    int top = pcn; PEmitLoad(hi, ln); PEmitLoad(hl, ln); PEmit(OP_LEN, 0, ln); PEmit(OP_LT, 0, ln); int jf = PEmit(OP_JF, 0, ln);
+                    PEmitLoad(hl, ln); PEmitLoad(hi, ln); PEmit(OP_INDEX, 0, ln); PEmitDeclare(var, kd == K_AUTO ? K_AUTO : kd, ek, ln);
+                    PLoopBegin(ln); PStmt();
+                    int inc = pcn; PEmitLoad(hi, ln); PEmitNum(1, false, ln); PEmit(OP_ADD, 0, ln); PEmitStoreVar(hi, ln); PEmit(OP_JMP, top, ln);
+                    pcode[jf].a = pcn; PLoopEnd(inc, pcn); return;
+                }
+                ptp = save;
+            }
+            /* init */
+            if (!PIsOp(";")) {
+                if (PAtType()) { int kd, ek; PParseType(&kd, &ek); PDeclList(kd, ek, ln); }
+                else for (;;) { if (!PAtAssign()) PfFail(pt[ptp].ln, "Expected a starting statement like  int i = 0  here"); PAssign(); if (PIsOp(",")) ptp++; else break; }
+            }
+            PExpectOp(";", "after the first part of the for loop");
+            int top = pcn; int jf = -1;
+            if (!PIsOp(";")) { PExpr(); jf = PEmit(OP_JF, 0, ln); }
+            PExpectOp(";", "after the condition of the for loop");
+            int jb = PEmit(OP_JMP, 0, ln); int stepAt = pcn;
+            if (!PIsOp(")")) for (;;) {
+                if (PAtAssign()) PAssign(); else { PExpr(); PEmit(OP_POP, 0, ln); }
+                if (PIsOp(",")) ptp++; else break;
+            }
+            PExpectOp(")", "to finish the for loop");
+            PEmit(OP_JMP, top, ln); pcode[jb].a = pcn;
+            PLoopBegin(ln); PStmt(); PEmit(OP_JMP, stepAt, ln);
+            if (jf >= 0) pcode[jf].a = pcn;
+            PLoopEnd(stepAt, pcn); return;
         }
         if (!strcmp(k, "return")) {
-            ptp++; if (pt[ptp].t != T_NL && pt[ptp].t != T_EOF) PExpr(); else PEmit(OP_NONE, 0, ln);
-            PEmit(pInFn ? OP_RET : OP_END, 0, ln); PEndLine(); return;
+            ptp++;
+            if (!pInFn) PfFail(ln, "'return' only works inside a function");
+            if (!PIsOp(";")) {
+                if (pRetK == K_VOID) PfFail(ln, "This function is void, so it cannot return a value");
+                PExpr(); PCoerce(pRetK, ln);
+            }
+            else PEmit(OP_NONE, 0, ln);
+            PEmit(OP_RET, 0, ln); PEndStmt(); return;
         }
-        if (!strcmp(k, "pass")) { ptp++; PEndLine(); return; }
         if (!strcmp(k, "break") || !strcmp(k, "continue")) {
             bool br = k[0] == 'b'; ptp++;
             if (plpn <= pLoopBase) PfFail(ln, "'%s' only works inside a loop", br ? "break" : "continue");
             PLoopC* l = &plp[plpn - 1]; int j = PEmit(OP_JMP, 0, ln);
             if (br) { if (l->nb < 63) l->brk[l->nb++] = j; }
             else { if (l->nc < 63) l->cont[l->nc++] = j; }
-            PEndLine(); return;
+            PEndStmt(); return;
         }
-        if (!strcmp(k, "global")) {
-            ptp++;
-            while (pt[ptp].t == T_NAME) { if (pInFn && pGdN < 16) snprintf(pGd[pGdN++], 32, "%s", pt[ptp].s); ptp++; if (PIsOp(",")) ptp++; else break; }
-            PEndLine(); return;
-        }
+        if (!strcmp(k, "using")) { PCppOnly("'using namespace std;'", ln); while (!PIsOp(";") && pt[ptp].t != T_EOF) ptp++; PEndStmt(); return; }
+        if (!strcmp(k, "switch") || !strcmp(k, "case") || !strcmp(k, "default")) PfFail(ln, "switch is not available in the farm yet. Use if / else if instead");
+        if (!strcmp(k, "struct") || !strcmp(k, "class") || !strcmp(k, "enum") || !strcmp(k, "typedef") || !strcmp(k, "union") || !strcmp(k, "template"))
+            PfFail(ln, "'%s' is not available in the farm. The farm runs a smaller C/C++", k);
+        if (!strcmp(k, "new") || !strcmp(k, "delete")) PfFail(ln, "Dynamic memory (new / delete / malloc) is not available in the farm");
+        if (!strcmp(k, "goto")) PfFail(ln, "goto is not available");
     }
-    int aop = (t->t == T_NAME) ? PAssignOp(&pt[ptp + 1]) : -1;
-    if (aop != -1) {
-        char nm[32]; snprintf(nm, 32, "%s", t->s); ptp += 2;
-        if (aop != -2) PEmitLoad(nm, ln);
-        PExpr(); if (aop != -2) PEmit(aop, 0, ln);
-        PEmitStore(nm, ln); PEndLine(); return;
-    }
-    if (PIsIndexAssign()) {
-        PNeed(U_LISTS, "Changing list items is", ln);
-        PEmitLoad(t->s, ln); ptp++;
-        for (;;) {
-            PExpectOp("[", NULL); PExpr(); PExpectOp("]", NULL);
-            if (PIsOp("[")) PEmit(OP_INDEX, 0, ln); else break;
-        }
-        int op = PAssignOp(&pt[ptp]); ptp++;
-        if (op != -2) PEmit(OP_DUP2, 0, ln), PEmit(OP_INDEX, 0, ln);
-        PExpr(); if (op != -2) PEmit(op, 0, ln);
-        PEmit(OP_SETINDEX, 0, ln); PEndLine(); return;
-    }
+    if (t->t == T_NAME && !strcmp(t->s, "std") && PIsOpAt(ptp + 1, "::") && pt[ptp + 2].t == T_NAME && !strcmp(pt[ptp + 2].s, "cout")) ptp += 2;
+    if (PName("cout")) { PCoutStmt(); return; }
+    if (PName("cin") || PName("scanf") || PName("gets") || PName("getchar")) PfFail(ln, "The farm program has no keyboard input. Use get_pos_x() and friends to read the farm instead");
+    if (PAtType()) { int kd, ek; PParseType(&kd, &ek); PDeclList(kd, ek, ln); PEndStmt(); return; }
+    if (PAtAssign()) { PAssign(); PEndStmt(); return; }
     PExpr();
-    if (PAssignOp(&pt[ptp]) != -1) PfFail(ln, "You can only assign to a variable or a list item");
-    PEmit(OP_POP, 0, ln); PEndLine();
+    if (PAssignOp(&pt[ptp]) != -1 && pt[ptp].t == T_OP) PfFail(ln, "You can only assign to a variable or an array item");
+    PEmit(OP_POP, 0, ln); PEndStmt();
+}
+
+/* ---- top level: global variables and functions ---- */
+static void PTopFunc(int rk, const char* nm, int ln)
+{
+    bool isMain = !strcmp(nm, "main");
+    ptp++;                                                                  /* ( */
+    char params[16][32]; int pk[16], pe[16], np = 0;
+    if (PName("void") && PIsOpAt(ptp + 1, ")")) ptp++;
+    while (!PIsOp(")")) {
+        int kd, ek; PParseType(&kd, &ek);
+        bool ptr = false; if (PIsOp("*")) { ptr = true; ptp++; }
+        if (ptr && kd != K_STR) PfFail(ln, "Pointers are not available in the farm");
+        if (PIsOp("&")) { if (kd != K_VEC) PfFail(ln, "Reference parameters are only available for vectors in the farm. Return a value instead"); ptp++; }
+        if (pt[ptp].t != T_NAME) PfFail(pt[ptp].ln, "Expected a parameter name but found %s", PDesc(&pt[ptp]));
+        if (np < 16) snprintf(params[np], 32, "%s", pt[ptp].s); ptp++;
+        if (PIsOp("[")) { ptp++; if (pt[ptp].t == T_NUM) ptp++; PExpectOp("]", NULL); ek = kd; kd = K_VEC; }
+        if (np < 16) { pk[np] = kd; pe[np] = ek; np++; }
+        if (PIsOp(",")) ptp++; else break;
+    }
+    PExpectOp(")", "to finish the parameter list");
+    if (PIsOp(";")) { ptp++; return; }                                      /* a prototype */
+    if (!PIsOp("{")) PfFail(pt[ptp].ln, "Expected '{' to start the function body but found %s", PDesc(&pt[ptp]));
+    if (isMain && np) PfFail(ln, "main takes no parameters in the farm:  int main(void)");
+    if (!isMain) PNeed(U_FUNCS, "Your own functions are", ln);
+    int gi = PAddG(nm, ln); pgKind[gi] = K_AUTO;
+    int jmp = PEmit(OP_JMP, 0, ln); if (pfnn >= 63) PfFail(ln, "Too many functions"); int fi = pfnn++;
+    pfn[fi].entry = pcn; pfn[fi].np = np; pInFn = true; pLocN = 0; pLoopBase = plpn; pRetK = rk;
+    for (int i = 0; i < np; i++) { snprintf(pLoc[pLocN], 32, "%s", params[i]); pLocKind[pLocN] = (unsigned char)pk[i]; pLocElem[pLocN] = (unsigned char)pe[i]; pLocN++; }
+    for (int i = 0; i < np; i++) if (pk[i] == K_INT || pk[i] == K_DBL || pk[i] == K_BOOL) { PEmit(OP_LOADL, i, ln); PCoerce(pk[i], ln); PEmit(OP_STOREL, i, ln); }
+    PBlock(); PEmit(OP_NONE, 0, pt[ptp - 1].ln); PEmit(OP_RET, 0, pt[ptp - 1].ln);
+    pfn[fi].nl = pLocN; pInFn = false; pLoopBase = 0; pRetK = K_VOID; pcode[jmp].a = pcn;
+    PEmit(OP_FUNC, fi, ln); PEmit(OP_STOREG, gi, ln);
+    if (isMain) pHasMain = true;
+}
+static void PTop(void)
+{
+    PTok* t = &pt[ptp]; int ln = t->ln;
+    if (PIsOp(";")) { ptp++; return; }
+    if (t->t == T_KW && !strcmp(t->s, "using")) { PCppOnly("'using namespace std;'", ln); while (!PIsOp(";") && pt[ptp].t != T_EOF) ptp++; PEndStmt(); return; }
+    if (t->t == T_KW && (!strcmp(t->s, "struct") || !strcmp(t->s, "class") || !strcmp(t->s, "enum") || !strcmp(t->s, "typedef") || !strcmp(t->s, "union") || !strcmp(t->s, "template")))
+        PfFail(ln, "'%s' is not available in the farm. The farm runs a smaller C/C++", t->s);
+    if (!PAtType()) PfFail(ln, "Outside of functions you can only declare variables and functions. Put this statement inside int main(void) { ... }");
+    int kd, ek; PParseType(&kd, &ek);
+    if (pt[ptp].t == T_NAME && PIsOpAt(ptp + 1, "(") && !(kd == K_VEC)) {
+        char nm[32]; snprintf(nm, 32, "%s", pt[ptp].s); ptp++; PTopFunc(kd, nm, ln); return;
+    }
+    if (kd == K_VOID) PfFail(ln, "Expected a function name after void");
+    PDeclList(kd, ek, ln); PEndStmt();
+}
+static void PfPrescan(void)               /* find function names first so they can be called before they are defined */
+{
+    int depth = 0;
+    for (int i = 0; i + 1 < ptn; i++) {
+        if (pt[i].t == T_OP) { if (pt[i].s[0] == '{') depth++; else if (pt[i].s[0] == '}') depth--; }
+        if (depth == 0 && pt[i].t == T_NAME && PIsOpAt(i + 1, "(") && i > 0 && (PIsOpAt(i - 1, ">") || (pt[i - 1].t == T_NAME && PIsTypeWord(pt[i - 1].s)))) PAddG(pt[i].s, pt[i].ln);
+    }
 }
 static bool PfCompile(const char* src)
 {
     if (setjmp(pfJmp)) return false;
-    pcn = pnn = pgn = pfnn = 0; pInFn = false; plpn = pLoopBase = pHid = 0; pfStrLen = 0; ptp = 0;
-    PfLex(src);
-    while (pt[ptp].t != T_EOF) PStmt();
-    PEmit(OP_END, 0, pt[ptn - 1].ln); pfStrBase = pfStrLen;
+    pcn = pnn = pgn = pfnn = 0; pInFn = false; pHasMain = false; plpn = pLoopBase = pHid = 0; pfStrLen = 0; ptp = 0; pRetK = K_VOID;
+    memset(pgKind, K_AUTO, sizeof pgKind); memset(pgElem, K_AUTO, sizeof pgElem);
+    PfLex(src); PfPrescan();
+    while (pt[ptp].t != T_EOF) PTop();
+    int g = PFindG("main");
+    if (!pHasMain || g < 0) PfFail(1, "Your program needs a main function to start from. For example:  int main(void) { ... }");
+    int ln = pt[ptn - 1].ln;
+    PEmit(OP_LOADG, g, ln); PEmit(OP_CALL, 0, ln); PEmit(OP_POP, 0, ln); PEmit(OP_END, 0, ln); pfStrBase = pfStrLen;
     return true;
 }
 
@@ -7455,8 +8913,7 @@ static const char* PfDidYouMean(const char* nm)
 {
     for (int i = 0; i < BI_N; i++) if (!PfCaseCmp(PBI[i].name, nm) && strcmp(PBI[i].name, nm)) return PBI[i].name;
     for (int i = 0; i < pgn; i++) if (!PfCaseCmp(pgName[i], nm) && strcmp(pgName[i], nm)) return pgName[i];
-    static const char* ex[] = { "North", "East", "South", "West", "Entities", "Items", "Grounds", NULL };
-    for (int i = 0; ex[i]; i++) if (!PfCaseCmp(ex[i], nm) && strcmp(ex[i], nm)) return ex[i];
+    for (int i = 0; PCONST[i].n; i++) if (!PfCaseCmp(PCONST[i].n, nm) && strcmp(PCONST[i].n, nm)) return PCONST[i].n;
     return NULL;
 }
 static double PfNumOf(PV v, int ln, const char* what)
@@ -7467,13 +8924,19 @@ static double PfNumOf(PV v, int ln, const char* what)
 static PV PfArith(int op, PV a, PV b, int ln)
 {
     if (VIsNum(a) && VIsNum(b)) {
-        double x = a.u.n, y = b.u.n;
+        double x = a.u.n, y = b.u.n; bool dbl = a.a == 1 || b.a == 1;
         switch (op) {
-        case OP_ADD: return VNum(x + y); case OP_SUB: return VNum(x - y); case OP_MUL: return VNum(x * y);
-        case OP_DIV: if (y == 0) PfFail(ln, "You tried to divide by zero"); return VNum(x / y);
-        case OP_IDIV: if (y == 0) PfFail(ln, "You tried to divide by zero"); return VNum(floor(x / y));
-        case OP_MOD: if (y == 0) PfFail(ln, "You tried to divide by zero (in %%)"); return VNum(x - y * floor(x / y));
-        case OP_POW: return VNum(pow(x, y));
+        case OP_ADD: return dbl ? VNumD(x + y) : VNum(x + y);
+        case OP_SUB: return dbl ? VNumD(x - y) : VNum(x - y);
+        case OP_MUL: return dbl ? VNumD(x * y) : VNum(x * y);
+        case OP_DIV:
+            if (y == 0 && !dbl) PfFail(ln, "You tried to divide an int by zero. In real C this crashes the program");
+            if (!dbl) return VNum(trunc(x / y));                 /* int / int cuts off the decimals, just like C */
+            return VNumD(y == 0 ? (x == 0 ? NAN : (x > 0 ? INFINITY : -INFINITY)) : x / y);
+        case OP_MOD:
+            if (dbl) PfFail(ln, "The %% operator needs two int values. Use (int) to convert");
+            if (y == 0) PfFail(ln, "You tried to divide by zero (in %%)");
+            return VNum(x - y * trunc(x / y));
         }
     }
     if (op == OP_ADD && a.t == V_STR && b.t == V_STR) {
@@ -7487,7 +8950,7 @@ static PV PfArith(int op, PV a, PV b, int ln)
         PV v; memset(&v, 0, sizeof v); v.t = V_LIST; v.u.l = l; return v;
     }
     static const char* sym[] = { "+", "-", "*", "/", "//", "%", "**" };
-    PfFail(ln, "Can't use '%s' between %s and %s%s", sym[op - OP_ADD], VTName(a), VTName(b), (op == OP_ADD && (a.t == V_STR || b.t == V_STR)) ? ". Use str() to turn a number into text." : "");
+    PfFail(ln, "Can't use '%s' between %s and %s%s", sym[op - OP_ADD], VTName(a), VTName(b), (op == OP_ADD && (a.t == V_STR || b.t == V_STR)) ? ". Use to_string() to turn a number into text." : "");
     return VNone();
 }
 static PV PfCompare(int op, PV a, PV b, int ln)
@@ -7498,7 +8961,7 @@ static PV PfCompare(int op, PV a, PV b, int ln)
         bool f = false;
         if (b.t == V_LIST) { for (int i = 0; i < b.u.l->n; i++) if (VEq(a, b.u.l->v[i])) { f = true; break; } }
         else if (b.t == V_STR && a.t == V_STR) f = strstr(b.u.s, a.u.s) != NULL;
-        else PfFail(ln, "'in' needs a list or text on the right");
+        else PfFail(ln, "'in' needs an array or text on the right");
         return VBool(op == OP_IN ? f : !f);
     }
     double c;
@@ -7509,16 +8972,55 @@ static PV PfCompare(int op, PV a, PV b, int ln)
 }
 static int PfIndexOf(PV o, PV i, int ln, int* len)
 {
-    if (o.t != V_LIST && o.t != V_STR) PfFail(ln, "Can't index a %s", VTName(o));
-    if (!VIsNum(i)) PfFail(ln, "A list index must be a number");
-    int n = o.t == V_LIST ? o.u.l->n : (int)strlen(o.u.s), k = (int)i.u.n; if (k < 0) k += n;
-    if (k < 0 || k >= n || i.u.n != floor(i.u.n)) PfFail(ln, "List index %g is out of range (the list has %d items)", i.u.n, n);
+    if (o.t != V_LIST && o.t != V_STR) PfFail(ln, "Can't use [ ] on a %s", VTName(o));
+    if (!VIsNum(i)) PfFail(ln, "An array index must be a number");
+    int n = o.t == V_LIST ? o.u.l->n : (int)strlen(o.u.s), k = (int)i.u.n;
+    if (k < 0 || k >= n || i.u.n != floor(i.u.n)) PfFail(ln, "Index %g is out of bounds. This array has %d item%s, so valid positions are 0 to %d (real C would read junk memory here)", i.u.n, n, n == 1 ? "" : "s", n - 1);
     if (len) *len = n; return k;
 }
 static int PfDirArg(PV v, int ln, const char* fn)
 {
-    if (v.t != V_ENUM || (v.a >> 4) != 0) PfFail(ln, "%s needs a direction: North, East, South or West", fn);
+    if (VIsNum(v) && v.u.n >= 0 && v.u.n <= 3 && v.u.n == floor(v.u.n)) return (int)v.u.n;      /* NORTH, EAST, SOUTH, WEST are 0, 1, 2, 3 */
+    if (v.t != V_ENUM || (v.a >> 4) != 0) PfFail(ln, "%s needs a direction: NORTH, EAST, SOUTH or WEST", fn);
     return v.a & 15;
+}
+static void PfPrintf(PV* a, int argc, int ln)
+{
+    if (argc < 1 || a[0].t != V_STR) PfFail(ln, "printf needs some text in quotes first, like  printf(\"%%d\\n\", x);");
+    const char* f = a[0].u.s; char out[1400]; int o = 0, ai = 1;
+    for (; *f && o < 1250; f++) {
+        if (*f != '%') { out[o++] = *f; continue; }
+        if (f[1] == '%') { out[o++] = '%'; f++; continue; }
+        char spec[24]; int sn = 0; spec[sn++] = '%'; f++;
+        while (*f && strchr("-+ 0#", *f) && sn < 8) spec[sn++] = *f++;
+        while (isdigit((unsigned char)*f) && sn < 14) spec[sn++] = *f++;
+        if (*f == '.') { spec[sn++] = *f++; while (isdigit((unsigned char)*f) && sn < 18) spec[sn++] = *f++; }
+        while (*f == 'l' || *f == 'h' || *f == 'z' || *f == 'L') f++;
+        char cv = *f; if (!cv) PfFail(ln, "The text in printf ends in the middle of a %% conversion");
+        if (ai >= argc) PfFail(ln, "printf has more %% conversions than values. Each %%%c needs a value after the text", cv);
+        PV v = a[ai++]; char buf[420]; buf[0] = 0;
+        switch (cv) {
+        case 'd': case 'i': case 'u': case 'x': case 'X': case 'o':
+            if (!VIsNum(v)) PfFail(ln, "%%%c prints a whole number but got %s", cv, VTName(v));
+            if (v.u.n != floor(v.u.n)) PfFail(ln, "%%%c prints a whole number but this value is %g. Use %%f for decimals, or convert with (int)", cv, v.u.n);
+            spec[sn++] = 'l'; spec[sn++] = 'l'; spec[sn++] = cv == 'i' ? 'd' : cv; spec[sn] = 0; snprintf(buf, sizeof buf, spec, (long long)v.u.n); break;
+        case 'f': case 'F': case 'e': case 'E': case 'g': case 'G':
+            if (!VIsNum(v)) PfFail(ln, "%%%c prints a number but got %s", cv, VTName(v));
+            spec[sn++] = cv; spec[sn] = 0; snprintf(buf, sizeof buf, spec, v.u.n); break;
+        case 'c':
+            if (v.t == V_STR) { spec[sn++] = 's'; spec[sn] = 0; char one[2] = { v.u.s[0], 0 }; snprintf(buf, sizeof buf, spec, one); }
+            else if (VIsNum(v)) { spec[sn++] = 'c'; spec[sn] = 0; snprintf(buf, sizeof buf, spec, (int)v.u.n); }
+            else PfFail(ln, "%%c prints one character but got %s", VTName(v));
+            break;
+        case 's':
+            if (v.t != V_STR) PfFail(ln, "%%s prints text but got %s. Use %%d for whole numbers or %%f for decimals", VTName(v));
+            spec[sn++] = 's'; spec[sn] = 0; snprintf(buf, sizeof buf, spec, v.u.s); break;
+        default: PfFail(ln, "printf does not know the conversion %%%c here. Try %%d, %%f, %%s or %%c", cv);
+        }
+        for (const char* q = buf; *q && o < 1380; q++) out[o++] = *q;
+    }
+    if (ai < argc) PfFail(ln, "printf was given %d more value%s than its text has conversions for", argc - ai, argc - ai == 1 ? "" : "s");
+    out[o] = 0; FarmOut(out);
 }
 /* runs a built-in; returns true when it is a drone action (the program then waits for its duration) */
 static bool PfBuiltin(int id, PV* a, int argc, int ln, PV* out)
@@ -7530,7 +9032,7 @@ static bool PfBuiltin(int id, PV* a, int argc, int ln, PV* out)
     case BI_HARVEST: *out = VBool(FHarvest()); break;
     case BI_CANHARV: *out = VBool(FCanHarvest()); break;
     case BI_PLANT: {
-        if (argc < 1 || a[0].t != V_ENUM || (a[0].a >> 4) != 1) PfFail(ln, "plant() needs a crop type, e.g. plant(Entities.Bush)");
+        if (argc < 1 || a[0].t != V_ENUM || (a[0].a >> 4) != 1) PfFail(ln, "plant() needs a crop type, e.g. plant(ENT_BUSH)");
         int r = FPlant(a[0].a & 15); if (r < 0) PfFail(ln, "%s", fErr); *out = VBool(r == 1); break;
     }
     case BI_TILL: *out = VBool(FTill()); break;
@@ -7540,40 +9042,34 @@ static bool PfBuiltin(int id, PV* a, int argc, int ln, PV* out)
     case BI_POSY: FAct(0.05); *out = VNum(fD.y); break;
     case BI_WSIZE: FAct(0.05); *out = VNum(fN); break;
     case BI_NUMITEMS:
-        if (argc < 1 || a[0].t != V_ENUM || (a[0].a >> 4) != 2) PfFail(ln, "num_items() needs an item, e.g. num_items(Items.Hay)");
+        if (argc < 1 || a[0].t != V_ENUM || (a[0].a >> 4) != 2) PfFail(ln, "num_items() needs an item, e.g. num_items(ITEM_HAY)");
         FAct(0.05); *out = VNum(fsv.inv[(a[0].a & 15) % IT_N]); break;
     case BI_USEITEM:
-        if (argc < 1 || a[0].t != V_ENUM || (a[0].a >> 4) != 2) PfFail(ln, "use_item() needs an item, e.g. use_item(Items.Water)");
-        if ((a[0].a & 15) != 6) PfFail(ln, "use_item() only works with Items.Water for now");
+        if (argc < 1 || a[0].t != V_ENUM || (a[0].a >> 4) != 2) PfFail(ln, "use_item() needs an item, e.g. use_item(ITEM_WATER)");
+        if ((a[0].a & 15) != 6) PfFail(ln, "use_item() only works with ITEM_WATER for now");
         *out = VBool(FUseWater()); break;
     case BI_MEASURE: { int m = FMeasure(); *out = m < 0 ? VNone() : VNum(m); break; }
     case BI_MAZE: *out = VBool(FGenMaze()); break;
     case BI_CANMOVE: *out = VBool(FCanMove(PfDirArg(argc ? a[0] : VNone(), ln, "can_move()"))); break;
     case BI_FLIP: FFlip(); break;
-    case BI_PRINT: {
-        char line[1200]; int p = 0; line[0] = 0;
-        for (int i = 0; i < argc && p < 1000; i++) { if (i) line[p++] = ' '; VRepr(a[i], line + p, 1190 - p, true); p += (int)strlen(line + p); }
-        line[p++] = '\n'; line[p] = 0; FarmOut(line); break;
-    }
-    case BI_LEN: if (argc != 1 || (a[0].t != V_LIST && a[0].t != V_STR)) PfFail(ln, "len() needs a list or text"); *out = VNum(a[0].t == V_LIST ? a[0].u.l->n : (double)strlen(a[0].u.s)); break;
-    case BI_RANGE: {
-        double s = 0, e, st = 1;
-        if (argc == 1) e = PfNumOf(a[0], ln, "range()");
-        else if (argc == 2) { s = PfNumOf(a[0], ln, "range()"); e = PfNumOf(a[1], ln, "range()"); }
-        else if (argc == 3) { s = PfNumOf(a[0], ln, "range()"); e = PfNumOf(a[1], ln, "range()"); st = PfNumOf(a[2], ln, "range()"); }
-        else { PfFail(ln, "range() takes 1, 2 or 3 numbers"); return false; }
-        if (st == 0) PfFail(ln, "range() step cannot be 0");
-        if (fabs((e - s) / st) > 100000) PfFail(ln, "That range is too big (limit 100000)");
-        PList* l = PfListNew((int)fabs((e - s) / st) + 1, ln);
-        if (st > 0) for (double i = s; i < e; i += st) PfListPush(l, VNum(i), ln); else for (double i = s; i > e; i += st) PfListPush(l, VNum(i), ln);
-        out->t = V_LIST; out->u.l = l; break;
-    }
-    case BI_STR: { char b[1200]; VRepr(argc ? a[0] : VNone(), b, sizeof b, true); *out = VStrV(PfStr(b, (int)strlen(b), ln)); break; }
-    case BI_INT:
-        if (argc && a[0].t == V_STR) { char* e; double d = strtod(a[0].u.s, &e); if (e == a[0].u.s) PfFail(ln, "int() can't turn '%s' into a number", a[0].u.s); *out = VNum(trunc(d)); }
-        else *out = VNum(trunc(PfNumOf(argc ? a[0] : VNone(), ln, "int()")));
+    case BI_PRINTF: PfPrintf(a, argc, ln); break;
+    case BI_PUTS: { char line[1200]; if (argc != 1 || a[0].t != V_STR) PfFail(ln, "puts() needs one piece of text in quotes"); snprintf(line, sizeof line, "%s\n", a[0].u.s); FarmOut(line); break; }
+    case BI_COUT: { char line[1200]; VRepr(argc ? a[0] : VNone(), line, sizeof line, true); FarmOut(line); break; }
+    case BI_LEN: if (argc != 1 || (a[0].t != V_LIST && a[0].t != V_STR)) PfFail(ln, "len() needs an array or text"); *out = VNum(a[0].t == V_LIST ? a[0].u.l->n : (double)strlen(a[0].u.s)); break;
+    case BI_APPEND: if (argc != 2 || a[0].t != V_LIST) PfFail(ln, "append(array, value) adds a value to the end of an array"); PfListPush(a[0].u.l, a[1], ln); break;
+    case BI_POP:
+        if (argc != 1 || a[0].t != V_LIST) PfFail(ln, "pop(array) removes and returns the last item of an array");
+        if (!a[0].u.l->n) PfFail(ln, "pop() on an empty array");
+        *out = a[0].u.l->v[--a[0].u.l->n]; break;
+    case BI_TOSTR: { char b[1200]; VRepr(argc ? a[0] : VNone(), b, sizeof b, true); *out = VStrV(PfStr(b, (int)strlen(b), ln)); break; }
+    case BI_ATOI:
+        if (argc && a[0].t == V_STR) { char* e; double d = strtod(a[0].u.s, &e); if (e == a[0].u.s) PfFail(ln, "atoi() can't turn '%s' into a number", a[0].u.s); *out = VNum(trunc(d)); }
+        else *out = VNum(trunc(PfNumOf(argc ? a[0] : VNone(), ln, "atoi()")));
         break;
-    case BI_ABS: *out = VNum(fabs(PfNumOf(argc ? a[0] : VNone(), ln, "abs()"))); break;
+    case BI_ABS: { double d = fabs(PfNumOf(argc ? a[0] : VNone(), ln, "abs()")); *out = (argc && a[0].a == 1) ? VNumD(d) : VNum(d); break; }
+    case BI_FABS: *out = VNumD(fabs(PfNumOf(argc ? a[0] : VNone(), ln, "fabs()"))); break;
+    case BI_SQRT: { double d = PfNumOf(argc ? a[0] : VNone(), ln, "sqrt()"); if (d < 0) PfFail(ln, "sqrt() of a negative number is not a real number"); *out = VNumD(sqrt(d)); break; }
+    case BI_POW: *out = VNumD(pow(PfNumOf(argc > 0 ? a[0] : VNone(), ln, "pow()"), PfNumOf(argc > 1 ? a[1] : VNone(), ln, "pow()"))); break;
     case BI_ROUND: *out = VNum(floor(PfNumOf(argc ? a[0] : VNone(), ln, "round()") + 0.5)); break;
     case BI_MIN: case BI_MAX: {
         PV* l = a; int n = argc;
@@ -7583,7 +9079,7 @@ static bool PfBuiltin(int id, PV* a, int argc, int ln, PV* out)
         for (int i = 1; i < n; i++) if (VTruthy(PfCompare(id == BI_MIN ? OP_LT : OP_GT, l[i], best, ln))) best = l[i];
         *out = best; break;
     }
-    case BI_RANDOM: *out = VNum(FRand()); break;
+    case BI_RAND: *out = VNum(floor(FRand() * 32768.0)); break;
     case BI_RANDINT: {
         double lo = PfNumOf(argc > 0 ? a[0] : VNone(), ln, "randint()"), hi = PfNumOf(argc > 1 ? a[1] : VNone(), ln, "randint()");
         *out = VNum(lo + floor(FRand() * (hi - lo + 1))); break;
@@ -7597,7 +9093,7 @@ static int PfExec(long budget)
     if (setjmp(pfJmp)) return PF_ERR;
     for (long it = 0; it < budget; it++) {
         const PIns* in = &pcode[ppc++];
-        if (++pfIdle > PF_IDLE) PfFail(in->ln, "This program ran a very long time without the drone doing anything. Add an action like harvest() or move(), or a break.");
+        if (++pfIdle > PF_IDLE) PfFail(in->ln, "This program ran a very long time without the drone doing anything. Add an action like harvest() or move(NORTH), or a break.");
         switch (in->op) {
         case OP_NUM: PUSH(VNum(pnum[in->a])); break;
         case OP_STR: PUSH(VStrV(pfStrBuf + in->a)); break;
@@ -7609,8 +9105,8 @@ static int PfExec(long budget)
             PV v = pgv[in->a];
             if (v.t == V_UNDEF) {
                 const char* h = PfDidYouMean(pgName[in->a]);
-                if (h) PfFail(in->ln, "The name '%s' is not defined. Did you mean '%s'?", pgName[in->a], h);
-                PfFail(in->ln, "The name '%s' is not defined. Check the spelling, or create it with %s = ...", pgName[in->a], pgName[in->a]);
+                if (h) PfFail(in->ln, "'%s' has no value yet. Did you mean '%s'?", pgName[in->a], h);
+                PfFail(in->ln, "'%s' is used before it is defined. Functions must be defined in the file; variables must be declared first", pgName[in->a]);
             }
             PUSH(v); break;
         }
@@ -7623,7 +9119,27 @@ static int PfExec(long budget)
         case OP_ADD: case OP_SUB: case OP_MUL: case OP_DIV: case OP_IDIV: case OP_MOD: case OP_POW: { PV b = pst[--psp], a = pst[--psp]; PUSH(PfArith(in->op, a, b, in->ln)); break; }
         case OP_EQ: case OP_NE: case OP_LT: case OP_GT: case OP_LE: case OP_GE: case OP_IN: case OP_NOTIN: { PV b = pst[--psp], a = pst[--psp]; PUSH(PfCompare(in->op, a, b, in->ln)); break; }
         case OP_NOT: pst[psp - 1] = VBool(!VTruthy(pst[psp - 1])); break;
-        case OP_NEG: { PV v = pst[psp - 1]; if (!VIsNum(v)) PfFail(in->ln, "Can't negate a %s", VTName(v)); pst[psp - 1] = VNum(-v.u.n); break; }
+        case OP_NEG: { PV v = pst[psp - 1]; if (!VIsNum(v)) PfFail(in->ln, "Can't negate a %s", VTName(v)); pst[psp - 1] = v.a ? VNumD(-v.u.n) : VNum(-v.u.n); break; }
+        case OP_NUMD: PUSH(VNumD(pnum[in->a])); break;
+        case OP_TOINT: {
+            PV v = pst[psp - 1];
+            if (v.t == V_ENUM && (v.a >> 4) == 0) pst[psp - 1] = VNum(v.a & 15);
+            else if (!VIsNum(v)) PfFail(in->ln, "A %s cannot be stored in an int", VTName(v));
+            else pst[psp - 1] = VNum(trunc(v.u.n));
+            break;
+        }
+        case OP_TODBL: { PV v = pst[psp - 1]; if (!VIsNum(v)) PfFail(in->ln, "A %s cannot be stored in a double", VTName(v)); pst[psp - 1] = VNumD(v.u.n); break; }
+        case OP_TOBOOL: pst[psp - 1] = VBool(VTruthy(pst[psp - 1])); break;
+        case OP_FILL: {
+            PV cnt = pst[--psp], val = pst[--psp], lst = VNone(); int mode = in->a;
+            if (mode == 1) { PV t = cnt; cnt = val; val = t; }                           /* stack was [count, value] */
+            if (mode == 3) { lst = pst[--psp]; }
+            if (!VIsNum(cnt) || cnt.u.n < 0 || cnt.u.n != floor(cnt.u.n)) PfFail(in->ln, "An array size must be a whole number that is not negative");
+            if (cnt.u.n > 100000) PfFail(in->ln, "That array is too big (the limit is 100000 items)");
+            if (mode == 3) { for (int i = lst.u.l->n; i < (int)cnt.u.n; i++) PfListPush(lst.u.l, val, in->ln); PUSH(lst); break; }
+            PList* l = PfListNew((int)cnt.u.n, in->ln); for (int i = 0; i < (int)cnt.u.n; i++) PfListPush(l, val, in->ln);
+            PV r; memset(&r, 0, sizeof r); r.t = V_LIST; r.u.l = l; PUSH(r); break;
+        }
         case OP_JMP: ppc = in->a; break;
         case OP_JF: if (!VTruthy(pst[--psp])) ppc = in->a; break;
         case OP_JFK: if (!VTruthy(pst[psp - 1])) ppc = in->a; else psp--; break;
@@ -7637,20 +9153,29 @@ static int PfExec(long budget)
         case OP_TOLIST: {
             PV v = pst[psp - 1];
             if (v.t == V_STR) { PList* l = PfListNew((int)strlen(v.u.s), in->ln); for (const char* c = v.u.s; *c; c++) PfListPush(l, VStrV(PfStr(c, 1, in->ln)), in->ln); pst[psp - 1].t = V_LIST; pst[psp - 1].u.l = l; }
-            else if (v.t != V_LIST) PfFail(in->ln, "A for loop needs a list or range(...) to loop over");
+            else if (v.t != V_LIST) PfFail(in->ln, "A range-based for loop needs an array or vector to loop over");
             break;
         }
         case OP_LEN: pst[psp - 1] = VNum(pst[psp - 1].u.l->n); break;
         case OP_FUNC: { PV v; memset(&v, 0, sizeof v); v.t = V_FUNC; v.a = in->a; PUSH(v); break; }
         case OP_METHOD: {
-            int argc = in->a >> 4, id = in->a & 15; PV o = pst[psp - argc - 1];
-            if (o.t != V_LIST) PfFail(in->ln, "Only lists have append() and pop()");
-            PV r = VNone();
-            if (id == 0) { if (argc != 1) PfFail(in->ln, "append() needs one value"); PfListPush(o.u.l, pst[psp - 1], in->ln); }
+            int argc = in->a >> 4, id = in->a & 15; PV o = pst[psp - argc - 1]; PV r = VNone();
+            if (o.t == V_STR && (id == 2 || id == 3)) {
+                if (argc) PfFail(in->ln, "size() and empty() take no values");
+                r = id == 2 ? VNum((double)strlen(o.u.s)) : VBool(o.u.s[0] == 0);
+            }
             else {
-                if (!o.u.l->n) PfFail(in->ln, "pop() from an empty list");
-                int k = o.u.l->n - 1; if (argc) k = PfIndexOf(o, pst[psp - 1], in->ln, NULL);
-                r = o.u.l->v[k]; memmove(&o.u.l->v[k], &o.u.l->v[k + 1], sizeof(PV) * (size_t)(o.u.l->n - k - 1)); o.u.l->n--;
+                if (o.t != V_LIST) PfFail(in->ln, "Only vectors and text have these methods");
+                PList* l = o.u.l;
+                switch (id) {
+                case 0: if (argc != 1) PfFail(in->ln, "push_back() needs one value"); PfListPush(l, pst[psp - 1], in->ln); break;
+                case 1: if (!l->n) PfFail(in->ln, "pop_back() on an empty vector"); l->n--; break;
+                case 2: r = VNum(l->n); break;
+                case 3: r = VBool(l->n == 0); break;
+                case 4: if (!l->n) PfFail(in->ln, "back() on an empty vector"); r = l->v[l->n - 1]; break;
+                case 5: if (!l->n) PfFail(in->ln, "front() on an empty vector"); r = l->v[0]; break;
+                case 6: l->n = 0; break;
+                }
             }
             psp -= argc + 1; PUSH(r); break;
         }
@@ -7664,8 +9189,8 @@ static int PfExec(long budget)
             }
             if (c.t == V_FUNC) {
                 PFn* f = &pfn[c.a];
-                if (argc != f->np) PfFail(in->ln, "This function needs %d value%s but you gave it %d", f->np, f->np == 1 ? "" : "s", argc);
-                if (pfrn >= 110) PfFail(in->ln, "Too many nested function calls. Is a function calling itself forever?");
+                if (argc != f->np) PfFail(in->ln, "This function takes %d value%s but was called with %d", f->np, f->np == 1 ? "" : "s", argc);
+                if (pfrn >= 110) PfFail(in->ln, "Too many nested function calls (a stack overflow). Does a recursive function have a base case that stops it?");
                 pfr[pfrn].ret = ppc; pfr[pfrn].base = psp - argc; pfr[pfrn].callee = psp - argc - 1; pfrn++;
                 for (int k = argc; k < f->nl; k++) PUSH(VNone());
                 ppc = f->entry; break;
@@ -8021,18 +9546,41 @@ static bool FPick(Vector2 m, int* tx, int* ty)
 /* ------------------------------------------------------------------ */
 /*  Clockwork Farm: runner, floating windows and the screen            */
 /* ------------------------------------------------------------------ */
-#define F_DEFAULT_CODE "while True:\n    if can_harvest():\n        harvest()\n    move(North)\n"
+#define F_DEFAULT_C "int main(void) {\n    while (1) {\n        if (can_harvest()) {\n            harvest();\n        }\n        move(NORTH);\n    }\n    return 0;\n}\n"
+#define F_DEFAULT_CPP "int main() {\n    while (true) {\n        if (can_harvest()) {\n            harvest();\n        }\n        move(NORTH);\n    }\n    return 0;\n}\n"
+static const char* FDefaultCode(void) { return lang == 0 ? F_DEFAULT_C : F_DEFAULT_CPP; }
 
-static const struct { const char* title, * code; } FEX[] = {
-    { "Mow everything", F_DEFAULT_CODE },
-    { "Bush farm (Bushes)", "while True:\n    if can_harvest():\n        harvest()\n        plant(Entities.Bush)\n    move(North)\n" },
-    { "Sweep the plot (Loops)", "n = get_world_size()\nwhile True:\n    for x in range(n):\n        for y in range(n):\n            if can_harvest():\n                harvest()\n            move(North)\n        move(East)\n" },
-    { "Carrot field (Soil, Carrots)", "while True:\n    if can_harvest():\n        harvest()\n    if get_entity_type() == None:\n        if get_ground_type() != Grounds.Soil:\n            till()\n        plant(Entities.Carrot)\n    move(North)\n" },
-    { "Helper function (Functions)", "def tend():\n    if can_harvest():\n        harvest()\n        plant(Entities.Bush)\n\nwhile True:\n    tend()\n    move(North)\n    tend()\n    move(East)\n" },
-    { "Tree grove (Trees)", "while True:\n    if can_harvest():\n        harvest()\n    if get_entity_type() == None:\n        if (get_pos_x() + get_pos_y()) % 2 == 0:\n            plant(Entities.Tree)\n        else:\n            plant(Entities.Bush)\n    move(North)\n    if get_pos_y() == 0:\n        move(East)\n" },
-    { "Pumpkin patch (Pumpkins)", "def fill():\n    if get_ground_type() != Grounds.Soil:\n        till()\n    plant(Entities.Pumpkin)\n\nn = get_world_size()\nfor x in range(n):\n    for y in range(n):\n        fill()\n        move(North)\n    move(East)\nwhile True:\n    for x in range(n):\n        for y in range(n):\n            if get_entity_type() == Entities.Dead_Pumpkin:\n                harvest()\n                fill()\n            move(North)\n        move(East)\n" },
-    { "Sunflower power (Sunflowers)", "while True:\n    if get_ground_type() != Grounds.Soil:\n        till()\n    if can_harvest():\n        harvest()\n    if get_entity_type() == None:\n        plant(Entities.Sunflower)\n    move(North)\n" },
-    { "Maze solver (Labyrinth)", "generate_maze()\ndirs = [North, East, South, West]\nd = 1\nwhile get_entity_type() != Entities.Treasure:\n    for turn in [1, 0, 3, 2]:\n        nd = (d + turn) % 4\n        if can_move(dirs[nd]):\n            d = nd\n            move(dirs[d])\n            break\nharvest()\n" },
+static const struct { const char* title, * c, * cpp; } FEX[] = {
+    { "Mow everything",
+      "int main(void) {\n    while (1) {\n        if (can_harvest()) {\n            harvest();\n        }\n        move(NORTH);\n    }\n    return 0;\n}\n",
+      "int main() {\n    while (true) {\n        if (can_harvest()) {\n            harvest();\n        }\n        move(NORTH);\n    }\n    return 0;\n}\n" },
+    { "Bush farm (Bushes)",
+      "int main(void) {\n    while (1) {\n        if (can_harvest()) {\n            harvest();\n            plant(ENT_BUSH);\n        }\n        move(NORTH);\n    }\n    return 0;\n}\n",
+      "int main() {\n    while (true) {\n        if (can_harvest()) {\n            harvest();\n            plant(ENT_BUSH);\n        }\n        move(NORTH);\n    }\n    return 0;\n}\n" },
+    { "Sweep the plot (Loops)",
+      "int main(void) {\n    int n = get_world_size();\n    while (1) {\n        for (int x = 0; x < n; x++) {\n            for (int y = 0; y < n; y++) {\n                if (can_harvest()) {\n                    harvest();\n                }\n                move(NORTH);\n            }\n            move(EAST);\n        }\n    }\n    return 0;\n}\n",
+      "int main() {\n    int n = get_world_size();\n    while (true) {\n        for (int x = 0; x < n; x++) {\n            for (int y = 0; y < n; y++) {\n                if (can_harvest()) {\n                    harvest();\n                }\n                move(NORTH);\n            }\n            move(EAST);\n        }\n    }\n    return 0;\n}\n" },
+    { "Carrot field (Soil, Carrots)",
+      "int main(void) {\n    while (1) {\n        if (can_harvest()) {\n            harvest();\n        }\n        if (get_entity_type() == NULL) {\n            if (get_ground_type() != GROUND_SOIL) {\n                till();\n            }\n            plant(ENT_CARROT);\n        }\n        move(NORTH);\n    }\n    return 0;\n}\n",
+      "int main() {\n    while (true) {\n        if (can_harvest()) {\n            harvest();\n        }\n        if (get_entity_type() == NULL) {\n            if (get_ground_type() != GROUND_SOIL) {\n                till();\n            }\n            plant(ENT_CARROT);\n        }\n        move(NORTH);\n    }\n    return 0;\n}\n" },
+    { "Helper function (Functions)",
+      "void tend(void) {\n    if (can_harvest()) {\n        harvest();\n        plant(ENT_BUSH);\n    }\n}\n\nint main(void) {\n    while (1) {\n        tend();\n        move(NORTH);\n        tend();\n        move(EAST);\n    }\n    return 0;\n}\n",
+      "void tend() {\n    if (can_harvest()) {\n        harvest();\n        plant(ENT_BUSH);\n    }\n}\n\nint main() {\n    while (true) {\n        tend();\n        move(NORTH);\n        tend();\n        move(EAST);\n    }\n    return 0;\n}\n" },
+    { "Tree grove (Trees)",
+      "int main(void) {\n    while (1) {\n        if (can_harvest()) {\n            harvest();\n        }\n        if (get_entity_type() == NULL) {\n            if ((get_pos_x() + get_pos_y()) % 2 == 0) {\n                plant(ENT_TREE);\n            } else {\n                plant(ENT_BUSH);\n            }\n        }\n        move(NORTH);\n        if (get_pos_y() == 0) {\n            move(EAST);\n        }\n    }\n    return 0;\n}\n",
+      "int main() {\n    while (true) {\n        if (can_harvest()) {\n            harvest();\n        }\n        if (get_entity_type() == NULL) {\n            if ((get_pos_x() + get_pos_y()) % 2 == 0) {\n                plant(ENT_TREE);\n            } else {\n                plant(ENT_BUSH);\n            }\n        }\n        move(NORTH);\n        if (get_pos_y() == 0) {\n            move(EAST);\n        }\n    }\n    return 0;\n}\n" },
+    { "Pumpkin patch (Pumpkins)",
+      "void fill(void) {\n    if (get_ground_type() != GROUND_SOIL) {\n        till();\n    }\n    plant(ENT_PUMPKIN);\n}\n\nint main(void) {\n    int n = get_world_size();\n    for (int x = 0; x < n; x++) {\n        for (int y = 0; y < n; y++) {\n            fill();\n            move(NORTH);\n        }\n        move(EAST);\n    }\n    while (1) {\n        for (int x = 0; x < n; x++) {\n            for (int y = 0; y < n; y++) {\n                if (get_entity_type() == ENT_DEAD_PUMPKIN) {\n                    harvest();\n                    fill();\n                }\n                move(NORTH);\n            }\n            move(EAST);\n        }\n    }\n    return 0;\n}\n",
+      "void fill() {\n    if (get_ground_type() != GROUND_SOIL) {\n        till();\n    }\n    plant(ENT_PUMPKIN);\n}\n\nint main() {\n    int n = get_world_size();\n    for (int x = 0; x < n; x++) {\n        for (int y = 0; y < n; y++) {\n            fill();\n            move(NORTH);\n        }\n        move(EAST);\n    }\n    while (true) {\n        for (int x = 0; x < n; x++) {\n            for (int y = 0; y < n; y++) {\n                if (get_entity_type() == ENT_DEAD_PUMPKIN) {\n                    harvest();\n                    fill();\n                }\n                move(NORTH);\n            }\n            move(EAST);\n        }\n    }\n    return 0;\n}\n" },
+    { "Sunflower power (Sunflowers)",
+      "int main(void) {\n    while (1) {\n        if (get_ground_type() != GROUND_SOIL) {\n            till();\n        }\n        if (can_harvest()) {\n            harvest();\n        }\n        if (get_entity_type() == NULL) {\n            plant(ENT_SUNFLOWER);\n        }\n        move(NORTH);\n    }\n    return 0;\n}\n",
+      "int main() {\n    while (true) {\n        if (get_ground_type() != GROUND_SOIL) {\n            till();\n        }\n        if (can_harvest()) {\n            harvest();\n        }\n        if (get_entity_type() == NULL) {\n            plant(ENT_SUNFLOWER);\n        }\n        move(NORTH);\n    }\n    return 0;\n}\n" },
+    { "Maze solver (Labyrinth, Lists)",
+      "int main(void) {\n    generate_maze();\n    int dirs[4] = { NORTH, EAST, SOUTH, WEST };\n    int turns[4] = { 1, 0, 3, 2 };\n    int d = 1;\n    while (get_entity_type() != ENT_TREASURE) {\n        for (int i = 0; i < 4; i++) {\n            int nd = (d + turns[i]) % 4;\n            if (can_move(dirs[nd])) {\n                d = nd;\n                move(dirs[d]);\n                break;\n            }\n        }\n    }\n    harvest();\n    return 0;\n}\n",
+      "#include <vector>\nusing namespace std;\n\nint main() {\n    generate_maze();\n    vector<int> dirs = { NORTH, EAST, SOUTH, WEST };\n    vector<int> turns = { 1, 0, 3, 2 };\n    int d = 1;\n    while (get_entity_type() != ENT_TREASURE) {\n        for (int turn : turns) {\n            int nd = (d + turn) % 4;\n            if (can_move(dirs[nd])) {\n                d = nd;\n                move(dirs[d]);\n                break;\n            }\n        }\n    }\n    harvest();\n    return 0;\n}\n" },
+    { "Print to the Output window",
+      "#include <stdio.h>\n\nint main(void) {\n    int n = get_world_size();\n    printf(\"The farm is %d by %d\\n\", n, n);\n    printf(\"Hay: %d\\n\", num_items(ITEM_HAY));\n    return 0;\n}\n",
+      "#include <iostream>\nusing namespace std;\n\nint main() {\n    int n = get_world_size();\n    cout << \"The farm is \" << n << \" by \" << n << endl;\n    cout << \"Hay: \" << num_items(ITEM_HAY) << endl;\n    return 0;\n}\n" },
 };
 #define F_NEX ((int)(sizeof FEX / sizeof FEX[0]))
 static int fEx = 0;
@@ -8091,16 +9639,25 @@ static void FarmFrame(float dt)
 }
 
 /* ---- code is kept between visits ---- */
+static int fCodeLang = 0;                                   /* which language the code in the editor is written in */
+static const char* FarmFile(int l) { return l == 0 ? "farm_c.txt" : "farm_cpp.txt"; }
 static void FarmSaveCode(void)
 {
     if (!fInit || strcmp(fCodeSaved, labBuf) == 0) return;
-    FILE* f = fopen("farm2_code.txt", "wb");
+    FILE* f = fopen(FarmFile(fCodeLang), "wb");
     if (f) { fwrite(labBuf, 1, (size_t)labLen, f); fclose(f); strcpy(fCodeSaved, labBuf); }
 }
 static void FarmSetCode(const char* s)
 {
     int n = (int)strlen(s); if (n > LAB_CAP - 1) n = LAB_CAP - 1;
     memcpy(labBuf, s, (size_t)n); labBuf[n] = 0; labLen = n; labCur = labAnc = 0; labSX = labSY = 0; labErrN = 0;
+}
+static void FarmLoadCode(int l)                             /* your saved program for that language, or the starter */
+{
+    FILE* f = fopen(FarmFile(l), "rb"); bool ok = false;
+    if (f) { int n = (int)fread(labBuf, 1, LAB_CAP - 1, f); fclose(f); if (n > 0) { labBuf[n] = 0; labLen = n; labCur = labAnc = 0; labSX = labSY = 0; labErrN = 0; ok = true; } }
+    if (!ok) FarmSetCode(l == 0 ? F_DEFAULT_C : F_DEFAULT_CPP);
+    strcpy(fCodeSaved, labBuf); fCodeLang = l; fEx = 0;
 }
 
 /* ---- floating windows ---- */
@@ -8200,7 +9757,7 @@ static void FEditorWin(Rectangle r)
     x += 6;
     float rightEdge = r.x + r.width - 4;
     if (rightEdge - x > 160) {
-        if (GBtn((Rectangle) { rightEdge - 52, r.y + 3, 52, 30 }, "Load", (Color) { 53, 70, 50, 255 }, 14)) { FarmSetCode(FEX[fEx].code); labEnsure = true; }
+        if (GBtn((Rectangle) { rightEdge - 52, r.y + 3, 52, 30 }, "Load", (Color) { 53, 70, 50, 255 }, 14)) { FarmSetCode(lang == 0 ? FEX[fEx].c : FEX[fEx].cpp); labEnsure = true; }
         float tx = x, tw = rightEdge - 52 - 6 - x - 52;
         if (GBtn((Rectangle) { tx, r.y + 3, 24, 30 }, "<", (Color) { 53, 70, 50, 255 }, 16)) fEx = (fEx + F_NEX - 1) % F_NEX;
         DrawRectangle((int)tx + 26, (int)r.y + 3, (int)tw, 30, GB_DARK);
@@ -8233,7 +9790,7 @@ static void FOutWin(Rectangle r)
     const float fs = 16, lh = 22; float cw = MeasureTextEx(fCode, "M", fs, 0).x;
     int cols = (int)((body.width - 24) / cw); if (cols < 8) cols = 8;
     if (labOutLen == 0) {
-        Wrapped(fReg, "Press Run (or F5) to start your program. print() output, hints and error messages show up here.", body.x + 12, body.y + 10, body.width - 24, 14, DIM);
+        Wrapped(fReg, "Press Run (or F5) to start your program. printf / cout output, hints and error messages show up here.", body.x + 12, body.y + 10, body.width - 24, 14, DIM);
         return;
     }
     int lines = 0;
@@ -8308,24 +9865,28 @@ static void FUpgWin(Rectangle r)
 }
 
 static const struct { const char* sig, * desc; int req; } FHELP[] = {
-    { "move(North)", "Move one tile North, South, East or West. Walking off an edge wraps around to the other side.", -1 },
+    { "move(NORTH)", "Move one tile NORTH, EAST, SOUTH or WEST. Walking off an edge wraps around to the other side.", -1 },
     { "harvest()", "Cut or pick whatever is ripe on this tile. Unripe plants are lost, so check can_harvest() first.", -1 },
-    { "can_harvest()", "True when the plant on this tile is ripe (or the treasure is under you in a maze).", -1 },
-    { "plant(Entities.Bush)", "Plant a crop on this tile. Needs an empty tile and the right resources.", -1 },
+    { "can_harvest()", "1 (true) when the plant on this tile is ripe, or the treasure is under you in a maze.", -1 },
+    { "plant(ENT_BUSH)", "Plant a crop on this tile. Needs an empty tile and the right resources.", -1 },
     { "till()", "Turn grass into soil, or soil back into grass.", U_SOIL },
-    { "get_entity_type()", "What is on this tile: Entities.Grass, Bush, Carrot, Tree, Pumpkin, Sunflower, Dead_Pumpkin, Treasure or None.", -1 },
-    { "get_ground_type()", "Grounds.Grassland or Grounds.Soil.", U_SOIL },
-    { "get_pos_x() / get_pos_y()", "Where the drone is. (0, 0) is the south-west corner.", -1 },
+    { "get_entity_type()", "What is on this tile: ENT_GRASS, ENT_BUSH, ENT_CARROT, ENT_TREE, ENT_PUMPKIN, ENT_SUNFLOWER, ENT_DEAD_PUMPKIN, ENT_TREASURE, or NULL when the tile is empty.", -1 },
+    { "get_ground_type()", "GROUND_GRASSLAND or GROUND_SOIL.", U_SOIL },
+    { "get_pos_x() / get_pos_y()", "Where the drone is, as ints. (0, 0) is the south-west corner.", -1 },
     { "get_world_size()", "How many tiles wide and tall the plot is.", -1 },
-    { "num_items(Items.Hay)", "How much of an item you own. Items: Hay, Wood, Carrot, Pumpkin, Power, Gold, Water.", -1 },
-    { "use_item(Items.Water)", "Water the plant here; it grows in half the remaining time.", U_WATER },
+    { "num_items(ITEM_HAY)", "How much of an item you own. Items: ITEM_HAY, ITEM_WOOD, ITEM_CARROT, ITEM_PUMPKIN, ITEM_POWER, ITEM_GOLD, ITEM_WATER.", -1 },
+    { "use_item(ITEM_WATER)", "Water the plant here; it grows in half the remaining time.", U_WATER },
     { "measure()", "Sunflower petal count (7 to 15). The flower with the most petals pays a x10 Power bonus.", U_SUN },
     { "generate_maze()", "Grows a hedge maze around the drone with a treasure inside. harvest() it for Gold.", U_MAZE },
-    { "can_move(North)", "True if there is no hedge in that direction (maze only).", U_MAZE },
+    { "can_move(NORTH)", "1 (true) if there is no hedge in that direction (maze only).", U_MAZE },
     { "do_a_flip()", "A pointless but very stylish loop-the-loop.", -1 },
-    { "print(a, b, ...)", "Write values to the Output window.", -1 },
-    { "len(x)  str(x)  int(x)  abs(x)", "Handy helpers. Also round, min, max, random() and randint(a, b).", -1 },
-    { "range(n)", "Used by for loops: for i in range(5):", U_LOOPS },
+    { "printf(\"%d\\n\", x)", "Write values to the Output window. Works like C: %d for int, %f for double (%.2f for 2 decimals), %s for text, %c for a character, \\n for a new line.", -1 },
+    { "puts(\"text\")", "Print text followed by a new line.", -1 },
+    { "cout << x << endl;", "C++ only. Stream values to the Output window.", -1 },
+    { "len(a)  append(a, x)  pop(a)", "Array helpers: count the items, add one at the end, remove the last. In C++ a vector also has size(), push_back(), pop_back(), back() and empty().", -1 },
+    { "abs  fabs  sqrt  pow  round  min  max", "Handy math helpers. abs and min / max keep int or double, fabs sqrt and pow give a double.", -1 },
+    { "rand()  randint(a, b)", "rand() gives a whole number from 0 to 32767. randint(a, b) gives a whole number from a to b.", -1 },
+    { "to_string(x)  atoi(text)", "Turn a number into text, or text into an int.", -1 },
 };
 static const struct { const char* name; int grow; const char* cost, * gives; } FCROP[] = {
     { "Grass",     3,  "free",           "1 Hay (2 with Sharp Blades)" },
@@ -8340,7 +9901,10 @@ static void FHelpWin(Rectangle r)
     float yTop = r.y + 8 - fHelpScroll, y = yTop, w = r.width - 24, x = r.x + 12;
     ScissorT((int)r.x, (int)r.y, (int)r.width, (int)r.height);
     Txt(fBold, "The language", x, y, 17, (Color) { 255, 214, 100, 255 }); y += 26;
-    y += Wrapped(fReg, "A small Python. Variables, numbers, text, True/False/None, lists, if / elif / else, while, for ... in range(n), def and return, and / or / not, # comments. Indent with 4 spaces. Some of it is locked until you buy the upgrade.", x, y, w, 14, (Color) { 215, 207, 185, 255 });
+    y += Wrapped(fReg, lang == 0 ?
+        "A small C. int, double, bool and char variables, arrays like int a[5], if / else, while, do, for, your own functions, return, && || !. Every program starts in int main(void). Variables start at 0 here (real C would leave junk in them). Pointers, structs and malloc are left out. Some features stay locked until you buy the upgrade." :
+        "A small C++. int, double, bool, string and vector<int>, if / else, while, do, for (also for (int x : v)), your own functions, return, cout << ... << endl and printf. Every program starts in int main(). Classes, templates, references and pointers are left out. Some features stay locked until you buy the upgrade.",
+        x, y, w, 14, (Color) { 215, 207, 185, 255 });
     y += 14;
     Txt(fBold, "Functions", x, y, 17, (Color) { 255, 214, 100, 255 }); y += 28;
     for (int i = 0; i < (int)(sizeof FHELP / sizeof FHELP[0]); i++) {
@@ -8366,9 +9930,9 @@ static const struct { const char* text; } FTUT[] = {
     { "Press Run. The drone starts mowing the grass on its own." },
     { "Collect 10 Hay. Every harvest of ripe grass gives 1." },
     { "Open Upgrades (the + button) and buy Drone Speed I." },
-    { "Change the code (add move(East) somewhere) and Run it again." },
+    { "Change the code (add move(EAST); somewhere) and Run it again." },
     { "Buy Bushes, then plant one and harvest it for Wood." },
-    { "Buy Loops, so you can write for i in range(n):" },
+    { "Buy Loops, so you can write for (int i = 0; i < n; i++)" },
     { "Grow the plot to 4 x 4 with Farm 4 x 4." },
     { "Unlock Soil and Carrots, then harvest your first Carrot." },
     { "Sunflowers, giant pumpkins, a hedge maze... keep unlocking!" },
@@ -8391,7 +9955,7 @@ static bool FTutDone(int i)
 }
 static void FTutUpdate(void)
 {
-    if ((fsv.tut & 1) && !(fsv.tut & 2) && strcmp(labBuf, F_DEFAULT_CODE) != 0 && fRunning) fsv.tut |= 2;
+    if ((fsv.tut & 1) && !(fsv.tut & 2) && strcmp(labBuf, FDefaultCode()) != 0 && fRunning) fsv.tut |= 2;
     for (int i = 0; i < F_NTUT; i++)
         if (FTutDone(i) && !(fsv.tut & (1 << (i + 8)))) { fsv.tut |= 1 << (i + 8); if (i < F_NTUT - 1) { GainCredits(5, "Farm tutorial"); } else GainCredits(50, "Farm mastery"); }
 }
@@ -8463,13 +10027,11 @@ static void StartFarm(void)
     LabOwn(1);
     if (!fInit) {
         fInit = true; FArrange();
-        FILE* f = fopen("farm2_code.txt", "rb"); bool ok = false;
-        if (f) { int n = (int)fread(labBuf, 1, LAB_CAP - 1, f); fclose(f); if (n > 0) { labBuf[n] = 0; labLen = n; labCur = labAnc = 0; ok = true; } }
-        if (!ok) FarmSetCode(F_DEFAULT_CODE);
-        strcpy(fCodeSaved, labBuf);
+        FarmLoadCode(lang);
         labOutLen = 0; labOut[0] = 0;
         FarmOut("Welcome! Press Run to start the drone.\nEdit the code on the left; buy upgrades with the + button.\n");
     }
+    else if (fCodeLang != lang) { FarmSaveCode(); FarmLoadCode(lang); labOutLen = 0; labOut[0] = 0; fRunning = false; }
     screen = SCR_FARM; labFocus = 0; labPending = 0; labStatus = LAB_READY; fFocusEd = true; fMenu = false;
 }
 
@@ -8478,6 +10040,7 @@ static void DrawFarm(void)
     float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
     Vector2 m = GetMousePosition();
 
+    if (fCodeLang != lang) { FarmSaveCode(); FarmStop(); FarmLoadCode(lang); }          /* the C / C++ switch changed */
     /* simulation */
     FarmFrame(dt); FEatEvents(); FPartUpdate(dt); FTutUpdate();
     fSaveT += dt; if (fSaveT > 4) { fSaveT = 0; SaveFarm(); FarmSaveCode(); }
@@ -10160,6 +11723,7 @@ static void SetLang(int l)
 {
     if (l == lang || l < 0 || l > 1) return;
     if (screen == SCR_PROBLEM) { ProbSync(); lang = l; ProbLoad(); }
+    else if (screen == SCR_JOB) { JobSync(); lang = l; JobLoad(); }
     else lang = l;
     memListScroll = 0; mw.ready = false; mw.launch = -1; mw.hover = 0; mw.stage = 0; mowTrailN = 0;
 }
@@ -10190,9 +11754,8 @@ static void DrawMemList(void)
     TopBar();
     Txt(fBold, "Code Breakdown", 40, 14, 32, TXT);
     TxtFit(fReg, "Hover a program and the mower drives to it; click to ride in, then watch it run line by line.", 40, 46, 15, 640, DIM);
-    LangToggle(W - 300 - 166, 15);
+    LangToggle(W - 140 - 166, 15);
     if (Button((Rectangle) { W - 140, 16, 110, 40 }, "Menu", SURF2, 17)) GoMenu();
-    if (Button((Rectangle) { W - 300, 16, 140, 40 }, "Bug Hunt", (Color) { 168, 74, 54, 255 }, 17)) { StartBug(); return; }
     float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
     Vector2 mouse = GetMousePosition();
 
@@ -10488,90 +12051,170 @@ static void DrawMem(void)
    ====================================================================== */
 typedef struct {
     const char* title, * goal, * kind, * why, * fix;
-    int lang, nlines, bug;                 /* bug = the wrong line, counting from 0 */
+    int lang, nlines, bug, topic;          /* bug = the wrong line, counting from 0; topic 0..5 picks the tunnel */
     const char* code[13];
 } BugProg;
 
 static const BugProg BUGS[] = {
   { "Sum to n", "add up 1 + 2 + 3 + 4 + 5 and print 15", "Off by one",
     "i < n stops one short, so the last number (5) is never added. The program prints 10, not 15. The loop has to run while i <= n.",
-    "for (int i = 1; i <= n; i++) {", 0, 9, 3,
+    "for (int i = 1; i <= n; i++) {", 0, 9, 3, 0,
     { "#include <stdio.h>", "int main(void) {", "    int n = 5, sum = 0;", "    for (int i = 1; i < n; i++) {", "        sum += i;", "    }", "    printf(\"%d\\n\", sum);", "    return 0;", "}" } },
   { "Lives left", "print how many lives are left (3)", "Assignment vs comparison",
     "A single = assigns. This sets lives to 0, and the if is false, so the program wipes out your lives instead of checking them. == is the one that compares.",
-    "if (lives == 0) {", 0, 9, 3,
+    "if (lives == 0) {", 0, 9, 3, 1,
     { "#include <stdio.h>", "int main(void) {", "    int lives = 3;", "    if (lives = 0) {", "        printf(\"game over\\n\");", "    }", "    printf(\"lives left: %d\\n\", lives);", "    return 0;", "}" } },
   { "Average of two", "print the average of 7 and 2, which is 4.5", "Integer division",
     "Both sides of the / are ints, so C divides as whole numbers: 9 / 2 is 4, and the .5 is thrown away before it is stored in the double. Making one side a double (2.0) fixes it.",
-    "double avg = (a + b) / 2.0;", 0, 7, 3,
+    "double avg = (a + b) / 2.0;", 0, 7, 3, 2,
     { "#include <stdio.h>", "int main(void) {", "    int a = 7, b = 2;", "    double avg = (a + b) / 2;", "    printf(\"%.1f\\n\", avg);", "    return 0;", "}" } },
   { "Ask for an age", "read an age from the keyboard and print it", "Missing &",
     "scanf has to be given the address of age so it can write into it. Passing age itself hands it the (garbage) value as if it were an address, which usually crashes. You need &age.",
-    "scanf(\"%d\", &age);", 0, 8, 4,
+    "scanf(\"%d\", &age);", 0, 8, 4, 4,
     { "#include <stdio.h>", "int main(void) {", "    int age;", "    printf(\"Age? \");", "    scanf(\"%d\", age);", "    printf(\"%d\\n\", age);", "    return 0;", "}" } },
   { "Add up an array", "add the 5 numbers in the array and print 15", "Out of bounds",
     "An array of 5 has indexes 0 to 4. With i <= 5 the loop also reads a[5], which is past the end of the array: whatever happens to be in memory next gets added in. The test must be i < 5.",
-    "for (int i = 0; i < 5; i++) {", 0, 9, 4,
+    "for (int i = 0; i < 5; i++) {", 0, 9, 4, 3,
     { "#include <stdio.h>", "int main(void) {", "    int a[5] = {1, 2, 3, 4, 5};", "    int total = 0;", "    for (int i = 0; i <= 5; i++) {", "        total += a[i];", "    }", "    printf(\"%d\\n\", total);", "}" } },
   { "Copy a name", "copy \"Alexander\" into name and print it", "Buffer too small",
     "\"Alexander\" is 9 letters plus the hidden '\\0' at the end, 10 chars. name only has room for 5, so strcpy writes right past the end of the array and corrupts whatever is next to it.",
-    "char name[10];", 0, 8, 3,
+    "char name[10];", 0, 8, 3, 3,
     { "#include <stdio.h>", "#include <string.h>", "int main(void) {", "    char name[5];", "    strcpy(name, \"Alexander\");", "    printf(\"%s\\n\", name);", "    return 0;", "}" } },
   { "Use after free", "store 42 on the heap and print it", "Use after free",
     "free(p) gives the memory back. After that the pointer still holds the old address, but the memory isn't yours any more, so reading *p is undefined. Print the value before calling free.",
-    "Print *p first, then call free(p).", 0, 9, 6,
+    "Print *p first, then call free(p).", 0, 9, 6, 4,
     { "#include <stdio.h>", "#include <stdlib.h>", "int main(void) {", "    int *p = malloc(sizeof *p);", "    *p = 42;", "    free(p);", "    printf(\"%d\\n\", *p);", "    return 0;", "}" } },
   { "Make a number", "return a pointer to the number 5", "Dangling pointer",
     "x lives in make's stack frame, and that frame is gone the moment make returns. The pointer it hands back points at memory that is about to be reused. Return the value, or use malloc.",
-    "Return the value (int make) or malloc the int.", 0, 9, 3,
+    "Return the value (int make) or malloc the int.", 0, 9, 3, 4,
     { "#include <stdio.h>", "int *make(void) {", "    int x = 5;", "    return &x;", "}", "int main(void) {", "    int *p = make();", "    printf(\"%d\\n\", *p);", "}" } },
   { "Free it once", "allocate a number and free it", "Double free",
     "The second free(p) frees memory that was already given back. That is undefined behaviour and often crashes with a heap corruption error. Each malloc gets exactly one free.",
-    "Delete the second free(p).", 0, 8, 5,
+    "Delete the second free(p).", 0, 8, 5, 4,
     { "#include <stdlib.h>", "int main(void) {", "    int *p = malloc(sizeof *p);", "    *p = 7;", "    free(p);", "    free(p);", "    return 0;", "}" } },
   { "Day names", "print Mon for day 1 and Tue for day 2", "Missing break",
     "With no break, case 1 doesn't stop: it carries on into case 2, so day 1 prints both Mon and Tue. Every case that should end needs a break.",
-    "case 1: printf(\"Mon\\n\"); break;", 0, 9, 4,
+    "case 1: printf(\"Mon\\n\"); break;", 0, 9, 4, 1,
     { "#include <stdio.h>", "int main(void) {", "    int day = 1;", "    switch (day) {", "        case 1: printf(\"Mon\\n\");", "        case 2: printf(\"Tue\\n\"); break;", "    }", "    return 0;", "}" } },
   { "Same word?", "print same when the word is hello", "Comparing strings with ==",
     "In C, == on two strings compares where they live in memory, not what they say, so it is almost never true. strcmp(word, \"hello\") == 0 is how to compare the letters.",
-    "if (strcmp(word, \"hello\") == 0) {", 0, 9, 4,
+    "if (strcmp(word, \"hello\") == 0) {", 0, 9, 4, 3,
     { "#include <stdio.h>", "#include <string.h>", "int main(void) {", "    char word[] = \"hello\";", "    if (word == \"hello\") {", "        printf(\"same\\n\");", "    }", "    return 0;", "}" } },
   { "Free the array", "make an array of 3 ints on the heap and free it", "delete vs delete[]",
     "Memory from new[] must be given back with delete[]. A plain delete frees it as if it were a single object, which is undefined behaviour.",
-    "delete[] a;", 1, 7, 4,
+    "delete[] a;", 1, 7, 4, 4,
     { "#include <iostream>", "int main() {", "    int *a = new int[3]{1, 2, 3};", "    std::cout << a[0] << \"\\n\";", "    delete a;", "    return 0;", "}" } },
   { "Running total", "add 1 + 2 + 3 and print 6", "Uninitialised variable",
     "total starts with whatever junk was in that memory, so the answer is junk + 6. Local variables are not set to 0 for you; give it a starting value.",
-    "int total = 0;", 1, 7, 2,
+    "int total = 0;", 1, 7, 2, 2,
     { "#include <iostream>", "int main() {", "    int total;", "    for (int i = 1; i <= 3; i++) total += i;", "    std::cout << total << \"\\n\";", "    return 0;", "}" } },
   { "Add one", "make n go from 1 to 2", "Pass by value",
     "addOne gets a copy of n, adds one to the copy, and the copy is thrown away. The original n is still 1. Taking a reference (int &x) lets the function change the caller's variable.",
-    "void addOne(int &x) {", 1, 9, 1,
+    "void addOne(int &x) {", 1, 9, 1, 5,
     { "#include <iostream>", "void addOne(int x) {", "    x = x + 1;", "}", "int main() {", "    int n = 1;", "    addOne(n);", "    std::cout << n << \"\\n\";", "}" } },
   { "Print a vector", "print 4, 8 and 15", "Off by one",
     "A vector of 3 has indexes 0, 1, 2. i <= v.size() makes one extra pass with i = 3, which reads past the end. The condition has to be i < v.size().",
-    "for (size_t i = 0; i < v.size(); i++) {", 1, 9, 4,
+    "for (size_t i = 0; i < v.size(); i++) {", 1, 9, 4, 0,
     { "#include <iostream>", "#include <vector>", "int main() {", "    std::vector<int> v = {4, 8, 15};", "    for (size_t i = 0; i <= v.size(); i++) {", "        std::cout << v[i] << \"\\n\";", "    }", "    return 0;", "}" } },
   { "A reference to what?", "return a reference to the number 5", "Reference to a local",
     "x is a local of get(), destroyed when get returns. The reference now refers to a variable that no longer exists, exactly like a dangling pointer.",
-    "Return by value (int get()) instead.", 1, 9, 3,
+    "Return by value (int get()) instead.", 1, 9, 3, 4,
     { "#include <iostream>", "int &get() {", "    int x = 5;", "    return x;", "}", "int main() {", "    int &r = get();", "    std::cout << r << \"\\n\";", "}" } },
   { "Grow a vector", "add a 9 to the vector when you see a 2", "Changing a vector while looping over it",
     "push_back can move the vector's storage to a new place, which invalidates the loop's hidden iterators. The loop is then using dangling ones. Collect changes first, apply them after the loop.",
-    "Add after the loop, not inside it.", 1, 8, 4,
+    "Add after the loop, not inside it.", 1, 8, 4, 3,
     { "#include <vector>", "int main() {", "    std::vector<int> v = {1, 2, 3};", "    for (int x : v) {", "        if (x == 2) v.push_back(9);", "    }", "    return 0;", "}" } },
+  { "Count up", "print 0 1 2 3 4", "Loop never ends",
+    "i-- takes i the wrong way: it goes 0, -1, -2 and so on, so i < 5 is always true and the loop never stops. To count up the line has to be i++.",
+    "i++;", 0, 9, 5, 0,
+    { "#include <stdio.h>", "int main(void) {", "    int i = 0;", "    while (i < 5) {", "        printf(\"%d\\n\", i);", "        i--;", "    }", "    return 0;", "}" } },
+  { "Say hi three times", "print hi three times", "Stray semicolon",
+    "The ; straight after the for ends the loop with an empty body. The loop spins three times doing nothing, then printf runs once on its own. Remove the semicolon.",
+    "for (int i = 0; i < 3; i++)", 0, 6, 2, 0,
+    { "#include <stdio.h>", "int main(void) {", "    for (int i = 0; i < 3; i++);", "        printf(\"hi\\n\");", "    return 0;", "}" } },
+  { "Is it in range?", "print ok only when n is from 1 to 10", "&& vs ||",
+    "With ||, the test passes if either half is true, and every number is at least 1 or at most 10, so 50 gets through. Both halves must hold, so the two tests are joined with &&.",
+    "if (n >= 1 && n <= 10) {", 0, 8, 3, 1,
+    { "#include <stdio.h>", "int main(void) {", "    int n = 50;", "    if (n >= 1 || n <= 10) {", "        printf(\"ok\\n\");", "    }", "    return 0;", "}" } },
+  { "Percentage", "print 50 (one out of two, as a percent)", "Order of operations with ints",
+    "1 / 2 is worked out first, and with ints it is 0, so the answer is 0 * 100 = 0. Multiply first: 1 * 100 / 2 gives 50.",
+    "int pct = 1 * 100 / 2;", 0, 6, 2, 2,
+    { "#include <stdio.h>", "int main(void) {", "    int pct = 1 / 2 * 100;", "    printf(\"%d\\n\", pct);", "    return 0;", "}" } },
+  { "Print a price", "print 2.5", "Wrong printf format",
+    "%d expects an int, but price is a double. Passing the wrong type makes printf print garbage. A double is printed with %f (or %.1f for one decimal place).",
+    "printf(\"%.1f\\n\", price);", 0, 6, 3, 2,
+    { "#include <stdio.h>", "int main(void) {", "    double price = 2.5;", "    printf(\"%d\\n\", price);", "    return 0;", "}" } },
+  { "Twice", "print 14, which is 7 doubled", "Missing return",
+    "The line n * 2; works out the answer and throws it away. Without a return the function hands back garbage. It has to say return n * 2;.",
+    "return n * 2;", 0, 8, 2, 5,
+    { "#include <stdio.h>", "int twice(int n) {", "    n * 2;", "}", "int main(void) {", "    printf(\"%d\\n\", twice(7));", "    return 0;", "}" } },
+  { "Reset the score", "set score back to 0", "Pass by value (C)",
+    "reset gets a copy of score, zeroes the copy, and the copy disappears when the function ends. In C a function changes the caller's variable only if it is given its address: pass &score and take an int *.",
+    "void reset(int *score) { *score = 0; }", 0, 8, 1, 5,
+    { "#include <stdio.h>", "void reset(int score) { score = 0; }", "int main(void) {", "    int score = 9;", "    reset(score);", "    printf(\"%d\\n\", score);", "    return 0;", "}" } },
+  { "Ten minus three", "print 7, which is 10 minus 3", "Arguments in the wrong order",
+    "sub(a, b) works out a - b, so sub(3, 10) is 3 - 10 = -7. The first argument must be the number you start from.",
+    "printf(\"%d\\n\", sub(10, 3));", 0, 8, 5, 5,
+    { "#include <stdio.h>", "int sub(int a, int b) {", "    return a - b;", "}", "int main(void) {", "    printf(\"%d\\n\", sub(3, 10));", "    return 0;", "}" } },
+  { "Even numbers", "print 0 2 4 6 8", "Wrong step",
+    "i++ goes up by one, so every number is printed. To skip the odd ones the loop has to jump by two with i += 2.",
+    "for (int i = 0; i < 10; i += 2) {", 1, 7, 2, 0,
+    { "#include <iostream>", "int main() {", "    for (int i = 0; i < 10; i++) {", "        std::cout << i << \"\\n\";", "    }", "    return 0;", "}" } },
+  { "Countdown", "print 3 2 1 0", "Unsigned never goes below 0",
+    "An unsigned number can't be negative: after 0, i-- wraps round to a huge number. So i >= 0 is always true and the loop never ends. Use a signed int for a countdown.",
+    "for (int i = 3; i >= 0; i--) {", 1, 7, 2, 0,
+    { "#include <iostream>", "int main() {", "    for (unsigned i = 3; i >= 0; i--) {", "        std::cout << i << \"\\n\";", "    }", "    return 0;", "}" } },
+  { "Pass mark", "print pass when the score is 50 or more", "Boundary condition",
+    "> 50 leaves out 50 itself, so a score of exactly 50 fails. Edges are where most bugs hide: 50 or more is >= 50.",
+    "if (score >= 50) {", 1, 8, 3, 1,
+    { "#include <iostream>", "int main() {", "    int score = 50;", "    if (score > 50) {", "        std::cout << \"pass\\n\";", "    }", "    return 0;", "}" } },
+  { "Between 1 and 4", "print in range only when x is 1, 2, 3 or 4", "Chained comparison",
+    "0 < x < 5 is read as (0 < x) < 5. The part in brackets is true (1) or false (0), and either is less than 5, so the test is always true. Write the two checks separately, joined by &&.",
+    "if (0 < x && x < 5) {", 1, 8, 3, 1,
+    { "#include <iostream>", "int main() {", "    int x = 9;", "    if (0 < x < 5) {", "        std::cout << \"in range\\n\";", "    }", "    return 0;", "}" } },
+  { "Is it 0.3?", "print equal, since 0.1 + 0.2 is 0.3", "Comparing doubles with ==",
+    "0.1 and 0.2 can't be stored exactly in binary, so their sum is 0.30000000000000004, not 0.3. Never compare doubles with ==; check that they are very close instead.",
+    "if (a - b < 1e-9 && b - a < 1e-9) {", 1, 9, 4, 1,
+    { "#include <iostream>", "int main() {", "    double a = 0.1 + 0.2;", "    double b = 0.3;", "    if (a == b) {", "        std::cout << \"equal\\n\";", "    }", "    return 0;", "}" } },
+  { "Four billion", "print 4000000000", "Integer overflow",
+    "An int tops out at about 2.1 billion. 2000000000 * 2 doesn't fit, so it wraps round to a negative number. Use a long long, and widen before you multiply.",
+    "long long twice = (long long)big * 2;", 1, 7, 3, 2,
+    { "#include <iostream>", "int main() {", "    int big = 2000000000;", "    int twice = big * 2;", "    std::cout << twice << \"\\n\";", "    return 0;", "}" } },
+  { "Half", "print 0.5", "Integer division",
+    "1 and 2 are both ints, so 1 / 2 is done as integer division and gives 0 before it is stored in the double. Make one side a double, like 1 / 2.0.",
+    "double half = 1 / 2.0;", 1, 6, 2, 2,
+    { "#include <iostream>", "int main() {", "    double half = 1 / 2;", "    std::cout << half << \"\\n\";", "    return 0;", "}" } },
+  { "The last one", "print 8, the last item", "Out of bounds",
+    "A vector of 4 has indexes 0 to 3, so v[v.size()] is v[4], one past the end. The last item is v[v.size() - 1], or just v.back().",
+    "std::cout << v[v.size() - 1] << \"\\n\";", 1, 7, 4, 3,
+    { "#include <iostream>", "#include <vector>", "int main() {", "    std::vector<int> v = {5, 6, 7, 8};", "    std::cout << v[v.size()] << \"\\n\";", "    return 0;", "}" } },
+  { "Add up an array", "print 26 (5 + 6 + 7 + 8)", "sizeof counts bytes",
+    "sizeof(a) is the size in bytes, 16 for four ints, not 4. The loop runs 16 times and reads far past the end of the array. Divide by the size of one item: sizeof(a) / sizeof(a[0]).",
+    "for (int i = 0; i < sizeof(a) / sizeof(a[0]); i++) {", 1, 10, 4, 3,
+    { "#include <iostream>", "int main() {", "    int a[4] = {5, 6, 7, 8};", "    int sum = 0;", "    for (int i = 0; i < sizeof(a); i++) {", "        sum += a[i];", "    }", "    std::cout << sum << \"\\n\";", "    return 0;", "}" } },
+  { "Mixing new and free", "make an int on the heap and give it back", "new with free",
+    "Memory from new has to be given back with delete. free belongs to malloc, and mixing the two is undefined behaviour because they may keep their books differently.",
+    "delete p;", 1, 8, 5, 4,
+    { "#include <iostream>", "#include <cstdlib>", "int main() {", "    int *p = new int(5);", "    std::cout << *p << \"\\n\";", "    free(p);", "    return 0;", "}" } },
+  { "Count the hits", "print 2 after two hits", "Shadowed variable",
+    "int score = 1 inside hit() makes a brand-new local called score that hides the global one. The global is never touched, so main prints 0. Drop the type and change the global: score++.",
+    "score++;", 1, 11, 3, 5,
+    { "#include <iostream>", "int score = 0;", "void hit() {", "    int score = 1;", "}", "int main() {", "    hit();", "    hit();", "    std::cout << score << \"\\n\";", "    return 0;", "}" } },
+  { "Fill the vector", "add a 1 to the vector, so its size is 1", "Pass by value (copy)",
+    "The vector is passed by value, so add() fills a copy and the caller's vector stays empty. Taking it by reference (std::vector<int> &v) lets the function change the original.",
+    "void add(std::vector<int> &v) {", 1, 11, 2, 5,
+    { "#include <iostream>", "#include <vector>", "void add(std::vector<int> v) {", "    v.push_back(1);", "}", "int main() {", "    std::vector<int> list;", "    add(list);", "    std::cout << list.size() << \"\\n\";", "    return 0;", "}" } },
 };
 #define NBUGS ((int)(sizeof BUGS / sizeof BUGS[0]))
 
 typedef struct { float x, y, ph, t, sayT, hop, shake; int dir; char say[48]; } BugHelper;
 static BugHelper bh;
-static int bugOrder[24], bugN = 0, bugIdx = 0;
+static int bugOrder[32], bugN = 0, bugIdx = 0;
 static int bugState = 0;                      /* 0 hunting, 1 found it, 2 gave up / revealed */
 static int bugTries = 0, bugFocus = -1;       /* wrong guesses so far; the line the helper is looking at */
 static bool bugHint = false, bugWrong[16];
 static int bugFound = 0, bugFirst = 0, bugGaveUp = 0;
-static unsigned char bugResult[24];           /* 0 not yet, 1 found, 2 revealed */
+static unsigned char bugResult[32];           /* 0 not yet, 1 found, 2 revealed */
 
 static void BugLoad(int k)
 {
@@ -10580,10 +12223,91 @@ static void BugLoad(int k)
     bh.x = 600; bh.y = 520; bh.sayT = 0; bh.hop = 0; bh.shake = 0; bh.dir = 1;
 }
 
-static void StartBug(void)
+
+/* ---- the topic picker: you ride a mine cart through a cave, and every tunnel is a kind of bug ---- */
+static const struct { const char* name, * blurb; Color col; } BUG_TOPICS[7] = {
+    { "All topics",         "A surprise mix from every tunnel", { 255, 214, 120, 255 } },
+    { "Loops & counting",   "Off by one, loops that never end", { 240, 170,  70, 255 } },
+    { "Conditions & logic", "if, switch, && and ||",            { 110, 190, 240, 255 } },
+    { "Numbers & types",    "Division, overflow, formats",      { 120, 215, 140, 255 } },
+    { "Arrays & strings",   "Bounds, sizes and buffers",        { 190, 140, 240, 255 } },
+    { "Memory & pointers",  "malloc, free, new, references",    { 240, 120, 120, 255 } },
+    { "Functions",          "Returns, arguments and copies",    { 100, 215, 200, 255 } },
+};
+static bool bugPick = true;                    /* true: choosing a topic; false: hunting */
+static int bugTopic = -1;                      /* -1 = every topic */
+static CbMower bcar = { 0, 0, 0, 0, 0, 2, -1, -1, 0, false };
+static float bugListScroll = 0;
+static int bugBest[2][7];                      /* most bugs found in one hunt, per language and tunnel (this session) */
+
+static void BugCartReset(void) { bcar.ready = false; bcar.launch = -1; bcar.hover = -1; bcar.t = 0; bcar.stage = 0; mowTrailN = 0; }
+static int BugCountFor(int topic)
 {
+    int n = 0;
+    for (int i = 0; i < NBUGS; i++) if (BUGS[i].lang == lang && (topic < 0 || BUGS[i].topic == topic)) n++;
+    return n;
+}
+
+/* a little beetle seen from above: legs that scurry, a wing line, two feelers. dir = +1 heads right, -1 left */
+static void DrawBeetle(float x, float y, float dir, float t, float sc, Color c)
+{
+    Color dk = { (unsigned char)(c.r * 0.45f), (unsigned char)(c.g * 0.45f), (unsigned char)(c.b * 0.45f), c.a };
+    for (int side = -1; side <= 1; side += 2)
+        for (int k = 0; k < 3; k++) {
+            float lx = (-5.0f + k * 5.0f) * sc, w = sinf(t * 14.0f + k * 2.1f + (side > 0 ? PI : 0.0f)) * 2.2f * sc;
+            DrawLineEx((Vector2) { x + lx, y + side * 3.0f * sc }, (Vector2) { x + lx + w, y + side * 9.0f * sc }, 1.6f * sc, dk);
+        }
+    DrawEllipse((int)x, (int)y, 9.0f * sc, 6.0f * sc, c);
+    DrawCircle((int)(x + dir * 9.5f * sc), (int)y, 3.6f * sc, dk);
+    DrawLineEx((Vector2) { x + dir * 11.0f * sc, y - 1.5f * sc }, (Vector2) { x + dir * 16.0f * sc, y - 5.0f * sc }, 1.2f * sc, dk);
+    DrawLineEx((Vector2) { x + dir * 11.0f * sc, y + 1.5f * sc }, (Vector2) { x + dir * 16.0f * sc, y + 5.0f * sc }, 1.2f * sc, dk);
+    DrawLineEx((Vector2) { x - 8.0f * sc, y }, (Vector2) { x + dir * 5.0f * sc, y }, 1.2f * sc, dk);
+    DrawCircle((int)(x - 2.0f * sc), (int)(y - 2.6f * sc), 1.5f * sc, dk);
+    DrawCircle((int)(x + 1.0f * sc), (int)(y + 2.6f * sc), 1.5f * sc, dk);
+}
+
+/* the character in an iron mine cart with a lantern on the front. dir 1 = facing left, 2 = facing right */
+static void DrawMineCart(float x, float fy, int dir, float ph, bool rolling, float t)
+{
+    float s = dir == 1 ? -1.0f : 1.0f;
+    Color iron = { 96, 102, 118, 255 }, ironL = { 150, 158, 176, 255 }, ironD = { 50, 54, 66, 255 }, rim = { 196, 124, 58, 255 }, amber = { 255, 208, 104, 255 };
+#define CF(ox, oy, w, h) ((Rectangle){ s > 0 ? x + (ox) : x - (ox) - (w), fy + (oy), (w), (h) })
+    DrawEllipse((int)x, (int)fy + 1, 46, 6, Fade(BLACK, 0.35f));
+    float lx = x + s * 36, ly = fy - 62;
+    Vector2 b0 = { lx, ly }, b1 = { lx + s * 130, ly - 30 }, b2 = { lx + s * 130, ly + 40 };       /* lantern light, drawn both ways round */
+    DrawTriangle(b0, b1, b2, Fade(amber, 0.10f)); DrawTriangle(b0, b2, b1, Fade(amber, 0.10f));
+    DrawPlayer(x - s * 2, fy - 24, dir, 0.78f, 0);
+    DrawRectangleRounded(CF(-36, -34, 72, 25), 0.22f, 6, ironD);                         /* the bucket */
+    DrawRectangleRounded(CF(-34, -32, 68, 21), 0.22f, 6, iron);
+    DrawRectangleRounded(CF(-39, -38, 78, 7), 0.45f, 4, rim);                             /* rim */
+    for (int k = 0; k < 5; k++) DrawCircle((int)(x - 28 + k * 14), (int)fy - 20, 1.8f, ironL);   /* rivets */
+    DrawRectangle((int)x - 30, (int)fy - 27, 60, 2, Fade(WHITE, 0.10f));
+    for (int i = 0; i < 2; i++) {                                                         /* wheels with turning spokes */
+        float wx = x + (i ? 23.0f : -23.0f);
+        DrawCircle((int)wx, (int)fy - 8, 8, ironD);
+        DrawCircle((int)wx, (int)fy - 8, 4.6f, ironL);
+        for (int k = 0; k < 3; k++) {
+            float a = ph * s + k * 2.094f;
+            DrawLineEx((Vector2) { wx, fy - 8 }, (Vector2) { wx + cosf(a) * 4.5f, fy - 8 + sinf(a) * 4.5f }, 1.4f, ironD);
+        }
+    }
+    DrawLineEx((Vector2) { x + s * 32, fy - 36 }, (Vector2) { lx, ly + 8 }, 3, ironD);      /* lantern on its pole */
+    DrawCircle((int)lx, (int)ly, 15, Fade(amber, 0.16f + 0.04f * sinf(t * 6.0f)));
+    DrawRectangleRounded((Rectangle) { lx - 5, ly - 6, 10, 13 }, 0.4f, 4, amber);
+    DrawRectangle((int)lx - 6, (int)ly - 9, 12, 3, ironD);
+    if (rolling)
+        for (int i = 0; i < 4; i++) {                                                     /* sparks off the back wheel */
+            float u = fmodf(t * 4.0f + i * 0.25f, 1.0f);
+            DrawCircle((int)(x - s * (28 + u * 16)), (int)(fy - 3 - sinf(u * PI) * 9), 1.7f, Fade((Color) { 255, 176, 70, 255 }, 1.0f - u));
+        }
+#undef CF
+}
+
+static void StartBugTopic(int topic)
+{
+    bugTopic = topic; bugPick = false;
     bugN = 0;
-    for (int i = 0; i < NBUGS; i++) if (BUGS[i].lang == lang) bugOrder[bugN++] = i;
+    for (int i = 0; i < NBUGS; i++) if (BUGS[i].lang == lang && (topic < 0 || BUGS[i].topic == topic)) bugOrder[bugN++] = i;
     for (int i = bugN - 1; i > 0; i--) { int j = GetRandomValue(0, i), t = bugOrder[i]; bugOrder[i] = bugOrder[j]; bugOrder[j] = t; }
     memset(bugResult, 0, sizeof bugResult);
     bugFound = bugFirst = bugGaveUp = 0;
@@ -10591,18 +12315,163 @@ static void StartBug(void)
     BugLoad(0);
     bh.x = 600; bh.y = 160;
 }
+static void StartBug(void)                       /* from the menu: open the topic picker */
+{
+    screen = SCR_BUG; bugPick = true; bugListScroll = 0; BugCartReset();
+}
 
 static void BugSay(const char* s, float secs) { snprintf(bh.say, sizeof bh.say, "%s", s); bh.sayT = secs; }
 
-static void DrawBug(void)
+static void DrawBugPick(void)
 {
     float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
     Vector2 mouse = GetMousePosition();
+    float tt = (float)GetTime();
     TopBar();
-    if (Button((Rectangle) { 24, 16, 124, 40 }, "< Programs", SURF2, 16)) { screen = SCR_MEM; return; }
+    Txt(fBold, "Bug Hunt", 40, 14, 32, TXT);
+    TxtFit(fReg, "Hover a tunnel and the mine cart rolls to it; click to ride in and hunt the bug.", 40, 46, 15, 640, DIM);
+    if (LangToggle(W - 140 - 166, 15)) { StartBug(); return; }
+    if (Button((Rectangle) { W - 140, 16, 110, 40 }, "Menu", SURF2, 17)) { GoMenu(); return; }
+
+    const float tw = 350, th = 96, gap = 46, off = 66;
+    static Rectangle tile[7];
+    static bool tright[7];
+    float cy = 44;
+    for (int i = 0; i < 7; i++) {
+        float mid = cy + th / 2, px = CbPathX(mid);
+        tright[i] = (i & 1) != 0;
+        tile[i] = (Rectangle){ tright[i] ? px + off : px - off - tw, cy, tw, th };
+        cy += th + gap;
+    }
+    float contentH = cy + 30;
+    const float top = 80, viewH = H - top;
+    float maxScroll = contentH - viewH; if (maxScroll < 0) maxScroll = 0;
+    bugListScroll -= GetMouseWheelMove() * 70;
+    if (bugListScroll > maxScroll) bugListScroll = maxScroll;
+    if (bugListScroll < 0) bugListScroll = 0;
+    float sy = top - bugListScroll;
+
+    ScissorT(0, 73, W, H - 73);
+    DrawRectangle(0, 73, W, H - 73, (Color) { 17, 14, 25, 255 });
+    for (int k = (int)(bugListScroll / 34); k * 34 < bugListScroll + viewH + 34; k++)       /* rock strata */
+        if (k & 1) DrawRectangle(0, (int)(sy + k * 34), W, 34, Fade((Color) { 120, 90, 160, 255 }, 0.045f));
+    for (int k = 0; k < 44; k++) {                                                          /* glowing crystals */
+        float cxk = (float)(WoodHash(k, 1) % (unsigned)W), cyk = (float)(WoodHash(k, 2) % (unsigned)contentH);
+        float sz = 6.0f + (float)(WoodHash(k, 3) % 9);
+        Color cc = BUG_TOPICS[1 + k % 6].col;
+        float yy = sy + cyk;
+        if (yy < 60 || yy > H + 20) continue;
+        DrawCircle((int)cxk, (int)yy, sz * 2.6f, Fade(cc, 0.07f + 0.035f * sinf(tt * 1.6f + k)));
+        DrawTriangle((Vector2) { cxk - sz * 0.5f, yy + sz * 0.5f }, (Vector2) { cxk + sz * 0.5f, yy + sz * 0.5f }, (Vector2) { cxk, yy - sz * 1.3f }, Fade(cc, 0.75f));
+        DrawTriangle((Vector2) { cxk + sz * 0.5f, yy + sz * 0.5f }, (Vector2) { cxk - sz * 0.5f, yy + sz * 0.5f }, (Vector2) { cxk, yy - sz * 1.3f }, Fade(cc, 0.75f));
+        DrawTriangle((Vector2) { cxk, yy - sz * 1.3f }, (Vector2) { cxk - sz * 0.5f, yy + sz * 0.5f }, (Vector2) { cxk - sz * 0.1f, yy + sz * 0.5f }, Fade(WHITE, 0.25f));
+    }
+    for (int k = 0; k < 7; k++) {                                                           /* beetles scurrying about */
+        bool right = (k & 1) == 0;
+        float bx = fmodf(tt * (16.0f + k * 5.0f) + k * 210.0f, (float)W + 80.0f) - 40.0f;
+        if (!right) bx = (float)W - bx;
+        float by = sy + 70.0f + k * 150.0f + sinf(k * 3.0f) * 24.0f;
+        if (by > 70 && by < H) DrawBeetle(bx, by, right ? 1.0f : -1.0f, tt + k, 0.85f, Fade(BUG_TOPICS[1 + k % 6].col, 0.55f));
+    }
+
+    float y0 = bugListScroll - 20, y1 = bugListScroll + viewH + 20;                        /* the rails */
+    if (y0 < 0) y0 = 0;
+    if (y1 > contentH) y1 = contentH;
+    Color tie = { 92, 66, 46, 255 }, steel = { 150, 158, 176, 255 };
+    for (float yy = floorf(y0 / 22) * 22; yy < y1; yy += 22) DrawRectangleRounded((Rectangle) { CbPathX(yy) - 25, sy + yy - 2, 50, 6 }, 0.5f, 4, tie);
+    for (int rail = -1; rail <= 1; rail += 2)
+        for (float yy = y0; yy < y1; yy += 8)
+            DrawLineEx((Vector2) { CbPathX(yy) + rail * 16.0f, sy + yy }, (Vector2) { CbPathX(yy + 8) + rail * 16.0f, sy + yy + 8 }, 3.2f, steel);
+    for (int i = 0; i < 7; i++) {                                                           /* a spur of track to each tunnel */
+        float mid = tile[i].y + th / 2, px = CbPathX(mid), ex = tright[i] ? tile[i].x : tile[i].x + tile[i].width;
+        DrawLineEx((Vector2) { px, sy + mid - 4 }, (Vector2) { ex, sy + mid - 4 }, 2.6f, steel);
+        DrawLineEx((Vector2) { px, sy + mid + 5 }, (Vector2) { ex, sy + mid + 5 }, 2.6f, steel);
+        float lo = px < ex ? px : ex, hi = px < ex ? ex : px;
+        for (float xx = lo + 12; xx < hi - 4; xx += 18) DrawRectangle((int)xx, (int)(sy + mid - 8), 5, 17, tie);
+    }
+
+    int hov = -1;
+    for (int i = 0; i < 7; i++) {
+        Rectangle r = { tile[i].x, sy + tile[i].y, tile[i].width, tile[i].height };
+        if (CheckCollisionPointRec(mouse, r) && mouse.y > 73) hov = i;
+    }
+    if (bcar.launch < 0 && hov >= 0) { bcar.hover = hov; hand = true; }
+    if (!bcar.ready) { bcar.py = tile[0].y + th / 2; bcar.x = CbPathX(bcar.py); bcar.y = bcar.py; bcar.ready = true; bcar.hover = 0; bcar.stage = 0; }
+
+    int goal = bcar.launch >= 0 ? bcar.launch : (bcar.hover >= 0 ? bcar.hover : 0);
+    float gy = tile[goal].y + th / 2;
+    bool moving = false;
+    if (bcar.stage == 0) {                                      /* roll along the main line to the tunnel's depth */
+        float d = gy - bcar.py;
+        if (fabsf(d) > 1.5f) {
+            float step = (170.0f + 650.0f * (fabsf(d) > 160 ? 1.0f : fabsf(d) / 160)) * dt;
+            if (step > fabsf(d)) step = fabsf(d);
+            float ox = CbPathX(bcar.py);
+            bcar.py += d > 0 ? step : -step;
+            float nx = CbPathX(bcar.py);
+            if (fabsf(nx - ox) > 0.08f) bcar.dir = nx > ox ? 2 : 1;
+            bcar.ph += step * 0.14f;
+            moving = true;
+        }
+        bcar.x = CbPathX(bcar.py); bcar.y = bcar.py;
+        if (!moving && bcar.launch >= 0) bcar.stage = 1;
+    }
+    else if (bcar.stage == 1) {                               /* turn off down the spur */
+        float tx = tile[goal].x + tile[goal].width * 0.5f, dx = tx - bcar.x;
+        if (fabsf(dx) > 2.0f) {
+            float step = (260.0f + 300.0f * (fabsf(dx) > 120 ? 1.0f : fabsf(dx) / 120)) * dt;
+            if (step > fabsf(dx)) step = fabsf(dx);
+            bcar.x += dx > 0 ? step : -step; bcar.dir = dx > 0 ? 2 : 1; bcar.ph += step * 0.14f;
+            moving = true;
+        }
+        else { bcar.stage = 2; bcar.t = 0; CompBurst(bcar.x, sy + bcar.y - 30, 16); }
+    }
+    else {                                                    /* in the tunnel: a beat, then the hunt begins */
+        bcar.t += dt;
+        if (bcar.t > 0.55f) { EndScissorMode(); StartBugTopic(bcar.launch - 1); return; }
+    }
+    if (moving) {
+        if (mowTrailN < 48) mowTrail[mowTrailN++] = (MowTrail){ bcar.x, bcar.y, 1.0f };
+        else { memmove(mowTrail, mowTrail + 1, sizeof(MowTrail) * 47); mowTrail[47] = (MowTrail){ bcar.x, bcar.y, 1.0f }; }
+    }
+    for (int i = 0; i < mowTrailN; i++) mowTrail[i].life -= dt * 1.4f;
+    while (mowTrailN > 0 && mowTrail[0].life <= 0) { memmove(mowTrail, mowTrail + 1, sizeof(MowTrail) * (size_t)(mowTrailN - 1)); mowTrailN--; }
+    for (int i = 0; i < mowTrailN; i++) DrawCircle((int)mowTrail[i].x, (int)(sy + mowTrail[i].y - 4), 9, Fade((Color) { 255, 190, 90, 255 }, 0.13f * mowTrail[i].life));
+
+    for (int i = 0; i < 7; i++) {
+        Rectangle r = { tile[i].x, sy + tile[i].y, tile[i].width, tile[i].height };
+        if (r.y + r.height < 73 || r.y > H) continue;
+        Color col = BUG_TOPICS[i].col;
+        bool on = (bcar.launch < 0 && hov == i) || bcar.launch == i;
+        if (on) r.y -= 3;
+        Panel(r, 0.10f, on ? SURF2 : SURF, on ? col : BORDER);
+        DrawRectangleRounded((Rectangle) { r.x, r.y + 10, 5, r.height - 20 }, 0.5f, 4, col);
+        DrawCircle((int)r.x + 38, (int)r.y + 36, 24, Fade(col, on ? 0.30f : 0.16f));
+        DrawBeetle(r.x + 38, r.y + 36, 1.0f, on ? tt : 0.0f, 1.25f, col);
+        TxtFit(fBold, BUG_TOPICS[i].name, r.x + 76, r.y + 14, 19, r.width - 94, TXT);
+        TxtFit(fReg, BUG_TOPICS[i].blurb, r.x + 76, r.y + 42, 13, r.width - 94, DIM);
+        int cnt = BugCountFor(i - 1), best = bugBest[lang][i];
+        Txt(fCode, TextFormat("%d bugs", cnt), r.x + 76, r.y + r.height - 26, 12, col);
+        if (best > 0) Txt(fCode, best >= cnt ? "all found!" : TextFormat("best %d/%d", best, cnt), r.x + r.width - 14 - TxtW(fCode, best >= cnt ? "all found!" : TextFormat("best %d/%d", best, cnt), 12), r.y + r.height - 26, 12, best >= cnt ? GOOD : DIM);
+        if (bcar.launch == i && bcar.stage == 2) DrawRectangleRounded(r, 0.10f, 8, Fade(col, 0.16f));
+        if (mouse.y > 73 && CheckCollisionPointRec(mouse, r) && bcar.launch < 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { bcar.launch = i; bcar.t = 0; }
+    }
+
+    DrawMineCart(bcar.x, sy + bcar.y + 8, bcar.dir, bcar.ph, moving, tt);
+    CompDrawBits(dt);
+    EndScissorMode();
+}
+
+static void DrawBug(void)
+{
+    if (bugPick) { DrawBugPick(); return; }
+    float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
+    Vector2 mouse = GetMousePosition();
+    TopBar();
+    if (Button((Rectangle) { 24, 16, 124, 40 }, "< Topics", SURF2, 16)) { bugPick = true; BugCartReset(); return; }
     Txt(fBold, "Bug Hunt", 168, 12, 30, TXT);
-    if (LangToggle(W - 60 - bugN * 22.0f - 160, 15)) { StartBug(); return; }
-    Txt(fReg, TextFormat("%s  -  one line in each program is wrong", LANG_NAME[lang]), 170, 46, 14, DIM);
+    if (LangToggle(W - 60 - bugN * 22.0f - 160, 15)) { StartBugTopic(bugTopic); return; }
+    Txt(fReg, TextFormat("%s  -  %s  -  one line in each program is wrong", LANG_NAME[lang], BUG_TOPICS[bugTopic + 1].name), 170, 46, 14, DIM);
     /* progress dots */
     for (int i = 0; i < bugN; i++) {
         float dx = W - 36 - (bugN - i) * 22.0f;
@@ -10618,8 +12487,9 @@ static void DrawBug(void)
         CenterTxt(fReg, TextFormat("You found %d of %d bugs.", bugFound, bugN), W / 2.0f, r.y + 90, 22, TXT);
         CenterTxt(fReg, TextFormat("%d on the first try", bugFirst), W / 2.0f, r.y + 128, 17, DIM);
         CenterTxt(fReg, bugGaveUp ? TextFormat("%d had to be shown to you. Try them again!", bugGaveUp) : "Not one needed showing. Nicely done.", W / 2.0f, r.y + 158, 16, DIM);
-        if (Button((Rectangle) { r.x + 60, r.y + 270, 200, 54 }, "Hunt again", ACCENTS[lang], 20)) StartBug();
-        if (Button((Rectangle) { r.x + r.width - 260, r.y + 270, 200, 54 }, "Back", SURF2, 20)) screen = SCR_MEM;
+        if (bugFound > bugBest[lang][bugTopic + 1]) bugBest[lang][bugTopic + 1] = bugFound;
+        if (Button((Rectangle) { r.x + 60, r.y + 270, 200, 54 }, "Hunt again", ACCENTS[lang], 20)) StartBugTopic(bugTopic);
+        if (Button((Rectangle) { r.x + r.width - 260, r.y + 270, 200, 54 }, "Topics", SURF2, 20)) { bugPick = true; BugCartReset(); return; }
         DrawPlayer(W / 2.0f, r.y + 250, 0, 1.2f, 0);
         CompDrawBits(dt);
         return;
@@ -10791,6 +12661,502 @@ static void CompDrawBits(float dt)
     }
 }
 
+/* ====================================================================================
+   Valley Jobs: the townsfolk post requests, you build the programs, and they pay you.
+   Five villagers, three jobs each; every job is graded against test cases like Practice.
+   ==================================================================================== */
+typedef struct { const char* name, * role, * proj, * bonus; unsigned char look[5]; } JVill;
+typedef struct { int vill, step, pay; const char* title, * story, * fmt; PTest t[4]; const char* hint[2], * todo, * solC, * solCpp, * thanks; } Job;
+#define NJOBS 15
+#define NJPROJ 5
+#define JOB_BONUS 30
+
+static const JVill JVILL[NJPROJ] = {
+  { "Mabel", "the Baker", "The Bakery Till", "Mabel baked you a loaf of rye as a thank you", { 6, 0, 5, 0, 0 } },
+  { "Hank", "the Farmer", "The Egg Counter", "Hank left a basket of eggs at your door", { 2, 1, 0, 0, 0 } },
+  { "Ingrid", "the Innkeeper", "The Guest Book", "Ingrid saved you a seat by the fire", { 5, 0, 6, 0, 0 } },
+  { "Oskar", "the Woodcutter", "The Woodpile", "Oskar stacked a winter's worth of logs for you", { 3, 2, 3, 0, 0 } },
+  { "Greta", "the Weather Watcher", "The Weather Log", "Greta put your name on the weather board", { 4, 3, 2, 0, 0 } },
+};
+
+static const Job JOBS[NJOBS] = {
+  { 0, 0, 15, "Price the loaves",
+    "Morning! Loaves are $3 each, but when the queue is long I keep adding them up wrong. Could you write me a tiny till? Give it the number of loaves and it tells me what to charge.",
+    "Input: one whole number (loaves).\nOutput: Total: $<amount>",
+    { { "2", "Total: $6" },{ "0", "Total: $0" },{ "10", "Total: $30" },{ "7", "Total: $21" } },
+    { "Read the number into an int, then multiply it by 3.", "Print with printf(\"Total: $%d\\n\", total); in C++ use cout << \"Total: $\" << total << endl;" }, "read the loaves and print the total",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    printf(\"Total: $%d\\n\", n * 3);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    cout << \"Total: $\" << n * 3 << endl;\n    return 0;\n}\n",
+    "Perfect, the till works! Come back when you have a minute - I want to add discounts." },
+  { 0, 1, 25, "Bulk discount",
+    "Lovely. Now the Christmas rush! Anyone buying 10 loaves or more gets 10% off the total. Use whole numbers, so the discount is rounded down to a whole dollar.",
+    "Input: one whole number (loaves).\nOutput: Total: $<amount after discount>",
+    { { "5", "Total: $15" },{ "10", "Total: $27" },{ "20", "Total: $54" },{ "12", "Total: $33" } },
+    { "Work out the total first (n * 3). Then use an if: when n >= 10, take away total / 10.", "Integer division drops the remainder, which is exactly the rounding Mabel wants: total -= total / 10;" }, "total, then a discount when n >= 10",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);\n    int total = n * 3;\n    if (n >= 10) total -= total / 10;\n    printf(\"Total: $%d\\n\", total);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int n;\n    cin >> n;\n    int total = n * 3;\n    if (n >= 10) total -= total / 10;\n    cout << \"Total: $\" << total << endl;\n    return 0;\n}\n",
+    "That's the rush sorted! One more thing, for closing time..." },
+  { 0, 2, 40, "The day's takings",
+    "Last one, I promise. At closing I want a list: how many customers came, then how many loaves each bought. Show what each paid (with the discount) and the day's total.",
+    "Input: the number of customers, then one\nloaf count per customer.\nOutput: 'Customer <i>: $<amount>' per customer,\nthen 'Day total: $<sum>'",
+    { { "3\\n2\\n10\\n5", "Customer 1: $6\nCustomer 2: $27\nCustomer 3: $15\nDay total: $48" },{ "1\\n20", "Customer 1: $54\nDay total: $54" },{ "2\\n0\\n11", "Customer 1: $0\nCustomer 2: $30\nDay total: $30" },{ "4\\n1\\n1\\n1\\n1", "Customer 1: $3\nCustomer 2: $3\nCustomer 3: $3\nCustomer 4: $3\nDay total: $12" } },
+    { "Read the customer count first, then use a for loop that reads one loaf count each time round. Keep a running sum that starts at 0.", "Inside the loop reuse your discount code, print the line with the loop number i + 1, and add the amount to the sum. Print the day total after the loop." }, "print each bill, then the day total",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int k, sum = 0;\n    scanf(\"%d\", &k);\n    for (int i = 1; i <= k; i++) {\n        int n;\n        scanf(\"%d\", &n);\n        int total = n * 3;\n        if (n >= 10) total -= total / 10;\n        printf(\"Customer %d: $%d\\n\", i, total);\n        sum += total;\n    }\n    printf(\"Day total: $%d\\n\", sum);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int k, sum = 0;\n    cin >> k;\n    for (int i = 1; i <= k; i++) {\n        int n;\n        cin >> n;\n        int total = n * 3;\n        if (n >= 10) total -= total / 10;\n        cout << \"Customer \" << i << \": $\" << total << endl;\n        sum += total;\n    }\n    cout << \"Day total: $\" << sum << endl;\n    return 0;\n}\n",
+    "The best till in the valley, and it was free! (Well, almost.)" },
+  { 1, 0, 15, "Eggs to dozens",
+    "The hens are on a roll! The shop buys eggs by the dozen, so tell me how many full dozens I have and how many eggs are left over.",
+    "Input: the number of eggs.\nOutput: <d> dozen, <r> left",
+    { { "27", "2 dozen, 3 left" },{ "12", "1 dozen, 0 left" },{ "5", "0 dozen, 5 left" },{ "100", "8 dozen, 4 left" } },
+    { "Whole-number division gives the dozens: eggs / 12. The leftover is the remainder: eggs % 12.", "printf(\"%d dozen, %d left\\n\", eggs / 12, eggs % 12);" }, "dozens and leftover eggs",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int eggs;\n    scanf(\"%d\", &eggs);\n    printf(\"%d dozen, %d left\\n\", eggs / 12, eggs % 12);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int eggs;\n    cin >> eggs;\n    cout << eggs / 12 << \" dozen, \" << eggs % 12 << \" left\" << endl;\n    return 0;\n}\n",
+    "Smashing! Now I can sell them without a fuss." },
+  { 1, 1, 25, "Best laying day",
+    "I write down my eggs every day for a week. Which day was the best? If two days tie, the first one counts.",
+    "Input: seven numbers (eggs per day, day 1 first).\nOutput: Best day: <day> (<eggs> eggs)",
+    { { "3 5 2 9 4 9 1", "Best day: 4 (9 eggs)" },{ "7 7 7 7 7 7 7", "Best day: 1 (7 eggs)" },{ "0 0 0 0 0 0 4", "Best day: 7 (4 eggs)" },{ "10 2 3 4 5 6 8", "Best day: 1 (10 eggs)" } },
+    { "Keep two variables: the best count so far and the day it happened. Loop over the 7 numbers.", "Only update when the new number is strictly bigger than best (so a tie keeps the earlier day): if (x > best) { best = x; bestDay = d; }  Start best at -1." }, "find the biggest number and its day",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int best = -1, bestDay = 0;\n    for (int d = 1; d <= 7; d++) {\n        int x;\n        scanf(\"%d\", &x);\n        if (x > best) { best = x; bestDay = d; }\n    }\n    printf(\"Best day: %d (%d eggs)\\n\", bestDay, best);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int best = -1, bestDay = 0;\n    for (int d = 1; d <= 7; d++) {\n        int x;\n        cin >> x;\n        if (x > best) { best = x; bestDay = d; }\n    }\n    cout << \"Best day: \" << bestDay << \" (\" << best << \" eggs)\" << endl;\n    return 0;\n}\n",
+    "Day four, eh? Those hens like Thursdays." },
+  { 1, 2, 40, "Weekly report",
+    "Now the whole report for the farm board: total eggs, the average per day to one decimal place, and the best day again.",
+    "Input: seven numbers.\nOutput (3 lines):\nTotal: <sum>\nAverage: <avg, 1 decimal>\nBest day: <day>",
+    { { "3 5 2 9 4 9 1", "Total: 33\nAverage: 4.7\nBest day: 4" },{ "7 7 7 7 7 7 7", "Total: 49\nAverage: 7.0\nBest day: 1" },{ "0 0 0 0 0 0 4", "Total: 4\nAverage: 0.6\nBest day: 7" },{ "10 2 3 4 5 6 8", "Total: 38\nAverage: 5.4\nBest day: 1" } },
+    { "Add every number to a total while you look for the best day. The average is the total divided by 7.", "Divide as a double: (double)total / 7, and print it with %.1f (in C++ use fixed << setprecision(1))." }, "total, average and best day",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int total = 0, best = -1, bestDay = 0;\n    for (int d = 1; d <= 7; d++) {\n        int x;\n        scanf(\"%d\", &x);\n        total += x;\n        if (x > best) { best = x; bestDay = d; }\n    }\n    printf(\"Total: %d\\n\", total);\n    printf(\"Average: %.1f\\n\", (double)total / 7);\n    printf(\"Best day: %d\\n\", bestDay);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int total = 0, best = -1, bestDay = 0;\n    for (int d = 1; d <= 7; d++) {\n        int x;\n        cin >> x;\n        total += x;\n        if (x > best) { best = x; bestDay = d; }\n    }\n    cout << \"Total: \" << total << endl;\n    cout << \"Average: \" << fixed << setprecision(1) << (double)total / 7 << endl;\n    cout << \"Best day: \" << bestDay << endl;\n    return 0;\n}\n",
+    "A proper farm report. The board will be thrilled!" },
+  { 2, 0, 15, "Welcome sign",
+    "Every guest at the inn gets a welcome note with their name and the nights they're staying. Mind the plural: one night, two nights!",
+    "Input: a name (one word) and a number of nights.\nOutput: Welcome, <name>! Room for <n> night(s).",
+    { { "Ada 1", "Welcome, Ada! Room for 1 night." },{ "Bob 3", "Welcome, Bob! Room for 3 nights." },{ "Cy 2", "Welcome, Cy! Room for 2 nights." },{ "Di 10", "Welcome, Di! Room for 10 nights." } },
+    { "Read the name with scanf(\"%99s\", name) into a char array and the nights into an int. In C++ read both with cin >> (a string for the name).", "Choose the ending with a condition: nights == 1 ? \"night\" : \"nights\"" }, "print the welcome sign",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    char name[100];\n    int n;\n    scanf(\"%99s %d\", name, &n);\n    printf(\"Welcome, %s! Room for %d %s.\\n\", name, n, n == 1 ? \"night\" : \"nights\");\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    string name;\n    int n;\n    cin >> name >> n;\n    cout << \"Welcome, \" << name << \"! Room for \" << n << (n == 1 ? \" night.\" : \" nights.\") << endl;\n    return 0;\n}\n",
+    "Charming! The sign looks lovely above the door." },
+  { 2, 1, 25, "The bill",
+    "Rooms are $25 a night, but I give one free night for every full 7 nights a guest stays. Work out each guest's bill.",
+    "Input: a name and a number of nights.\nOutput: Bill for <name>: $<amount>",
+    { { "Ada 1", "Bill for Ada: $25" },{ "Bob 7", "Bill for Bob: $150" },{ "Cy 14", "Bill for Cy: $300" },{ "Di 10", "Bill for Di: $225" } },
+    { "Free nights = nights / 7 (whole-number division). Nights you pay for = nights - free nights.", "amount = (nights - nights / 7) * 25;" }, "work out the paid nights and the bill",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    char name[100];\n    int n;\n    scanf(\"%99s %d\", name, &n);\n    printf(\"Bill for %s: $%d\\n\", name, (n - n / 7) * 25);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    string name;\n    int n;\n    cin >> name >> n;\n    cout << \"Bill for \" << name << \": $\" << (n - n / 7) * 25 << endl;\n    return 0;\n}\n",
+    "Fair and square. The guests will love the free nights." },
+  { 2, 2, 40, "Check-in list",
+    "Friday check-in! Here is the whole list of guests. I want every bill, who stays the longest (the first one wins a tie) and the total takings.",
+    "Input: the number of guests, then one\n'name nights' line per guest.\nOutput: a 'Bill for <name>: $<amount>' line\nper guest, then\nLongest stay: <name>\nTotal takings: $<sum>",
+    { { "3\\nAda 1\\nBob 7\\nCy 14", "Bill for Ada: $25\nBill for Bob: $150\nBill for Cy: $300\nLongest stay: Cy\nTotal takings: $475" },{ "1\\nZed 3", "Bill for Zed: $75\nLongest stay: Zed\nTotal takings: $75" },{ "2\\nAnn 5\\nBen 5", "Bill for Ann: $125\nBill for Ben: $125\nLongest stay: Ann\nTotal takings: $250" },{ "4\\nA 1\\nB 2\\nC 8\\nD 3", "Bill for A: $25\nBill for B: $50\nBill for C: $175\nBill for D: $75\nLongest stay: C\nTotal takings: $325" } },
+    { "You don't need to store every guest. While you loop, remember the longest stay so far and copy that guest's name into a second char array (strcpy in C, a string in C++).", "Use > (not >=) when comparing nights, so the first guest wins a tie. Add each bill to a running total and print the last two lines after the loop." }, "bills, longest stay and total",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int k, total = 0, longest = -1;\n    char best[100] = \"\";\n    scanf(\"%d\", &k);\n    for (int i = 0; i < k; i++) {\n        char name[100];\n        int n;\n        scanf(\"%99s %d\", name, &n);\n        int bill = (n - n / 7) * 25;\n        printf(\"Bill for %s: $%d\\n\", name, bill);\n        total += bill;\n        if (n > longest) { longest = n; strcpy(best, name); }\n    }\n    printf(\"Longest stay: %s\\n\", best);\n    printf(\"Total takings: $%d\\n\", total);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int k, total = 0, longest = -1;\n    string best;\n    cin >> k;\n    for (int i = 0; i < k; i++) {\n        string name;\n        int n;\n        cin >> name >> n;\n        int bill = (n - n / 7) * 25;\n        cout << \"Bill for \" << name << \": $\" << bill << endl;\n        total += bill;\n        if (n > longest) { longest = n; best = name; }\n    }\n    cout << \"Longest stay: \" << best << endl;\n    cout << \"Total takings: $\" << total << endl;\n    return 0;\n}\n",
+    "The inn has never run so smoothly. Mulled cider is on me!" },
+  { 3, 0, 15, "Bundles of six",
+    "I sell firewood in bundles of 6 logs. Tell me how many full bundles I can make from my logs, and how many logs are left loose.",
+    "Input: the number of logs.\nOutput: Bundles: <b>, loose: <r>",
+    { { "20", "Bundles: 3, loose: 2" },{ "6", "Bundles: 1, loose: 0" },{ "5", "Bundles: 0, loose: 5" },{ "100", "Bundles: 16, loose: 4" } },
+    { "Full bundles: logs / 6. Loose logs: logs % 6.", "printf(\"Bundles: %d, loose: %d\\n\", logs / 6, logs % 6);" }, "bundles and loose logs",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int logs;\n    scanf(\"%d\", &logs);\n    printf(\"Bundles: %d, loose: %d\\n\", logs / 6, logs % 6);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int logs;\n    cin >> logs;\n    cout << \"Bundles: \" << logs / 6 << \", loose: \" << logs % 6 << endl;\n    return 0;\n}\n",
+    "Neat and tidy. Winter can come!" },
+  { 3, 1, 25, "Can I fill the order?",
+    "A customer orders some bundles. I know how many logs I have in stock. Can I fill the order? If not, how many logs am I short?",
+    "Input: bundles ordered, then logs in stock.\nOutput: Enough  or  Short by <n>",
+    { { "3 20", "Enough" },{ "4 20", "Short by 4" },{ "0 0", "Enough" },{ "10 59", "Short by 1" } },
+    { "Logs needed = bundles * 6. Compare that with the stock.", "if (need <= stock) print Enough, otherwise print Short by and need - stock." }, "compare the logs needed with the stock",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int bundles, stock;\n    scanf(\"%d %d\", &bundles, &stock);\n    int need = bundles * 6;\n    if (need <= stock) printf(\"Enough\\n\");\n    else printf(\"Short by %d\\n\", need - stock);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int bundles, stock;\n    cin >> bundles >> stock;\n    int need = bundles * 6;\n    if (need <= stock) cout << \"Enough\" << endl;\n    else cout << \"Short by \" << need - stock << endl;\n    return 0;\n}\n",
+    "Good to know before I promise anything!" },
+  { 3, 2, 40, "Sort the logs",
+    "Last job: I measure every log in cm. Line them up from shortest to longest for me, and tell me which one is the longest.",
+    "Input: a count k, then k lengths.\nOutput: line 1: the lengths, shortest to longest,\nseparated by spaces\nline 2: Longest: <length>",
+    { { "5\\n30 12 45 12 20", "12 12 20 30 45\nLongest: 45" },{ "1\\n7", "7\nLongest: 7" },{ "4\\n9 8 7 6", "6 7 8 9\nLongest: 9" },{ "6\\n50 40 40 10 30 20", "10 20 30 40 40 50\nLongest: 50" } },
+    { "Store the lengths in an array, e.g. int a[100]; and read k of them with a for loop.", "A simple sort: two nested loops, swapping a[j] and a[j+1] whenever they are in the wrong order (bubble sort). After sorting, the longest is the last one." }, "read k lengths, sort them, print",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int k, a[100];\n    scanf(\"%d\", &k);\n    for (int i = 0; i < k; i++) scanf(\"%d\", &a[i]);\n    for (int i = 0; i < k - 1; i++)\n        for (int j = 0; j < k - 1 - i; j++)\n            if (a[j] > a[j + 1]) { int t = a[j]; a[j] = a[j + 1]; a[j + 1] = t; }\n    for (int i = 0; i < k; i++) printf(i ? \" %d\" : \"%d\", a[i]);\n    printf(\"\\nLongest: %d\\n\", a[k - 1]);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int k;\n    cin >> k;\n    vector<int> a(k);\n    for (int i = 0; i < k; i++) cin >> a[i];\n    for (int i = 0; i < k - 1; i++)\n        for (int j = 0; j < k - 1 - i; j++)\n            if (a[j] > a[j + 1]) swap(a[j], a[j + 1]);\n    for (int i = 0; i < k; i++) cout << (i ? \" \" : \"\") << a[i];\n    cout << \"\\nLongest: \" << a[k - 1] << endl;\n    return 0;\n}\n",
+    "Sorted! You could stack a pile of logs for me any day." },
+  { 4, 0, 15, "Fahrenheit, please",
+    "Visitors from far away think in Fahrenheit. Turn my Celsius reading into Fahrenheit, to one decimal place. (F = C x 9 / 5 + 32)",
+    "Input: a temperature in Celsius\n(a whole number, may be negative).\nOutput: <f> F  (one decimal)",
+    { { "25", "77.0 F" },{ "0", "32.0 F" },{ "-40", "-40.0 F" },{ "100", "212.0 F" } },
+    { "Use a double so the maths isn't rounded: double f = c * 9.0 / 5 + 32;", "Print with one decimal place: printf(\"%.1f F\\n\", f); in C++ use fixed << setprecision(1)." }, "convert Celsius to Fahrenheit",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int c;\n    scanf(\"%d\", &c);\n    double f = c * 9.0 / 5 + 32;\n    printf(\"%.1f F\\n\", f);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int c;\n    cin >> c;\n    double f = c * 9.0 / 5 + 32;\n    cout << fixed << setprecision(1) << f << \" F\" << endl;\n    return 0;\n}\n",
+    "Now the tourists will know exactly how cold it is. Brrr!" },
+  { 4, 1, 25, "Frost warning",
+    "Each morning I put a sign outside: FROST at 0 degrees or below, COLD from 1 to 5, and MILD for anything above 5.",
+    "Input: a temperature in Celsius.\nOutput: <t>C: <WORD>",
+    { { "-3", "-3C: FROST" },{ "0", "0C: FROST" },{ "5", "5C: COLD" },{ "12", "12C: MILD" } },
+    { "Three outcomes means an if / else if / else chain. Check the coldest case first.", "if (t <= 0) FROST; else if (t <= 5) COLD; else MILD. Print the number, then C: and the word." }, "print the temperature and the warning",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int t;\n    scanf(\"%d\", &t);\n    const char *w;\n    if (t <= 0) w = \"FROST\";\n    else if (t <= 5) w = \"COLD\";\n    else w = \"MILD\";\n    printf(\"%dC: %s\\n\", t, w);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int t;\n    cin >> t;\n    string w;\n    if (t <= 0) w = \"FROST\";\n    else if (t <= 5) w = \"COLD\";\n    else w = \"MILD\";\n    cout << t << \"C: \" << w << endl;\n    return 0;\n}\n",
+    "The sign will go up at dawn. Wrap up warm!" },
+  { 4, 2, 40, "The week's weather",
+    "Here is a week of morning readings. I need the number of frost days (0 or below) and the coldest morning of the week.",
+    "Input: seven temperatures.\nOutput (2 lines):\nFrost days: <n>\nColdest: <t>",
+    { { "3 -2 0 5 -7 1 4", "Frost days: 3\nColdest: -7" },{ "10 11 12 13 14 15 16", "Frost days: 0\nColdest: 10" },{ "-1 -1 -1 -1 -1 -1 -1", "Frost days: 7\nColdest: -1" },{ "0 4 -5 -5 2 8 -1", "Frost days: 4\nColdest: -5" } },
+    { "Loop over the 7 readings. Keep a counter for frost days and a variable for the coldest so far.", "Start coldest with the first reading (or a huge number like 1000), then lower it whenever you see something smaller." }, "count frost days and find the coldest",
+    "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    int frost = 0, coldest = 1000;\n    for (int i = 0; i < 7; i++) {\n        int t;\n        scanf(\"%d\", &t);\n        if (t <= 0) frost++;\n        if (t < coldest) coldest = t;\n    }\n    printf(\"Frost days: %d\\n\", frost);\n    printf(\"Coldest: %d\\n\", coldest);\n    return 0;\n}\n",
+    "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    int frost = 0, coldest = 1000;\n    for (int i = 0; i < 7; i++) {\n        int t;\n        cin >> t;\n        if (t <= 0) frost++;\n        if (t < coldest) coldest = t;\n    }\n    cout << \"Frost days: \" << frost << endl;\n    cout << \"Coldest: \" << coldest << endl;\n    return 0;\n}\n",
+    "A full weather log, and all done by you. The valley thanks you!" },
+};
+
+static struct { unsigned char done[NJOBS], hints[NJOBS], bonus[NJPROJ]; int attempts[NJOBS]; int earned; } jb;     /* jobs.dat */
+static char jobCode[NJOBS][2][PCAP];                                                                          /* jobs_code.dat */
+static bool jobCodeDirty = false, jobCodeInit = false;
+static int jobIdx = 0, jobTab = 0;
+static float jobScroll = 0, jobSaveT = 0, jobsT = 0;
+
+static void SaveJobs(void) { FILE* f = fopen("jobs.dat", "wb"); if (f) { fwrite(&jb, sizeof jb, 1, f); fclose(f); } }
+static void LoadJobs(void)
+{
+    memset(&jb, 0, sizeof jb);
+    FILE* f = fopen("jobs.dat", "rb");
+    if (f) { if (fread(&jb, sizeof jb, 1, f) != 1) memset(&jb, 0, sizeof jb); fclose(f); }
+}
+static bool JobOpen(int i) { return JOBS[i].step == 0 || jb.done[i - 1]; }
+static int JobsDone(int v) { int n = 0; for (int s = 0; s < 3; s++) n += jb.done[v * 3 + s]; return n; }
+static int JobsDoneAll(void) { int n = 0; for (int i = 0; i < NJOBS; i++) n += jb.done[i]; return n; }
+static Look JobLook(int v) { Look L = LookFrom(JVILL[v].look); L.pack = -1; return L; }
+
+static void StartJobs(void) { screen = SCR_JOBS; }
+
+static void JobStarter(int i, int lg, char* out, int cap)
+{
+    if (lg == 0) snprintf(out, (size_t)cap, "#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    // TODO: %s\n\n    return 0;\n}\n", JOBS[i].todo);
+    else snprintf(out, (size_t)cap, "#include <iostream>\n#include <string>\n#include <vector>\n#include <iomanip>\nusing namespace std;\n\nint main() {\n    // TODO: %s\n\n    return 0;\n}\n", JOBS[i].todo);
+}
+static void JobLoad(void)
+{
+    char* c = jobCode[jobIdx][lang];
+    if (!c[0]) JobStarter(jobIdx, lang, c, PCAP);
+    int n = (int)strlen(c);
+    memcpy(labBuf, c, (size_t)n + 1); labLen = n; labCur = labAnc = 0; labSX = labSY = 0; labErrN = 0;
+    probRes = 0; probPass = 0; probFailIdx = -1; probPending = 0; probMsg[0] = 0; memset(probTest, 0, sizeof probTest);
+}
+static void JobSync(void)
+{
+    char* c = jobCode[jobIdx][lang];
+    if (strncmp(c, labBuf, PCAP - 1) != 0 || (int)strlen(c) != (labLen < PCAP - 1 ? labLen : PCAP - 1)) {
+        int n = labLen < PCAP - 1 ? labLen : PCAP - 1;
+        memcpy(c, labBuf, (size_t)n); c[n] = 0; jobCodeDirty = true;
+    }
+}
+static void SaveJobCode(void)
+{
+    if (!jobCodeDirty) return;
+    FILE* f = fopen("jobs_code.dat", "wb");
+    if (f) { fwrite(jobCode, sizeof jobCode, 1, f); fclose(f); jobCodeDirty = false; }
+}
+static void StartJob(int i)
+{
+    LabOwn(3);
+    if (!jobCodeInit) { jobCodeInit = true; FILE* f = fopen("jobs_code.dat", "rb"); if (f) { if (fread(jobCode, sizeof jobCode, 1, f) != 1) memset(jobCode, 0, sizeof jobCode); fclose(f); } }
+    jobIdx = i; jobTab = 0; jobScroll = 0;
+    JobLoad();
+    labFocus = 0; labPending = 0; labStatus = LAB_READY;
+    screen = SCR_JOB;
+}
+
+/* only < 0: run every test (a submission); otherwise just that one test (a trial run) */
+static void JobGrade(int only)
+{
+    const Job* P = &JOBS[jobIdx];
+    memset(probTest, 0, sizeof probTest); memset(probGot, 0, sizeof probGot);
+    probMsg[0] = 0; probPass = 0; probFailIdx = -1; labErrN = 0;
+    labLang = lang;
+    int first = only >= 0 ? only : 0, last = only >= 0 ? only : 3, kind = 1;
+    for (int t = first; t <= last; t++) {
+        snprintf(labInput, sizeof labInput, "%s", P->t[t].in); labInLen = (int)strlen(labInput);
+        labReuseExe = t > first;
+        LabRun();
+        labReuseExe = false;
+        if (labStatus == LAB_NO_COMPILER) { kind = 6; snprintf(probMsg, sizeof probMsg, "%s", labOut); break; }
+        if (labStatus == LAB_COMPILE_ERR) { kind = 3; snprintf(probMsg, sizeof probMsg, "%s", labOut); break; }
+        const char* o = labOut, * mk = strstr(labOut, "[Program output]\n");
+        if (mk) o = mk + 17;
+        snprintf(probGot[t], sizeof probGot[t], "%s", o);
+        bool ok = labStatus == LAB_OK && OutMatch(o, P->t[t].out);
+        probTest[t] = ok ? 1 : 2;
+        if (ok) probPass++;
+        else if (kind == 1) { kind = labStatus == LAB_TIMEOUT ? 5 : labStatus == LAB_RUNTIME_ERR ? 4 : 2; probFailIdx = t; }
+    }
+    probRes = (only >= 0 && kind == 1) ? 7 : kind;
+    labStatus = LAB_READY;
+    if (only < 0 && kind != 3 && kind != 6) { jb.attempts[jobIdx]++; SaveJobs(); }
+    if (only < 0 && kind == 1 && !jb.done[jobIdx]) {
+        int v = P->vill;
+        jb.done[jobIdx] = 1; jb.earned += P->pay; SaveJobs();
+        GainCredits(P->pay, TextFormat("%s paid you", JVILL[v].name));
+        if (JobsDone(v) == 3 && !jb.bonus[v]) {
+            jb.bonus[v] = 1; jb.earned += JOB_BONUS; SaveJobs();
+            GainCredits(JOB_BONUS, TextFormat("%s: project finished", JVILL[v].proj));
+            Notify(TextFormat("%s!", JVILL[v].bonus), GOOD);
+        }
+    }
+}
+
+static void JobLeft(Rectangle L, Color accent)
+{
+    const Job* P = &JOBS[jobIdx];
+    const JVill* V = &JVILL[P->vill];
+    const Color gold = { 255, 205, 90, 255 }, cream = { 231, 223, 201, 255 };
+    Panel(L, 0.02f, SURF, BORDER);
+    static const char* tn[3] = { "Request", "Hints", "Solution" };
+    for (int t = 0; t < 3; t++) {
+        Rectangle r = { L.x + 1 + t * (L.width - 2) / 3, L.y + 1, (L.width - 2) / 3, 38 };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+        if (hov) hand = true;
+        if (t == jobTab) { DrawRectangleRec(r, SURF2); DrawRectangle((int)r.x, (int)r.y + 36, (int)r.width, 3, accent); }
+        CenterTxt(fBold, tn[t], r.x + r.width / 2, r.y + 8, 16, t == jobTab ? TXT : DIM);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { jobTab = t; jobScroll = 0; }
+    }
+    Rectangle cv = { L.x + 18, L.y + 48, L.width - 36, L.height - 58 };
+    ScissorT((int)cv.x - 6, (int)cv.y, (int)cv.width + 12, (int)cv.height);
+    float y = cv.y + 4 - jobScroll, w = cv.width;
+    if (jobTab == 0) {
+        Rectangle pr = { cv.x, y, 96, 128 };
+        DrawRectangleRounded(pr, 0.12f, 8, CODEBG);
+        Look lk = JobLook(P->vill);
+        DrawPersonEx(pr.x + 48, pr.y + 118, 0, 2.0f, 0, &lk);
+        Txt(fBold, V->name, cv.x + 112, y + 2, 26, TXT);
+        Txt(fReg, V->role, cv.x + 112, y + 34, 15, DIM);
+        Txt(fBold, TextFormat("Job %d of 3  -  %s", P->step + 1, P->title), cv.x + 112, y + 62, 15, gold);
+        if (jb.done[jobIdx]) Pill("Done", cv.x + 112, y + 92, GOOD);
+        else Pill(TextFormat("Pays %d credits", P->pay), cv.x + 112, y + 92, gold);
+        y += 142;
+        float bh = (float)WrapH(fReg, P->story, w - 36, 17) + 28;
+        DrawTriangle((Vector2) { cv.x + 36, y - 12 }, (Vector2) { cv.x + 24, y + 2 }, (Vector2) { cv.x + 52, y + 2 }, SURF2);
+        DrawRectangleRounded((Rectangle) { cv.x, y, w, bh }, 0.08f, 8, SURF2);
+        Wrapped(fReg, P->story, cv.x + 18, y + 14, w - 36, 17, cream);
+        y += bh + 16;
+        Txt(fBold, "WHAT TO BUILD", cv.x, y, 12, DIM); y += 22;
+        y = ProbBox("", P->fmt, cv.x, y, w, 7);
+        for (int e = 0; e < 2; e++) {
+            char in[600]; ProbText(P->t[e].in, in, sizeof in);
+            Txt(fBold, TextFormat("EXAMPLE %d", e + 1), cv.x, y, 12, DIM); y += 22;
+            y = ProbBox("Input", in, cv.x, y, w, 6);
+            y = ProbBox("Output", P->t[e].out, cv.x, y, w, 6);
+        }
+        Wrapped(fReg, "Your program reads from standard input and prints the answer. Outputs must match exactly (trailing spaces and blank lines are ignored).", cv.x, y, w, 14, DIM);
+        y += 80;
+    }
+    else if (jobTab == 1) {
+        y = (float)Wrapped(fReg, "Stuck? Try the job first, then reveal hints one at a time. The second is more specific than the first.", cv.x, y, w, 15, DIM) + 10;
+        for (int h = 0; h < 2; h++) {
+            bool shown = h < jb.hints[jobIdx];
+            Rectangle c = { cv.x, y, w, shown ? (float)WrapH(fReg, P->hint[h], w - 32, 16) + 56 : 64 };
+            DrawRectangleRounded(c, 0.08f, 8, shown ? SURF2 : CODEBG);
+            Txt(fBold, TextFormat("Hint %d", h + 1), c.x + 16, c.y + 12, 15, shown ? accent : DIM);
+            if (shown) Wrapped(fReg, P->hint[h], c.x + 16, c.y + 40, w - 32, 16, (Color) { 239, 231, 209, 255 });
+            else if (h == jb.hints[jobIdx]) {
+                if (Button((Rectangle) { c.x + w - 136, c.y + 12, 120, 40 }, "Reveal", (Color) { 214, 140, 30, 255 }, 15)) { jb.hints[jobIdx]++; SaveJobs(); }
+            }
+            else Txt(fReg, "Reveal the previous hint first", c.x + w - 16 - TxtW(fReg, "Reveal the previous hint first", 13), c.y + 18, 13, DIM);
+            y += c.height + 12;
+        }
+    }
+    else {
+        bool open = jb.done[jobIdx] || jb.attempts[jobIdx] >= 3;
+        if (!open) {
+            y += 10;
+            DrawRectangleRounded((Rectangle) { cv.x, y, w, 150 }, 0.06f, 8, CODEBG);
+            CenterTxt(fBold, "Solution locked", cv.x + w / 2, y + 22, 22, TXT);
+            Wrapped(fReg, TextFormat("Finish the job, or submit at least 3 attempts, to see a worked solution.  Attempts so far: %d / 3", jb.attempts[jobIdx]), cv.x + 24, y + 62, w - 48, 15, DIM);
+            y += 160;
+        }
+        else {
+            y = (float)DrawCode(lang == 0 ? P->solC : P->solCpp, cv.x, y, w, 12.5f, lang == 0 ? "solution.c" : "solution.cpp") + 14;
+            Wrapped(fReg, "Compare this with your own code. Is yours shorter, clearer or handling more cases?", cv.x, y, w, 14, DIM);
+            y += 70;
+        }
+    }
+    EndScissorMode();
+    float total = y + jobScroll - cv.y, maxS = total - cv.height; if (maxS < 0) maxS = 0;
+    if (CheckCollisionPointRec(GetMousePosition(), L)) jobScroll -= GetMouseWheelMove() * 45;
+    if (jobScroll < 0) jobScroll = 0;
+    if (jobScroll > maxS) jobScroll = maxS;
+}
+
+static void JobResults(Rectangle R)
+{
+    const Job* P = &JOBS[jobIdx];
+    const JVill* V = &JVILL[P->vill];
+    Panel(R, 0.02f, SURF, BORDER);
+    float x = R.x + 18, y = R.y + 14, w = R.width - 36;
+    if (probPending) { CenterTxt(fBold, "Compiling and running your code...", R.x + R.width / 2, R.y + R.height / 2 - 14, 20, DIM); return; }
+    if (probRes == 0) {
+        Txt(fBold, "Test results", x, y, 18, TXT);
+        Wrapped(fReg, TextFormat("Write your program, press Run sample to try the first example, then Submit to check it against all of %s's tests. Read the error messages carefully - they are the fastest teacher.", V->name), x, y + 34, w, 15, DIM);
+        for (int t = 0; t < 4; t++) { DrawRectangleRounded((Rectangle) { x + t * 78.0f, R.y + R.height - 54, 70, 34 }, 0.3f, 8, CODEBG); CenterTxt(fReg, TextFormat("Test %d", t + 1), x + t * 78.0f + 35, R.y + R.height - 48, 14, DIM); }
+        return;
+    }
+    static const char* vn[8] = { "", "Job done!", "Not quite right", "Compile error", "Crashed", "Took too long", "No compiler found", "Sample matches" };
+    Color vc = probRes == 1 || probRes == 7 ? GOOD : probRes == 5 ? (Color) { 255, 184, 64, 255 } : BAD;
+    if (probOnly < 0 && probFailIdx >= 0 && (probRes == 2 || probRes == 4 || probRes == 5)) Txt(fBold, TextFormat("%s on test %d", vn[probRes], probFailIdx + 1), x, y - 2, 26, vc);
+    else Txt(fBold, vn[probRes], x, y - 2, 26, vc);
+    if (probRes <= 5 && probRes != 3) Txt(fBold, TextFormat("%d / %d tests passed", probPass, probOnly >= 0 ? 1 : 4), x + w - 190, y + 6, 16, DIM);
+    y += 40;
+    if (probRes == 3 || probRes == 6) {
+        char t[1400]; snprintf(t, sizeof t, "%s", probMsg);
+        const char* p = strstr(t, "error"); if (p) { while (p > t && p[-1] != '\n') p--; }
+        else p = t;
+        ProbBox("Compiler message", p, x, y, w, 7);
+        return;
+    }
+    if (probOnly < 0) {
+        for (int t = 0; t < 4; t++) {
+            Rectangle c = { x + t * 78.0f, y, 70, 30 };
+            DrawRectangleRounded(c, 0.3f, 8, probTest[t] == 1 ? Fade(GOOD, 0.2f) : probTest[t] == 2 ? Fade(BAD, 0.22f) : CODEBG);
+            Txt(fMed, TextFormat("Test %d", t + 1), c.x + 8, c.y + 5, 13, probTest[t] == 1 ? GOOD : probTest[t] == 2 ? BAD : DIM);
+        }
+        y += 42;
+    }
+    if (probRes == 1) {
+        Wrapped(fReg, TextFormat("%s: \"%s\"", V->name, P->thanks), x, y, w, 16, (Color) { 231, 223, 201, 255 });
+        Txt(fBold, TextFormat("Paid %d credits (once per job)", P->pay), x, R.y + R.height - 50, 16, (Color) { 255, 205, 90, 255 });
+        if (P->step < 2) { if (Button((Rectangle) { R.x + R.width - 220, R.y + R.height - 58, 200, 42 }, "Next job >", GOOD, 15)) StartJob(jobIdx + 1); }
+        else if (Button((Rectangle) { R.x + R.width - 240, R.y + R.height - 58, 220, 42 }, "Back to the board", GOOD, 15)) { SaveJobCode(); screen = SCR_JOBS; }
+        return;
+    }
+    if (probRes == 7) { Wrapped(fReg, "The first example matches. Press Submit to try every test, including the tricky ones.", x, y, w, 15, DIM); return; }
+    int t = probFailIdx >= 0 ? probFailIdx : 0;
+    char in[600]; ProbText(P->t[t].in, in, sizeof in);
+    float cw3 = (w - 20) / 3;
+    ProbBox("Input", in, x, y, cw3, 4);
+    ProbBox("Expected", P->t[t].out, x + cw3 + 10, y, cw3, 4);
+    ProbBox(probRes == 4 ? "Crashed" : probRes == 5 ? "Stopped" : "Your output", probGot[t][0] ? probGot[t] : "(nothing printed)", x + 2 * (cw3 + 10), y, cw3, 4);
+}
+
+static void DrawJob(Color accent)
+{
+    const Job* P = &JOBS[jobIdx];
+    float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
+    if (probPending == 2) { JobGrade(probOnly); probPending = 0; }
+    else if (probPending == 1) probPending = 2;
+    if (labPending) { labPending = 0; if (!probPending) { probOnly = 0; probPending = 1; } }      /* F5 / Ctrl+Enter = run sample */
+
+    labFocus = 0; LabEdit();
+    JobSync();
+    jobSaveT += dt; if (jobSaveT > 5) { jobSaveT = 0; SaveJobCode(); }
+
+    DrawRectangle(0, 0, W, 58, SURF); DrawLine(0, 58, W, 58, BORDER);
+    if (Button((Rectangle) { 12, 8, 130, 42 }, "< Job board", SURF2, 15)) { SaveJobCode(); screen = SCR_JOBS; return; }
+    const char* title = TextFormat("%s: %s", JVILL[P->vill].name, P->title);
+    TxtFit(fBold, title, 160, 14, 24, 440, TXT);
+    float px = 160 + fminf(TxtW(fBold, title, 24), 440) + 16;
+    if (jb.done[jobIdx]) Pill("Done", px, 15, GOOD); else Pill(TextFormat("Pays %d", P->pay), px, 15, (Color) { 255, 205, 90, 255 });
+    LangToggle(W - 12 - 150, 8);
+    DrawCreditsChip(W - 12 - 150 - 14, 9);
+
+    JobLeft((Rectangle) { 12, 68, 524, 680 }, accent);
+
+    float ex = 548;
+    DrawRectangle((int)ex, 68, 640, 40, SURF);
+    bool busy = probPending != 0;
+    if (Button((Rectangle) { ex + 6, 70, 130, 36 }, "Run sample", SURF2, 15) && !busy) { probOnly = 0; probPending = 1; }
+    if (Button((Rectangle) { ex + 144, 70, 120, 36 }, "Submit", GOOD, 16) && !busy) { probOnly = -1; probPending = 1; }
+    if (Button((Rectangle) { ex + 272, 70, 120, 36 }, "Reset code", SURF2, 14)) { jobCode[jobIdx][lang][0] = 0; JobLoad(); labEnsure = true; }
+    if (Button((Rectangle) { ex + 400, 70, 116, 36 }, "Step through", SURF2, 14) && !busy) StepOpen(labBuf, P->t[0].in, SCR_JOB);
+    Txt(fReg, "F5 = run sample", ex + 640 - 8 - TxtW(fReg, "F5 = run sample", 13), 80, 13, DIM);
+    labX = (int)ex; labY = 108; labW = 640; labH = 330;
+    float cw = MeasureTextEx(fCode, "M", LAB_FS, 0).x;
+    Rectangle ed = { (float)labX, (float)labY, (float)labW, (float)labH };
+    Vector2 m = GetMousePosition();
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, ed)) {
+        bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+        LabMove(LabPosFromMouse(m.x, m.y, cw), shift); labDrag = true; labWant = -1;
+    }
+    if (labDrag) { if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) { labCur = LabPosFromMouse(m.x, m.y, cw); labWant = -1; } else labDrag = false; }
+    if (labEnsure) { LabKeepCursorVisible(cw); labEnsure = false; }
+    if (CheckCollisionPointRec(m, ed)) ibeam = true;
+    LabDrawEditor(cw);
+
+    JobResults((Rectangle) { ex, 448, 640, 300 });
+}
+
+static void DrawLock(float cx, float cy, Color c)
+{
+    DrawRing((Vector2) { cx, cy - 2 }, 3.0f, 4.6f, 180, 360, 12, c);
+    DrawRectangleRounded((Rectangle) { cx - 5.5f, cy - 2, 11, 9 }, 0.25f, 4, c);
+}
+
+/* the notice board: one card per villager */
+static void DrawJobs(void)
+{
+    float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
+    jobsT += dt;
+    const Color gold = { 255, 205, 90, 255 };
+    Vector2 m = GetMousePosition();
+
+    TopBar();
+    Txt(fBold, "Valley Jobs", 40, 14, 32, TXT);
+    TxtFit(fReg, "The townsfolk need programs. Pick a job, build it, get paid.", 40, 46, 15, 520, DIM);
+    if (Button((Rectangle) { W - 140, 16, 110, 40 }, "Menu", SURF2, 17)) { GoMenu(); return; }
+    LangToggle(W - 140 - 166, 15);
+    DrawCreditsChip(W - 140 - 166 - 14, 15);
+
+    const float cw = 364, ch = 300, x0 = 40, y0 = 96, gap = 14;
+    for (int v = 0; v < NJPROJ; v++) {
+        const JVill* V = &JVILL[v];
+        Rectangle c = { x0 + (v % 3) * (cw + gap), y0 + (v / 3) * (ch + gap), cw, ch };
+        int dn = JobsDone(v);
+        Panel(c, 0.04f, SURF, dn == 3 ? GOOD : BORDER);
+        DrawWood(c.x + 1, c.y + 1, c.width - 2, 12, false, v + 11);
+        DrawCircle((int)(c.x + c.width / 2), (int)c.y + 8, 5.5f, (Color) { 204, 70, 62, 255 });
+        DrawCircle((int)(c.x + c.width / 2) - 1, (int)c.y + 7, 2, (Color) { 240, 150, 140, 255 });
+
+        Rectangle pr = { c.x + 14, c.y + 26, 92, 116 };
+        DrawRectangleRounded(pr, 0.12f, 8, CODEBG);
+        Look lk = JobLook(v);
+        DrawPersonEx(pr.x + 46, pr.y + 106, 0, 1.9f, 0, &lk);
+        Txt(fBold, V->name, c.x + 120, c.y + 28, 25, TXT);
+        Txt(fReg, V->role, c.x + 120, c.y + 58, 14, DIM);
+        TxtFit(fBold, V->proj, c.x + 120, c.y + 82, 16, c.width - 134, gold);
+        DrawRectangleRounded((Rectangle) { c.x + 120, c.y + 112, c.width - 134, 8 }, 0.5f, 6, SURF2);
+        if (dn > 0) DrawRectangleRounded((Rectangle) { c.x + 120, c.y + 112, (c.width - 134)* dn / 3.0f, 8 }, 0.5f, 6, GOOD);
+        Txt(fReg, TextFormat("%d of 3 jobs done", dn), c.x + 120, c.y + 126, 12, DIM);
+
+        for (int s = 0; s < 3; s++) {
+            int ji = v * 3 + s;
+            bool open = JobOpen(ji), done = jb.done[ji];
+            Rectangle r = { c.x + 12, c.y + 152 + s * 42.0f, c.width - 24, 38 };
+            bool hov = open && CheckCollisionPointRec(m, r);
+            if (hov) hand = true;
+            Panel(r, 0.25f, hov ? SURF2 : CODEBG, hov ? gold : CODEBG);
+            float cx = r.x + 20, cy = r.y + 19;
+            if (done) { DrawCircle((int)cx, (int)cy, 12, GOOD); DrawCheck(cx, cy, 11, WHITE); }
+            else if (open) { DrawRing((Vector2) { cx, cy }, 10, 12.5f, 0, 360, 24, gold); CenterTxt(fBold, TextFormat("%d", s + 1), cx, cy - 9, 15, gold); }
+            else { DrawCircle((int)cx, (int)cy, 12, SURF2); DrawLock(cx, cy, DIM); }
+            TxtFit(fMed, JOBS[ji].title, r.x + 42, r.y + 9, 16, r.width - 42 - 84, open ? TXT : DIM);
+            DrawCoin(r.x + r.width - 60, cy, 8);
+            Txt(fBold, TextFormat("%d", JOBS[ji].pay), r.x + r.width - 46, r.y + 10, 16, done ? DIM : gold);
+            if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { StartJob(ji); return; }
+        }
+        if (jb.bonus[v]) Txt(fBold, TextFormat("Project finished  -  bonus %d paid", JOB_BONUS), c.x + 14, c.y + 280, 12, GOOD);
+        else Txt(fReg, TextFormat("Finish all three for a %d credit bonus", JOB_BONUS), c.x + 14, c.y + 280, 12, DIM);
+    }
+
+    /* the ledger in the sixth slot */
+    Rectangle c = { x0 + 2 * (cw + gap), y0 + (ch + gap), cw, ch };
+    Panel(c, 0.04f, SURF, BORDER);
+    DrawWood(c.x + 1, c.y + 1, c.width - 2, 12, false, 29);
+    int done = JobsDoneAll(), projs = 0;
+    for (int v = 0; v < NJPROJ; v++) projs += JobsDone(v) == 3;
+    const char* rank = done == 0 ? "Newcomer" : done < 5 ? "Odd-jobber" : done < 10 ? "Handy coder" : done < NJOBS ? "Valley builder" : "Pride of the Valley";
+    Txt(fBold, "Your ledger", c.x + 20, c.y + 28, 24, TXT);
+    Txt(fReg, TextFormat("Town rank: %s", rank), c.x + 20, c.y + 60, 15, gold);
+    float pulse = 1.0f + 0.05f * sinf(jobsT * 3.0f);
+    DrawCoin(c.x + 52, c.y + 124, 26 * pulse);
+    Txt(fBold, TextFormat("%d", jb.earned), c.x + 96, c.y + 96, 40, gold);
+    Txt(fReg, "credits earned from jobs", c.x + 96, c.y + 142, 14, DIM);
+    Txt(fBold, TextFormat("Jobs done: %d / %d", done, NJOBS), c.x + 20, c.y + 180, 17, TXT);
+    Txt(fBold, TextFormat("Projects finished: %d / %d", projs, NJPROJ), c.x + 20, c.y + 206, 17, TXT);
+    Wrapped(fReg, "Each job unlocks the next. Every program is graded on its test cases, and you are paid the first time you pass.", c.x + 20, c.y + 240, c.width - 40, 14, DIM);
+}
+
+
 /* mood: MOOD_IDLE, MOOD_THINK, MOOD_CHEER or MOOD_SAD. `below` puts the speech bubble under the
    character instead of above (for characters near the top of the screen). */
 static void DrawCompanion(float cx, float footY, float sc, int mood, bool below)
@@ -10878,6 +13244,86 @@ static float bootT = 0;
 static float BootClamp(float x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
 static float BootEase(float x) { x = BootClamp(x); return x * x * (3 - 2 * x); }
 
+/* ---- boot scene: a night valley with aurora, mountains, pines, a cabin and snow ---- */
+static float BootRidge(float x, float seed, float a1, float a2)
+{
+    return a1 * sinf(x * 0.006f + seed) + a2 * sinf(x * 0.017f + seed * 2.3f) + 0.35f * a2 * sinf(x * 0.043f + seed * 4.1f);
+}
+
+static void DrawBootScene(float t, Color accent)
+{
+    DrawRectangleGradientV(0, 0, W, 330, (Color) { 5, 12, 26, 255 }, (Color) { 22, 46, 54, 255 });
+    DrawRectangleGradientV(0, 330, W, H - 330, (Color) { 22, 46, 54, 255 }, (Color) { 10, 24, 22, 255 });
+    for (int i = 0; i < 90; i++) {                                       /* stars */
+        float x = (float)((i * 197) % W), y = (float)((i * 89) % 300);
+        float tw = 0.35f + 0.65f * (0.5f + 0.5f * sinf(t * (1.2f + (i % 5) * 0.4f) + i));
+        DrawCircle((int)x, (int)y, (i % 7 == 0) ? 1.6f : 1.0f, Fade(WHITE, 0.55f * tw));
+    }
+    for (int b = 0; b < 3; b++) {                                        /* aurora ribbons */
+        Color c = b == 0 ? accent : b == 1 ? (Color) { 90, 220, 180, 255 } : (Color) { 140, 120, 255, 255 };
+        for (int x = 0; x < W; x += 10) {
+            float y = 120 + b * 28 + 38 * sinf(x * 0.007f + t * (0.35f + b * 0.12f) + b * 2) + 16 * sinf(x * 0.02f - t * 0.6f);
+            float hgt = 90 + 40 * sinf(x * 0.011f + t * 0.5f + b);
+            DrawRectangleGradientV(x, (int)(y - hgt), 10, (int)hgt, Fade(c, 0), Fade(c, 0.10f));
+            DrawRectangleGradientV(x, (int)y, 10, 44, Fade(c, 0.10f), Fade(c, 0));
+        }
+    }
+    DrawCircle(980, 110, 70, Fade((Color) { 230, 240, 255, 255 }, 0.05f));                       /* moon with halo */
+    DrawCircle(980, 110, 44, Fade((Color) { 230, 240, 255, 255 }, 0.08f));
+    DrawCircle(980, 110, 26, (Color) { 238, 244, 252, 255 });
+    DrawCircle(972, 104, 5, (Color) { 214, 224, 238, 255 });
+    DrawCircle(988, 118, 3.5f, (Color) { 214, 224, 238, 255 });
+    /* mountain layers */
+    static const float base[3] = { 430, 470, 520 };
+    static const Color mc[3] = { { 44, 74, 92, 255 }, { 30, 58, 70, 255 }, { 18, 40, 44, 255 } };
+    for (int L = 0; L < 3; L++) {
+        for (int x = 0; x < W; x += 6) {
+            float y = base[L] - 70 - L * 10 + BootRidge((float)x, L * 1.7f, 46.0f - L * 8, 22.0f - L * 4);
+            DrawRectangle(x, (int)y, 6, H - (int)y, mc[L]);
+            if (L < 2) DrawRectangle(x, (int)y, 6, 4, Fade(WHITE, 0.30f - L * 0.12f));      /* snow caps */
+        }
+    }
+    /* pines */
+    for (int i = 0; i < 26; i++) {
+        float x = (float)((i * 131 + 40) % (W + 60)) - 20, sc = 0.7f + (float)((i * 37) % 6) / 8.0f;
+        float y = 612 + (float)((i * 53) % 40);
+        Color tc = (Color){ (unsigned char)(10 + i % 4 * 2), (unsigned char)(30 + i % 5 * 3), (unsigned char)(28 + i % 3 * 3), 255 };
+        for (int k = 0; k < 4; k++) {
+            float w = (46 - k * 9) * sc, h = 30 * sc, yy = y - k * 20 * sc;
+            DrawTriangle((Vector2) { x, yy - h }, (Vector2) { x - w / 2, yy }, (Vector2) { x + w / 2, yy }, tc);
+            DrawTriangle((Vector2) { x, yy - h }, (Vector2) { x - w * 0.14f, yy - h * 0.62f }, (Vector2) { x + w * 0.14f, yy - h * 0.62f }, Fade(WHITE, 0.55f));
+        }
+        DrawRectangle((int)(x - 3 * sc), (int)y, (int)(6 * sc), (int)(10 * sc), (Color) { 36, 24, 18, 255 });
+    }
+    /* snowy ground */
+    DrawRectangleGradientV(0, 630, W, H - 630, (Color) { 196, 214, 226, 255 }, (Color) { 120, 148, 170, 255 });
+    for (int x = 0; x < W; x += 4) DrawRectangle(x, (int)(626 + 5 * sinf(x * 0.012f) + 3 * sinf(x * 0.04f)), 4, 10, (Color) { 214, 228, 238, 255 });
+    /* cabin with glowing windows and chimney smoke */
+    float cx = 150, cy = 640;
+    DrawRectangle((int)cx, (int)(cy - 58), 118, 58, (Color) { 92, 62, 40, 255 });
+    for (int k = 0; k < 6; k++) DrawRectangle((int)cx, (int)(cy - 58 + k * 10), 118, 2, Fade(BLACK, 0.25f));
+    DrawTriangle((Vector2) { cx - 14, cy - 56 }, (Vector2) { cx + 132, cy - 56 }, (Vector2) { cx + 59, cy - 108 }, (Color) { 58, 40, 30, 255 });
+    DrawTriangle((Vector2) { cx - 6, cy - 58 }, (Vector2) { cx + 124, cy - 58 }, (Vector2) { cx + 59, cy - 100 }, (Color) { 236, 244, 250, 255 });
+    DrawRectangle((int)cx + 86, (int)cy - 112, 14, 30, (Color) { 70, 60, 58, 255 });
+    float fl = 0.85f + 0.15f * sinf(t * 9) * sinf(t * 5.3f);
+    DrawRectangle((int)cx + 14, (int)cy - 40, 24, 22, (Color) { 255, (unsigned char)(196 * fl), 96, 255 });
+    DrawRectangle((int)cx + 78, (int)cy - 40, 24, 22, (Color) { 255, (unsigned char)(186 * fl), 90, 255 });
+    DrawCircle((int)cx + 26, (int)cy - 29, 38, Fade((Color) { 255, 190, 90, 255 }, 0.10f * fl));
+    DrawCircle((int)cx + 90, (int)cy - 29, 38, Fade((Color) { 255, 190, 90, 255 }, 0.10f * fl));
+    DrawRectangle((int)cx + 50, (int)cy - 30, 18, 30, (Color) { 52, 34, 24, 255 });
+    for (int k = 0; k < 6; k++) {
+        float u = fmodf(t * 0.5f + k / 6.0f, 1.0f);
+        DrawCircle((int)(cx + 93 + 16 * u + 5 * sinf(t + k)), (int)(cy - 116 - 70 * u), 4 + 8 * u, Fade((Color) { 210, 220, 230, 255 }, 0.30f * (1 - u)));
+    }
+    /* snowfall in two depths */
+    for (int i = 0; i < 90; i++) {
+        float sp = (i % 2) ? 38.0f : 70.0f, sz = (i % 2) ? 1.4f : 2.4f;
+        float x = fmodf((float)((i * 97) % W) + 14 * sinf(t * 0.8f + i), (float)W);
+        float y = fmodf(t * sp + (float)((i * 61) % H), (float)H);
+        DrawCircle((int)x, (int)y, sz, Fade(WHITE, (i % 2) ? 0.45f : 0.8f));
+    }
+}
+
 static void DrawBoot(void)
 {
     float dt = GetFrameTime();
@@ -10888,19 +13334,8 @@ static void DrawBoot(void)
     Color accent = ACCENTS[lang];
     float t = bootT;
 
-    DrawRectangleGradientV(0, 0, W, H, (Color) { 8, 22, 18, 255 }, (Color) { 30, 22, 16, 255 });
-
-    /* falling code */
-    static const char GL[] = "01{}();<>#*&=+[]/\\|";
-    for (int i = 0; i < 40; i++) {
-        float x = i * 30.0f + 8, sp = 36 + (float)((i * 37) % 60), off = (float)((i * 211) % 760);
-        float y = fmodf(t * sp + off, H + 140) - 100;
-        for (int k = 0; k < 7; k++) {
-            char g[2] = { GL[(i * 7 + k * 5 + (int)(t * 2 + k)) % (int)(sizeof GL - 1)], 0 };
-            DrawTextEx(fCode, g, (Vector2) { x, y - k * 18 }, 16, 0, Fade(accent, 0.30f * (1.0f - k / 7.0f)));
-        }
-    }
-    DrawRectangleGradientV(0, 0, W, 130, Fade((Color) { 8, 22, 18, 255 }, 0.9f), Fade((Color) { 8, 22, 18, 255 }, 0));
+    DrawBootScene(t, accent);
+    DrawRectangleGradientV(0, 0, W, 360, Fade((Color) { 4, 10, 18, 255 }, 0.55f), Fade((Color) { 4, 10, 18, 255 }, 0));     /* calm the sky behind the logo */
 
     /* logo: a badge, then the name popping in letter by letter */
     const char* name = "Coding Valley";
@@ -10956,8 +13391,8 @@ static void DrawBoot(void)
     const char* pct = TextFormat("%d%%", (int)(prog * 100));
     Txt(fCode, pct, bar.x + bar.width - TxtW(fCode, pct, 17), bar.y + 34, 17, accent);
 
-    CenterTxt(fReg, "Tip: click your character on any screen. It has advice.", W / 2.0f, H - 96, 15, Fade(DIM, BootEase((t - 0.8f) / 0.6f)));
-    CenterTxt(fReg, "Click or press any key to skip", W / 2.0f, H - 52, 13, Fade((Color) { 101, 106, 89, 255 }, 0.5f + 0.5f * sinf(t * 3)));
+    CenterTxt(fReg, "Tip: click your character on any screen. It has advice.", W / 2.0f, H - 96, 15, Fade((Color) { 30, 44, 56, 255 }, BootEase((t - 0.8f) / 0.6f)));
+    CenterTxt(fReg, "Click or press any key to skip", W / 2.0f, H - 52, 13, Fade((Color) { 40, 56, 70, 255 }, 0.55f + 0.45f * sinf(t * 3)));
 
     /* fade in from black at the start */
     if (t < 0.45f) DrawRectangle(0, 0, W, H, Fade(BLACK, 1.0f - t / 0.45f));
@@ -11162,9 +13597,43 @@ static void DrawWinterFarm(float boost)
 {
     float t = (float)GetTime();
     Color snow = { 238, 244, 247, 255 };
+    /* stars that twinkle */
+    for (int i = 0; i < 64; i++) {
+        unsigned h = WoodHash(i, 900);
+        float sx = (float)(h % (unsigned)W), sy = (float)((h >> 9) % (unsigned)(H * 0.5f));
+        float tw = 0.35f + 0.65f * (0.5f + 0.5f * sinf(t * (0.8f + (h % 5) * 0.35f) + i * 1.7f));
+        bool big = h % 7 == 0;
+        DrawCircle((int)sx, (int)sy, big ? 2.0f : 1.1f, Fade((Color) { 230, 240, 235, 255 }, 0.55f * tw));
+        if (big) { DrawRectangle((int)sx - 4, (int)sy, 9, 1, Fade(WHITE, 0.22f * tw)); DrawRectangle((int)sx, (int)sy - 4, 1, 9, Fade(WHITE, 0.22f * tw)); }
+    }
+    /* northern lights: three slow ribbons */
+    static const Color AUR[3] = { { 70, 230, 160, 255 }, { 90, 190, 240, 255 }, { 150, 120, 240, 255 } };
+    for (int k = 0; k < 3; k++)
+        for (int x = 0; x < W; x += 12) {
+            float y = 80 + k * 34 + 34 * sinf(x * 0.0055f + t * (0.22f + k * 0.05f) + k * 2.1f) + 18 * sinf(x * 0.013f - t * 0.31f);
+            float a = 0.085f * (0.6f + 0.4f * sinf(x * 0.01f + t * 0.4f + k));
+            DrawRectangleGradientV(x, (int)y - 46, 12, 46, Fade(AUR[k], 0), Fade(AUR[k], a));
+            DrawRectangleGradientV(x, (int)y, 12, 74, Fade(AUR[k], a), Fade(AUR[k], 0));
+        }
     /* moon with a soft halo */
-    for (int k = 0; k < 6; k++) DrawCircle(W - 150, 118, 92 - k * 13.0f, Fade((Color) { 200, 226, 220, 255 }, 0.020f));
-    DrawCircle(W - 150, 118, 30, Fade((Color) { 236, 242, 226, 255 }, 0.22f));
+    for (int k = 0; k < 8; k++) DrawCircle(W - 150, 118, 110 - k * 11.0f, Fade((Color) { 200, 226, 220, 255 }, 0.016f));
+    DrawCircle(W - 150, 118, 30, (Color) { 232, 238, 224, 255 });
+    DrawCircle(W - 158, 110, 6, Fade((Color) { 150, 165, 150, 255 }, 0.30f));
+    DrawCircle(W - 141, 126, 8, Fade((Color) { 150, 165, 150, 255 }, 0.24f));
+    DrawCircle(W - 142, 106, 4, Fade((Color) { 150, 165, 150, 255 }, 0.22f));
+    /* two ranges of snowy mountains, far then near */
+    for (int layer = 0; layer < 2; layer++) {
+        Color mc = layer ? (Color) { 14, 33, 32, 255 } : (Color) { 21, 45, 46, 255 };
+        float base = H - 175.0f + layer * 52.0f;
+        for (int i = -1; i * 260 < W + 260; i++) {
+            float px = i * 260.0f + (layer ? 130 : 0) + (float)(WoodHash(i, 70 + layer) % 80);
+            float ph = (layer ? 130.0f : 190.0f) + (float)(WoodHash(i, 71 + layer) % 70);
+            DrawTriangle((Vector2) { px, base - ph }, (Vector2) { px - 240, base + 60 }, (Vector2) { px + 240, base + 60 }, mc);
+            DrawTriangle((Vector2) { px, base - ph }, (Vector2) { px - ph * 0.30f, base - ph * 0.66f }, (Vector2) { px + ph * 0.30f, base - ph * 0.66f }, Fade(snow, layer ? 0.10f : 0.17f));
+            DrawTriangle((Vector2) { px, base - ph }, (Vector2) { px + ph * 0.30f, base - ph * 0.66f }, (Vector2) { px + ph * 0.52f, base - ph * 0.30f }, Fade(BLACK, 0.16f));
+        }
+        DrawRectangle(0, (int)base + 58, W, H, mc);
+    }
     /* two rows of pines, far then near */
     for (int row = 0; row < 2; row++) {
         float base = H - 38.0f - row * 20.0f, step = row ? 64.0f : 50.0f;
@@ -11200,12 +13669,22 @@ static void DrawWinterFarm(float boost)
     DrawTriangle((Vector2) { cx + 60, cy - 42 }, (Vector2) { cx + 8, cy - 8 }, (Vector2) { cx + 112, cy - 8 }, Fade(snow, 0.92f));
     float flick = 0.85f + 0.15f * sinf(t * 7.0f + sinf(t * 3.1f) * 2.0f);
     DrawRectangle((int)cx + 20, (int)cy + 24, 30, 28, Fade((Color) { 255, 200, 90, 255 }, 0.80f * flick));
+    for (int k = 0; k < 8; k++) DrawCircle((int)cx + 35, (int)cy + 38, 110 - k * 12.0f, Fade((Color) { 255, 190, 90, 255 }, 0.016f * flick));   /* window glow */
+    DrawEllipse((int)cx + 38, H - 26, 96, 15, Fade((Color) { 255, 200, 110, 255 }, 0.11f * flick));                                         /* light spilling on the snow */
     DrawRectangle((int)cx + 34, (int)cy + 24, 2, 28, (Color) { 70, 48, 30, 255 });
     DrawRectangle((int)cx + 20, (int)cy + 36, 30, 2, (Color) { 70, 48, 30, 255 });
     DrawRectangle((int)cx + 76, (int)cy + 26, 26, 48, (Color) { 62, 42, 28, 255 });         /* door */
     for (int k = 0; k < 6; k++) {                                                           /* chimney smoke */
         float u = fmodf(t * 0.35f + k / 6.0f, 1.0f);
         DrawCircle((int)(cx + 78 + sinf(t + k) * 6 + u * 26), (int)(cy - 46 - u * 70), 5 + u * 9, Fade((Color) { 210, 216, 214, 255 }, 0.18f * (1.0f - u)));
+    }
+    /* low mist, and sparkles on the snow */
+    DrawRectangleGradientV(0, H - 200, W, 180, Fade((Color) { 190, 220, 215, 255 }, 0), Fade((Color) { 190, 220, 215, 255 }, 0.07f));
+    for (int i = 0; i < 26; i++) {
+        unsigned h = WoodHash(i, 950);
+        float sx = (float)(h % (unsigned)W), sy = H - 22.0f + (float)((h >> 10) % 16);
+        float a = sinf(t * 1.6f + i * 2.3f);
+        if (a > 0.6f) { float k = (a - 0.6f) / 0.4f; DrawRectangle((int)sx - 3, (int)sy, 7, 1, Fade(WHITE, 0.7f * k)); DrawRectangle((int)sx, (int)sy - 3, 1, 7, Fade(WHITE, 0.7f * k)); }
     }
     /* snowflakes in three depths */
     for (int layer = 0; layer < 3; layer++) {
@@ -11215,6 +13694,7 @@ static void DrawWinterFarm(float boost)
             unsigned h = WoodHash(i, 500 + layer);
             float x = fmodf((float)(h % (unsigned)W) + sinf(t * 0.6f + i) * (10.0f + layer * 6.0f) + W, (float)W);
             float y = fmodf(t * sp + (float)((h >> 8) % (unsigned)(H + 40)), (float)H + 20.0f) - 10.0f;
+            if (layer == 2) DrawCircle((int)x, (int)y, rad * 2.3f, Fade(snow, 0.06f));
             DrawCircle((int)x, (int)y, rad, Fade(snow, 0.30f + layer * 0.16f));
         }
     }
@@ -11871,9 +14351,9 @@ static void DrawStudy(Color accent)
     }
 
     /* tabs */
-    static const char* tabs[5] = { "Review", "Speed rounds", "Skills", "Saved & notes", "Search" };
+    static const char* tabs[7] = { "Review", "Speed rounds", "Skills", "Saved & notes", "Search", "Skill map", "Glossary" };
     float tx = 40;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 7; i++) {
         float tw = TxtW(fBold, tabs[i], 18) + 36;
         Rectangle r = { tx, 88, tw, 42 };
         bool hov = CheckCollisionPointRec(mouse, r);
@@ -11881,7 +14361,7 @@ static void DrawStudy(Color accent)
         if (hubTab == i) { DrawRectangleRounded(r, 0.3f, 8, Fade(accent, 0.18f)); DrawRectangle((int)r.x + 12, (int)r.y + 38, (int)tw - 24, 3, accent); }
         else if (hov) DrawRectangleRounded(r, 0.3f, 8, SURF2);
         Txt(fBold, tabs[i], r.x + 18, r.y + 9, 18, hubTab == i ? TXT : DIM);
-        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { hubTab = i; hubScroll = 0; hubFocus = (i == 4); }
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { hubTab = i; hubScroll = 0; hubFocus = (i == 4); glFocus = (i == 6); }
         tx += tw + 8;
     }
     DrawLine(40, 132, W - 40, 132, BORDER);
@@ -12000,6 +14480,12 @@ static void DrawStudy(Color accent)
             CenterTxt(fReg, "Tap the star at the top of a lesson to save it, and use Notes to write in your own words.", W / 2.0f, top + 130, 16, DIM);
         }
     }
+    else if (hubTab == 5) {                                   /* ---------------- skill map ---------------- */
+        DrawSkillMap(top, accent);
+    }
+    else if (hubTab == 6) {                                   /* ---------------- glossary ---------------- */
+        DrawGlossary(top, accent);
+    }
     else {                                                    /* ---------------- search ---------------- */
         Rectangle box = { 40, top, W - 80, 52 };
         bool hov = CheckCollisionPointRec(mouse, box);
@@ -12039,6 +14525,2439 @@ static void DrawStudy(Color accent)
     }
 }
 
+/* ======================================================================
+   CODE STEPPER
+   A small interpreter for the everyday subset of C and C++: variables,
+   arrays, loops, functions, references, simple pointers, printf / scanf
+   and cout / cin. It runs your program once and records one step per
+   line, with every variable and the output so far, so you can play it
+   forwards and backwards. Structs, classes, malloc/new and containers
+   are not followed (the Memory Lab covers the heap).
+   ====================================================================== */
+#define ST_TOK 6000
+#define ST_VARS 96
+#define ST_STEPS 2500
+#define ST_SNAPN 40000
+#define ST_OUT 6000
+#define ST_ARR 6000
+#define ST_FUNCS 32
+#define ST_MAXDEPTH 48
+
+enum { TK_END, TK_NUM, TK_STR, TK_CHR, TK_ID, TK_OP };
+enum { SK_INT, SK_DBL, SK_STR, SK_CHAR, SK_BOOL, SK_PTR };
+enum { F_NONE, F_BREAK, F_CONT, F_RET, F_EXIT };
+
+typedef struct { unsigned char k, isf; short line; double num; char s[72]; } StTok;
+/* t: 0 int, 1 double, 2 text, 3 char, 4 pointer (i = variable, d = element or -1), 5 cout, 6 cin, 7 manipulator */
+typedef struct { int t, lv, lidx; unsigned char w; double d; long long i; char s[80]; } Val;
+typedef struct { char name[24]; unsigned char kind, wide, inited, pad; short an, cap; int ao, refv, refi; Val v; } StVar;
+typedef struct { char name[24]; int retKind, retVoid, retWide, nparam, body, line; char pname[8][24]; unsigned char pkind[8], pwide[8], pref[8], pvec[8]; } StFunc;
+typedef struct { short line, depth; int v0, nv, outLen; char note[84]; char chain[64]; } StStep;
+typedef struct { char name[24]; char val[36]; unsigned char flags; } StSnapV;
+typedef struct { int kind, wide, isVoid, isConst, isStatic, isFloat, isVec; } StTy;
+#define ISARR(v) ((v)->an > 0 || (v)->pad)
+
+static StTok stTok[ST_TOK];
+static int stNTok, stP;
+static char stMacN[16][20];
+static double stMacV[16];
+static int stNMac;
+static StVar stVar[ST_VARS];
+static int stNVar, stBase, stGlobN;
+static double stArr[ST_ARR];
+static int stArrN;
+static StFunc stFunc[ST_FUNCS];
+static int stNFunc, stCallFn[ST_MAXDEPTH + 2], stDepth;
+static StStep stSteps[ST_STEPS];
+static StSnapV stSnap[ST_SNAPN];
+static int stNStep, stNSnap;
+static char stOutBuf[ST_OUT];
+static int stOutLen;
+static bool stFail, stTrunc;
+static char stErr[200], stNote[84];
+static int stErrLine, stFlow, stFixed, stPrec = 6, stInPos, stOps, stMainFn;
+static unsigned stRand = 1;
+static Val stRet;
+static const char* stIn = "";
+
+static Val StAssign(bool run);
+static Val StTernary(bool run);
+static Val StComma(bool run);
+static void StExec(bool run);
+static void StDecl(bool run);
+
+static bool StOp(const char* s) { return stTok[stP].k == TK_OP && !strcmp(stTok[stP].s, s); }
+static bool StId(const char* s) { return stTok[stP].k == TK_ID && !strcmp(stTok[stP].s, s); }
+static bool StEat(const char* s) { if (StOp(s)) { stP++; return true; } return false; }
+static void StFail(const char* msg)
+{
+    if (stFail) return;
+    stFail = true;
+    snprintf(stErr, sizeof stErr, "%s", msg);
+    stErrLine = stTok[stP].line;
+}
+static void StFailF(const char* fmt, int a, int b)
+{
+    char m[200];
+    snprintf(m, sizeof m, fmt, a, b);
+    StFail(m);
+}
+static void StExpect(const char* s)
+{
+    if (!StEat(s)) { char m[100]; snprintf(m, sizeof m, "Expected '%s' here (check for a missing ; ) or }).", s); StFail(m); }
+}
+
+static Val VZero(void) { Val v; memset(&v, 0, sizeof v); v.lv = -1; v.lidx = -1; return v; }
+static Val VInt(long long i) { Val v = VZero(); v.t = 0; v.i = i; return v; }
+static Val VDbl(double d) { Val v = VZero(); v.t = 1; v.d = d; return v; }
+static Val VStr(const char* s) { Val v = VZero(); v.t = 2; snprintf(v.s, sizeof v.s, "%s", s); return v; }
+static long long VI(Val v) { return v.t == 1 ? (long long)v.d : v.i; }
+static double VD(Val v) { return v.t == 1 ? v.d : (double)v.i; }
+static bool VT(Val v) { return v.t == 1 ? v.d != 0 : v.t == 2 ? v.s[0] != 0 : v.t == 4 ? v.i >= 0 : v.i != 0; }
+
+/* ---------------- lexer ---------------- */
+static void StAddTok(int k, int line, double num, int isf, const char* s)
+{
+    if (stNTok >= ST_TOK - 1) return;
+    StTok* t = &stTok[stNTok++];
+    t->k = (unsigned char)k; t->isf = (unsigned char)isf; t->line = (short)line; t->num = num;
+    snprintf(t->s, sizeof t->s, "%s", s ? s : "");
+}
+
+static void StLex(const char* src)
+{
+    static const char* ops3[] = { "<<=", ">>=", NULL };
+    static const char* ops2[] = { "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "==", "!=", "<=", ">=", "&&", "||", "<<", ">>", "->", "::", NULL };
+    stNTok = 0; stNMac = 0;
+    int line = 1;
+    const char* p = src;
+    while (*p) {
+        char c = *p;
+        if (c == '\n') { line++; p++; continue; }
+        if (c == ' ' || c == '\t' || c == '\r') { p++; continue; }
+        if (c == '/' && p[1] == '/') { while (*p && *p != '\n') p++; continue; }
+        if (c == '/' && p[1] == '*') { p += 2; while (*p && !(p[0] == '*' && p[1] == '/')) { if (*p == '\n') line++; p++; } if (*p) p += 2; continue; }
+        if (c == '#') {
+            const char* q = p + 1;
+            while (*q == ' ' || *q == '\t') q++;
+            if (!strncmp(q, "define", 6) && stNMac < 16) {
+                q += 6;
+                while (*q == ' ' || *q == '\t') q++;
+                char nm[20]; int n = 0;
+                while ((isalnum((unsigned char)*q) || *q == '_') && n < 19) nm[n++] = *q++;
+                nm[n] = 0;
+                if (*q != '(') {
+                    while (*q == ' ' || *q == '\t') q++;
+                    if (isdigit((unsigned char)*q) || *q == '-' || *q == '.') { snprintf(stMacN[stNMac], 20, "%s", nm); stMacV[stNMac] = strtod(q, NULL); stNMac++; }
+                }
+            }
+            while (*p && *p != '\n') p++;
+            continue;
+        }
+        if (isdigit((unsigned char)c) || (c == '.' && isdigit((unsigned char)p[1]))) {
+            char* e = NULL;
+            double v = strtod(p, &e);
+            int isf = 0;
+            bool hex = (c == '0' && (p[1] == 'x' || p[1] == 'X'));
+            if (!hex) for (const char* z = p; z < e; z++) if (*z == '.' || *z == 'e' || *z == 'E') isf = 1;
+            p = e;
+            while (*p == 'u' || *p == 'U' || *p == 'l' || *p == 'L' || *p == 'f' || *p == 'F') { if ((*p == 'f' || *p == 'F') && !hex) isf = 1; p++; }
+            StAddTok(TK_NUM, line, v, isf, "");
+            continue;
+        }
+        if (isalpha((unsigned char)c) || c == '_') {
+            char id[72]; int n = 0;
+            while ((isalnum((unsigned char)*p) || *p == '_') && n < 70) id[n++] = *p++;
+            id[n] = 0;
+            if (!strcmp(id, "std") && p[0] == ':' && p[1] == ':') { p += 2; continue; }
+            if (!strcmp(id, "using")) { while (*p && *p != ';') p++; if (*p) p++; continue; }
+            StAddTok(TK_ID, line, 0, 0, id);
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            char buf[72]; int n = 0; char q = c; p++;
+            while (*p && *p != q && *p != '\n') {
+                char ch = *p++;
+                if (ch == '\\' && *p) {
+                    char e = *p++;
+                    ch = e == 'n' ? '\n' : e == 't' ? '\t' : e == 'r' ? '\r' : e == '0' ? 0 : e == 'a' ? 7 : e;
+                }
+                if (n < 70) buf[n++] = ch;
+            }
+            if (*p == q) p++;
+            buf[n] = 0;
+            if (q == '"') StAddTok(TK_STR, line, 0, 0, buf);
+            else StAddTok(TK_CHR, line, (double)(unsigned char)(n ? buf[0] : 0), 0, "");
+            continue;
+        }
+        {
+            char op[4] = { c, 0, 0, 0 };
+            for (int i = 0; ops3[i]; i++) if (!strncmp(p, ops3[i], 3)) { memcpy(op, p, 3); op[3] = 0; break; }
+            if (!op[1]) for (int i = 0; ops2[i]; i++) if (!strncmp(p, ops2[i], 2)) { memcpy(op, p, 2); op[2] = 0; break; }
+            p += strlen(op);
+            StAddTok(TK_OP, line, 0, 0, op);
+        }
+    }
+    StAddTok(TK_END, line, 0, 0, "");
+}
+
+/* ---------------- types and variables ---------------- */
+static bool StIsTypeWord(const char* s)
+{
+    static const char* w[] = { "int", "long", "short", "unsigned", "signed", "char", "float", "double", "bool", "void", "size_t", "string", "auto", "const", "static",
+        "_Bool", "int8_t", "uint8_t", "int16_t", "uint16_t", "int32_t", "uint32_t", "int64_t", "uint64_t", NULL };
+    for (int i = 0; w[i]; i++) if (!strcmp(s, w[i])) return true;
+    return false;
+}
+static bool StIsContainer(int p)
+{
+    return stTok[p].k == TK_ID && (!strcmp(stTok[p].s, "vector") || !strcmp(stTok[p].s, "stack") || !strcmp(stTok[p].s, "queue"))
+        && stTok[p + 1].k == TK_OP && !strcmp(stTok[p + 1].s, "<");
+}
+static bool StAtType(void) { return stTok[stP].k == TK_ID && (StIsTypeWord(stTok[stP].s) || StIsContainer(stP)); }
+
+static StTy StParseType(void)
+{
+    StTy t; memset(&t, 0, sizeof t);
+    t.kind = SK_INT;
+    while (StAtType()) {
+        const char* s = stTok[stP].s;
+        if (StIsContainer(stP)) {
+            t.isVec = !strcmp(s, "vector") ? 1 : !strcmp(s, "stack") ? 2 : 3;
+            stP += 2;
+            if (StIsContainer(stP)) { StFail("Nested containers (vector of vectors) aren't supported by the stepper yet."); return t; }
+            StTy in = StParseType();
+            t.kind = in.kind < 0 ? SK_INT : in.kind; t.wide = in.wide; t.isFloat = in.isFloat;
+            if (t.kind == SK_STR) { StFail("Containers of strings aren't supported by the stepper yet (numbers and chars work)."); return t; }
+            StExpect(">");
+            continue;
+        }
+        if (!strcmp(s, "double")) t.kind = SK_DBL;
+        else if (!strcmp(s, "float")) { t.kind = SK_DBL; t.isFloat = 1; }
+        else if (!strcmp(s, "char") || !strcmp(s, "int8_t") || !strcmp(s, "uint8_t")) t.kind = SK_CHAR;
+        else if (!strcmp(s, "bool") || !strcmp(s, "_Bool")) t.kind = SK_BOOL;
+        else if (!strcmp(s, "string")) t.kind = SK_STR;
+        else if (!strcmp(s, "void")) t.isVoid = 1;
+        else if (!strcmp(s, "auto")) t.kind = -1;
+        else if (!strcmp(s, "const")) t.isConst = 1;
+        else if (!strcmp(s, "static")) t.isStatic = 1;
+        else if (!strcmp(s, "long") || !strcmp(s, "size_t") || !strcmp(s, "int64_t") || !strcmp(s, "uint64_t")) t.wide = 1;
+        stP++;
+    }
+    return t;
+}
+
+static int StFind(const char* nm)
+{
+    for (int i = stNVar - 1; i >= stBase; i--) if (!strcmp(stVar[i].name, nm)) return i;
+    for (int i = stGlobN - 1; i >= 0; i--) if (!strcmp(stVar[i].name, nm)) return i;
+    return -1;
+}
+static int StFindFunc(const char* nm)
+{
+    for (int i = 0; i < stNFunc; i++) if (!strcmp(stFunc[i].name, nm)) return i;
+    return -1;
+}
+
+static int StNewVar(const char* name, int kind, int wide, int an)
+{
+    if (stNVar >= ST_VARS) { StFail("Too many variables for the stepper (limit 96)."); return -1; }
+    StVar* v = &stVar[stNVar];
+    memset(v, 0, sizeof * v);
+    snprintf(v->name, sizeof v->name, "%s", name);
+    v->kind = (unsigned char)kind; v->wide = (unsigned char)wide; v->refv = -1; v->refi = -1;
+    v->v = VZero();
+    v->v.t = kind == SK_DBL ? 1 : kind == SK_STR ? 2 : kind == SK_CHAR ? 3 : kind == SK_PTR ? 4 : 0;
+    v->v.w = (unsigned char)wide;
+    if (kind == SK_PTR) { v->v.i = -1; v->v.d = -1; }
+    if (an > 0) {
+        if (stArrN + an > ST_ARR) { StFail("That array is too big for the stepper."); return -1; }
+        v->an = (short)an; v->ao = stArrN;
+        for (int i = 0; i < an; i++) stArr[stArrN + i] = 0;
+        stArrN += an;
+    }
+    return stNVar++;
+}
+
+static void StResolve(int* vi, int* idx)
+{
+    int guard = 0;
+    while (*vi >= 0 && *vi < stNVar && stVar[*vi].refv >= 0 && guard++ < 8) {
+        if (*idx < 0) *idx = stVar[*vi].refi;
+        *vi = stVar[*vi].refv;
+    }
+}
+
+static Val StRead(int vi, int idx)
+{
+    Val z = VZero();
+    if (vi < 0 || vi >= stNVar) { StFail("Internal error: bad variable."); return z; }
+    StResolve(&vi, &idx);
+    StVar* v = &stVar[vi];
+    z.lv = vi; z.lidx = idx;
+    if (idx >= 0) {
+        if (ISARR(v)) {
+            if (idx >= v->an) { StFailF("Index %d is outside the array (it has %d elements, so valid indexes are 0 to size-1). In C this is undefined behaviour.", idx, v->an); return z; }
+            double d = stArr[v->ao + idx];
+            if (v->kind == SK_DBL) { z.t = 1; z.d = d; }
+            else { z.t = v->kind == SK_CHAR ? 3 : 0; z.i = (long long)d; z.w = v->wide; }
+            return z;
+        }
+        if (v->kind == SK_STR) {
+            int n = (int)strlen(v->v.s);
+            if (idx > n) { StFailF("Index %d is past the end of the text (length %d).", idx, n); return z; }
+            z.t = 3; z.i = (unsigned char)v->v.s[idx];
+            return z;
+        }
+        StFail("This value can't be indexed.");
+        return z;
+    }
+    Val r = v->v;
+    r.lv = vi; r.lidx = -1; r.w = v->wide;
+    return r;
+}
+
+static void StText(Val v, char* out, int n)
+{
+    if (v.t == 1) {
+        snprintf(out, (size_t)n, "%g", v.d);
+        if (!strpbrk(out, ".en")) { size_t l = strlen(out); if ((int)l + 2 < n) strcat(out, ".0"); }
+    }
+    else if (v.t == 2) snprintf(out, (size_t)n, "\"%s\"", v.s);
+    else if (v.t == 3) snprintf(out, (size_t)n, "'%c'", v.i >= 32 && v.i < 127 ? (char)v.i : '?');
+    else if (v.t == 4) snprintf(out, (size_t)n, v.i < 0 ? "NULL" : "address");
+    else snprintf(out, (size_t)n, "%lld", v.i);
+}
+
+static void StNoteAssign(int vi, int idx, Val val)
+{
+    char t[40];
+    StText(val, t, sizeof t);
+    if (idx >= 0) snprintf(stNote, sizeof stNote, "%s[%d] = %s", stVar[vi].name, idx, t);
+    else if (stVar[vi].kind == SK_PTR && val.t == 4 && val.i >= 0 && val.i < stNVar) snprintf(stNote, sizeof stNote, "%s now points at %s", stVar[vi].name, stVar[val.i].name);
+    else snprintf(stNote, sizeof stNote, "%s = %s", stVar[vi].name, t);
+}
+
+static void StWrite(int vi, int idx, Val val)
+{
+    if (vi < 0 || vi >= stNVar) { StFail("That can't be assigned to."); return; }
+    StResolve(&vi, &idx);
+    StVar* v = &stVar[vi];
+    if (idx >= 0) {
+        if (ISARR(v)) {
+            if (idx >= v->an) { StFailF("Index %d is outside the array (it has %d elements). Writing there would corrupt other memory.", idx, v->an); return; }
+            if (val.t == 2 || val.t == 4) { StFail("Can't store that in a number array."); return; }
+            double d = VD(val);
+            if (v->kind == SK_INT) d = v->wide ? (double)(long long)d : (double)(int)(long long)d;
+            stArr[v->ao + idx] = d;
+        }
+        else if (v->kind == SK_STR) {
+            int n = (int)strlen(v->v.s);
+            if (idx > n || idx >= 79) { StFailF("Index %d is past the end of the text (length %d).", idx, n); return; }
+            if (v->cap > 0 && idx >= v->cap - 1) { StFailF("Buffer overflow: index %d doesn't fit in a char array of size %d.", idx, v->cap); return; }
+            if (idx == n) v->v.s[idx + 1] = 0;
+            v->v.s[idx] = (char)VI(val);
+        }
+        else StFail("This value can't be assigned to by index.");
+        StNoteAssign(vi, idx, val);
+        return;
+    }
+    Val* dst = &v->v;
+    switch (v->kind) {
+    case SK_INT:
+        if (val.t == 2 || val.t == 4) { StFail("Can't store text or an address in an int."); return; }
+        dst->t = 0; dst->i = VI(val);
+        if (!v->wide) dst->i = (long long)(int)dst->i;
+        break;
+    case SK_BOOL:
+        if (val.t == 2) { StFail("Can't store text in a bool."); return; }
+        dst->t = 0; dst->i = VT(val) ? 1 : 0;
+        break;
+    case SK_CHAR:
+        if (val.t == 2 || val.t == 4) { StFail("Can't store text in a char (use '' for one character)."); return; }
+        dst->t = 3; dst->i = (long long)(signed char)VI(val);
+        break;
+    case SK_DBL:
+        if (val.t == 2 || val.t == 4) { StFail("Can't store text in a double."); return; }
+        dst->t = 1; dst->d = VD(val);
+        break;
+    case SK_STR:
+        if (val.t == 3) { dst->s[0] = (char)val.i; dst->s[1] = 0; }
+        else if (val.t == 2) {
+            if (v->cap > 0 && (int)strlen(val.s) >= v->cap) { StFailF("Buffer overflow: that text needs %d bytes (with the '\\0') but the char array only has %d.", (int)strlen(val.s) + 1, v->cap); return; }
+            snprintf(dst->s, sizeof dst->s, "%s", val.s);
+        }
+        else { StFail("Expected text here."); return; }
+        dst->t = 2;
+        break;
+    case SK_PTR:
+        if (val.t == 4) { *dst = val; dst->lv = dst->lidx = -1; }
+        else if (VI(val) == 0) { dst->t = 4; dst->i = -1; dst->d = -1; }
+        else { StFail("Can't store a plain number in a pointer."); return; }
+        break;
+    }
+    dst->lv = dst->lidx = -1;
+    dst->w = v->wide;
+    v->inited = 1;
+    StNoteAssign(vi, -1, *dst);
+}
+
+/* ---------------- output and input ---------------- */
+static void StOut(const char* s)
+{
+    int n = (int)strlen(s);
+    if (stOutLen + n >= ST_OUT - 1) n = ST_OUT - 1 - stOutLen;
+    if (n > 0) { memcpy(stOutBuf + stOutLen, s, (size_t)n); stOutLen += n; stOutBuf[stOutLen] = 0; }
+}
+
+static void StStreamOut(Val b)
+{
+    char tmp[100];
+    if (b.t == 7) return;
+    if (b.t == 0) snprintf(tmp, sizeof tmp, "%lld", b.i);
+    else if (b.t == 1) { if (stFixed) snprintf(tmp, sizeof tmp, "%.*f", stPrec, b.d); else snprintf(tmp, sizeof tmp, "%.*g", stPrec > 0 ? stPrec : 1, b.d); }
+    else if (b.t == 2) snprintf(tmp, sizeof tmp, "%s", b.s);
+    else if (b.t == 3) snprintf(tmp, sizeof tmp, "%c", (char)b.i);
+    else snprintf(tmp, sizeof tmp, "0x%llx", 0x7ffd1000ULL + (unsigned long long)(b.i < 0 ? 0 : b.i * 16));
+    StOut(tmp);
+}
+
+static void StSkipWs(void) { while (stIn[stInPos] && isspace((unsigned char)stIn[stInPos])) stInPos++; }
+static bool StWord(char* w, int n)
+{
+    StSkipWs();
+    if (!stIn[stInPos]) return false;
+    int k = 0;
+    while (stIn[stInPos] && !isspace((unsigned char)stIn[stInPos])) { if (k < n - 1) w[k++] = stIn[stInPos]; stInPos++; }
+    w[k] = 0;
+    return true;
+}
+
+static void StStoreWord(int vi, int idx, const char* w)
+{
+    StResolve(&vi, &idx);
+    if (vi < 0) return;
+    int kind = stVar[vi].kind;
+    if (idx >= 0 && stVar[vi].an > 0) kind = stVar[vi].kind;
+    if (kind == SK_STR && idx < 0) StWrite(vi, idx, VStr(w));
+    else if (kind == SK_DBL) StWrite(vi, idx, VDbl(strtod(w, NULL)));
+    else if (kind == SK_CHAR) StWrite(vi, idx, VInt((unsigned char)w[0]));
+    else StWrite(vi, idx, VInt(strtoll(w, NULL, 10)));
+}
+
+static void StStreamIn(Val dst)
+{
+    if (dst.lv < 0) { StFail("cin >> needs a variable on the right."); return; }
+    char w[80];
+    int vi = dst.lv, idx = dst.lidx;
+    StResolve(&vi, &idx);
+    if (vi >= 0 && stVar[vi].kind == SK_CHAR && idx < 0) {
+        StSkipWs();
+        if (!stIn[stInPos]) { StFail("The program tried to read input, but there was none left. Add more in the Input box."); return; }
+        StWrite(vi, idx, VInt((unsigned char)stIn[stInPos++]));
+        return;
+    }
+    if (!StWord(w, sizeof w)) { StFail("The program tried to read input, but there was none left. Add more in the Input box."); return; }
+    StStoreWord(dst.lv, dst.lidx, w);
+}
+
+static void StPrintf(const char* f, Val* a, int na)
+{
+    char piece[140];
+    int ai = 0;
+    for (const char* p = f; *p && !stFail; p++) {
+        if (*p != '%') { char c[2] = { *p, 0 }; StOut(c); continue; }
+        if (p[1] == '%') { StOut("%"); p++; continue; }
+        char spec[28]; int sl = 0;
+        spec[sl++] = '%'; p++;
+        while (*p && strchr("-+ 0#", *p) && sl < 8) spec[sl++] = *p++;
+        while ((isdigit((unsigned char)*p) || *p == '.') && sl < 14) spec[sl++] = *p++;
+        while (*p == 'l' || *p == 'h' || *p == 'z' || *p == 'j') p++;
+        char cv = *p;
+        if (!cv) break;
+        Val v = ai < na ? a[ai] : VZero();
+        if (ai >= na && cv != '%') { StFail("printf has more % placeholders than values."); return; }
+        ai++;
+        switch (cv) {
+        case 'd': case 'i': spec[sl] = 0; strcat(spec, "lld"); snprintf(piece, sizeof piece, spec, (long long)VI(v)); break;
+        case 'u': spec[sl] = 0; strcat(spec, "llu"); snprintf(piece, sizeof piece, spec, (unsigned long long)VI(v)); break;
+        case 'x': case 'X': case 'o': spec[sl] = 0; strcat(spec, "ll"); { size_t l = strlen(spec); spec[l] = cv; spec[l + 1] = 0; } snprintf(piece, sizeof piece, spec, (unsigned long long)VI(v)); break;
+        case 'c': spec[sl] = 0; strcat(spec, "c"); snprintf(piece, sizeof piece, spec, (int)VI(v)); break;
+        case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': spec[sl] = 0; { size_t l = strlen(spec); spec[l] = cv; spec[l + 1] = 0; } snprintf(piece, sizeof piece, spec, VD(v)); break;
+        case 's': spec[sl] = 0; strcat(spec, "s"); snprintf(piece, sizeof piece, spec, v.t == 2 ? v.s : ""); break;
+        case 'p': snprintf(piece, sizeof piece, "0x7ffd1000"); break;
+        default: snprintf(piece, sizeof piece, "?"); break;
+        }
+        StOut(piece);
+    }
+}
+
+static Val StScanf(const char* f, Val* a, int na)
+{
+    int ai = 0, got = 0;
+    for (const char* p = f; *p && !stFail; p++) {
+        if (isspace((unsigned char)*p)) { StSkipWs(); continue; }
+        if (*p != '%') { StSkipWs(); if (stIn[stInPos] == *p) stInPos++; else break; continue; }
+        p++;
+        int width = 0;
+        while (isdigit((unsigned char)*p)) width = width * 10 + (*p++ - '0');
+        while (*p == 'l' || *p == 'h' || *p == 'z') p++;
+        char cv = *p;
+        if (!cv) break;
+        if (ai >= na) { StFail("scanf has more % placeholders than variables."); return VInt(got); }
+        Val d = a[ai++];
+        int vi = d.t == 4 ? (int)d.i : d.lv, idx = d.t == 4 ? (d.d < 0 ? -1 : (int)d.d) : d.lidx;
+        if (vi < 0) { StFail("scanf needs &variable here (an address)."); return VInt(got); }
+        if (cv == 'c') {
+            if (!stIn[stInPos]) { if (!got) return VInt(-1); break; }
+            StWrite(vi, idx, VInt((unsigned char)stIn[stInPos++])); got++;
+            continue;
+        }
+        char w[80];
+        if (!StWord(w, sizeof w)) { if (!got) { StFail("The program tried to read input, but there was none left. Add more in the Input box."); return VInt(-1); } break; }
+        if (width > 0 && width < (int)strlen(w)) { stInPos -= (int)strlen(w) - width; w[width] = 0; }
+        if (cv == 's') { StResolve(&vi, &idx); StWrite(vi, idx, VStr(w)); }
+        else if (cv == 'f' || cv == 'g' || cv == 'e') StWrite(vi, idx, VDbl(strtod(w, NULL)));
+        else StWrite(vi, idx, VInt(strtoll(w, NULL, 10)));
+        got++;
+    }
+    return VInt(got);
+}
+
+/* ---------------- recording ---------------- */
+static void StVarText(const StVar* v, char* out, int n)
+{
+    if (v->refv >= 0 && v->refi < 0 && ISARR(&stVar[v->refv])) { StVarText(&stVar[v->refv], out, n); return; }
+    if (ISARR(v)) {
+        char b[48] = "{"; int len = 1;
+        for (int i = 0; i < v->an && len < 30; i++) {
+            double d = stArr[v->ao + i];
+            char e[24];
+            if (v->kind == SK_DBL) snprintf(e, sizeof e, "%g", d);
+            else if (v->kind == SK_CHAR) snprintf(e, sizeof e, "'%c'", (int)d >= 32 && (int)d < 127 ? (char)(int)d : '?');
+            else snprintf(e, sizeof e, "%lld", (long long)d);
+            len += snprintf(b + len, sizeof b - (size_t)len, "%s%s", i ? ", " : "", e);
+        }
+        if (len >= 30) snprintf(b + 26, sizeof b - 26, "...");
+        else snprintf(b + len, sizeof b - (size_t)len, "}");
+        snprintf(out, (size_t)n, "%s", b);
+        return;
+    }
+    if (!v->inited && v->refv < 0) { snprintf(out, (size_t)n, "?"); return; }
+    if (v->kind == SK_PTR) {
+        if (v->v.i >= stNVar) snprintf(out, (size_t)n, "-> (gone)");
+        else if (v->v.i < 0) snprintf(out, (size_t)n, "NULL");
+        else if (v->v.d >= 0) snprintf(out, (size_t)n, "-> %s[%d]", stVar[v->v.i].name, (int)v->v.d);
+        else snprintf(out, (size_t)n, "-> %s", stVar[v->v.i].name);
+        return;
+    }
+    if (v->refv >= 0) {
+        int vi = v->refv, idx = v->refi;
+        Val r = StRead(vi, idx);
+        char t[40]; StText(r, t, sizeof t);
+        snprintf(out, (size_t)n, "%s (ref)", t);
+        return;
+    }
+    if (v->kind == SK_STR) { char t[80]; snprintf(t, sizeof t, "\"%.26s%s\"", v->v.s, strlen(v->v.s) > 26 ? "..." : ""); snprintf(out, (size_t)n, "%s", t); return; }
+    if (v->kind == SK_BOOL) { snprintf(out, (size_t)n, "%s", v->v.i ? "true" : "false"); return; }
+    if (v->kind == SK_CHAR) { snprintf(out, (size_t)n, "'%c' (%d)", v->v.i >= 32 && v->v.i < 127 ? (char)v->v.i : '?', (int)v->v.i); return; }
+    char t[40]; StText(v->v, t, sizeof t);
+    snprintf(out, (size_t)n, "%s", t);
+}
+
+static void StRec(int line, const char* note)
+{
+    if (stFail) return;
+    if (stNStep >= ST_STEPS) { stTrunc = true; StFail("Stopped after 2500 steps. Is there an infinite loop?"); return; }
+    StStep* s = &stSteps[stNStep++];
+    s->line = (short)line; s->depth = (short)stDepth; s->outLen = stOutLen;
+    snprintf(s->note, sizeof s->note, "%s", note && note[0] ? note : (stNote[0] ? stNote : ""));
+    stNote[0] = 0;
+    s->chain[0] = 0;
+    for (int i = 0; i < stDepth; i++) {
+        size_t l = strlen(s->chain);
+        if (l + 28 < sizeof s->chain) snprintf(s->chain + l, sizeof s->chain - l, "%s%s", i ? " > " : "", stFunc[stCallFn[i]].name);
+    }
+    s->v0 = stNSnap; s->nv = 0;
+    for (int i = 0; i < stNVar; i++) {
+        bool glob = i < stGlobN;
+        if (!glob && i < stBase) continue;
+        if (s->nv >= 24 || stNSnap >= ST_SNAPN) break;
+        StSnapV* q = &stSnap[stNSnap++];
+        snprintf(q->name, sizeof q->name, "%s", stVar[i].name);
+        StVarText(&stVar[i], q->val, sizeof q->val);
+        q->flags = (unsigned char)((glob ? 1 : 0) | (ISARR(&stVar[i]) ? 2 : 0) | (stVar[i].kind == SK_PTR ? 4 : 0));
+        s->nv++;
+    }
+}
+
+/* ---------------- expressions ---------------- */
+static Val StApply(const char* op, Val a, Val b)
+{
+    Val r = VZero();
+    char o = op[0], o2 = op[1];
+    if (a.t == 5 && !strcmp(op, "<<")) { StStreamOut(b); a.lv = -1; return a; }
+    if (a.t == 6 && !strcmp(op, ">>")) { StStreamIn(b); a.lv = -1; return a; }
+    if (a.t == 4 || b.t == 4) {
+        if (!strcmp(op, "==") || !strcmp(op, "!=")) {
+            bool eq;
+            if (a.t == 4 && b.t == 4) eq = (a.i == b.i && (a.i < 0 || a.d == b.d));
+            else { Val p = a.t == 4 ? a : b, n = a.t == 4 ? b : a; eq = (p.i < 0) && VI(n) == 0; }
+            r.i = (o == '=') ? eq : !eq; return r;
+        }
+        if ((o == '+' || o == '-') && !o2) {
+            Val p = a.t == 4 ? a : b, n = a.t == 4 ? b : a;
+            if (a.t == 4 && b.t == 4 && o == '-') return VInt((long long)(a.d - b.d));
+            if (p.i < 0) { StFail("Pointer arithmetic on a NULL pointer."); return r; }
+            long long k = VI(n);
+            if (p.d < 0 && k != 0) { StFail("Pointer arithmetic only makes sense inside an array."); return r; }
+            p.d += (o == '+') ? (double)k : -(double)k;
+            p.lv = p.lidx = -1;
+            return p;
+        }
+        StFail("That operation isn't supported on pointers.");
+        return r;
+    }
+    if (a.t == 2 || b.t == 2) {
+        if (a.t == 3) { a.s[0] = (char)a.i; a.s[1] = 0; a.t = 2; }
+        if (b.t == 3) { b.s[0] = (char)b.i; b.s[1] = 0; b.t = 2; }
+        if (a.t != 2 || b.t != 2) { StFail("Can't mix text and numbers in that operation."); return r; }
+        if (!strcmp(op, "+")) { r.t = 2; snprintf(r.s, sizeof r.s, "%.39s%.39s", a.s, b.s); return r; }
+        int c = strcmp(a.s, b.s);
+        if (!strcmp(op, "==")) r.i = c == 0; else if (!strcmp(op, "!=")) r.i = c != 0;
+        else if (!strcmp(op, "<")) r.i = c < 0; else if (!strcmp(op, ">")) r.i = c > 0;
+        else if (!strcmp(op, "<=")) r.i = c <= 0; else if (!strcmp(op, ">=")) r.i = c >= 0;
+        else StFail("That operation isn't supported on text.");
+        return r;
+    }
+    if (a.t >= 5 || b.t >= 5) { StFail("That expression isn't supported."); return r; }
+    bool fl = (a.t == 1 || b.t == 1);
+    double x = VD(a), y = VD(b);
+    long long p = VI(a), q = VI(b);
+    bool wide = a.w || b.w || p > 2147483647LL || p < -2147483648LL;
+    if (!strcmp(op, "+") || !strcmp(op, "-") || !strcmp(op, "*")) {
+        if (fl) return VDbl(o == '+' ? x + y : o == '-' ? x - y : x * y);
+        long long v = o == '+' ? p + q : o == '-' ? p - q : p * q;
+        r.i = wide ? v : (long long)(int)v; r.w = wide; return r;
+    }
+    if (!strcmp(op, "/")) {
+        if (fl) return VDbl(y == 0 ? (x == 0 ? (double)NAN : (x > 0 ? (double)INFINITY : -(double)INFINITY)) : x / y);
+        if (q == 0) { StFail("Division by zero! The program would crash here."); return r; }
+        r.i = p / q; r.w = wide; return r;
+    }
+    if (!strcmp(op, "%")) {
+        if (fl) { StFail("% only works on whole numbers (use fmod for decimals)."); return r; }
+        if (q == 0) { StFail("Modulo by zero! The program would crash here."); return r; }
+        r.i = p % q; return r;
+    }
+    if (!strcmp(op, "<<")) { r.i = wide ? (p << q) : (long long)(int)(p << (q & 31)); r.w = wide; return r; }
+    if (!strcmp(op, ">>")) { r.i = p >> (q & 63); return r; }
+    if (!strcmp(op, "&")) { r.i = p & q; return r; }
+    if (!strcmp(op, "|")) { r.i = p | q; return r; }
+    if (!strcmp(op, "^")) { r.i = p ^ q; return r; }
+    if (!strcmp(op, "==")) { r.i = fl ? x == y : p == q; return r; }
+    if (!strcmp(op, "!=")) { r.i = fl ? x != y : p != q; return r; }
+    if (!strcmp(op, "<")) { r.i = fl ? x < y : p < q; return r; }
+    if (!strcmp(op, ">")) { r.i = fl ? x > y : p > q; return r; }
+    if (!strcmp(op, "<=")) { r.i = fl ? x <= y : p <= q; return r; }
+    if (!strcmp(op, ">=")) { r.i = fl ? x >= y : p >= q; return r; }
+    StFail("Unsupported operator.");
+    return r;
+}
+
+static Val StCallUser(int fi, Val* a, int na);
+static int StCmpD(const void* a, const void* b) { double x = *(const double*)a, y = *(const double*)b; return x < y ? -1 : x > y ? 1 : 0; }
+
+static Val StBuiltin(const char* nm, Val* a, int na, bool* ok)
+{
+    Val r = VInt(0);
+    *ok = true;
+    if (!strcmp(nm, "printf")) { if (na < 1 || a[0].t != 2) StFail("printf needs a format string first."); else StPrintf(a[0].s, a + 1, na - 1); return r; }
+    if (!strcmp(nm, "puts")) { if (na > 0 && a[0].t == 2) { StOut(a[0].s); StOut("\n"); } return r; }
+    if (!strcmp(nm, "putchar")) { if (na > 0) { char c[2] = { (char)VI(a[0]), 0 }; StOut(c); } return r; }
+    if (!strcmp(nm, "scanf")) { if (na < 1 || a[0].t != 2) StFail("scanf needs a format string first."); else return StScanf(a[0].s, a + 1, na - 1); return r; }
+    if (!strcmp(nm, "getline")) {
+        if (na < 2 || a[1].lv < 0) { StFail("getline(cin, variable) needs a string variable."); return r; }
+        if (!stIn[stInPos]) { StFail("The program tried to read a line, but there was no input left. Add some in the Input box."); return r; }
+        char line[80]; int k = 0;
+        while (stIn[stInPos] && stIn[stInPos] != '\n') { if (k < 79) line[k++] = stIn[stInPos]; stInPos++; }
+        if (stIn[stInPos] == '\n') stInPos++;
+        line[k] = 0;
+        StWrite(a[1].lv, a[1].lidx, VStr(line));
+        return r;
+    }
+    if (!strcmp(nm, "swap")) {
+        if (na < 2 || a[0].lv < 0 || a[1].lv < 0) { StFail("swap needs two variables."); return r; }
+        Val x = StRead(a[0].lv, a[0].lidx), y = StRead(a[1].lv, a[1].lidx);
+        if (stFail) return r;
+        StWrite(a[0].lv, a[0].lidx, y); StWrite(a[1].lv, a[1].lidx, x);
+        snprintf(stNote, sizeof stNote, "swap: the two values trade places");
+        return r;
+    }
+    if (!strcmp(nm, "string")) { Val v = na > 0 ? a[0] : VStr(""); if (v.t == 3) { v.s[0] = (char)v.i; v.s[1] = 0; v.t = 2; } v.lv = v.lidx = -1; return v; }
+    if (!strcmp(nm, "to_string")) { char t[48]; if (na > 0 && a[0].t == 1) snprintf(t, sizeof t, "%f", a[0].d); else snprintf(t, sizeof t, "%lld", na > 0 ? VI(a[0]) : 0LL); return VStr(t); }
+    if (!strcmp(nm, "stoi")) return VInt(na > 0 && a[0].t == 2 ? (long long)atoi(a[0].s) : 0);
+    if (!strcmp(nm, "stod")) return VDbl(na > 0 && a[0].t == 2 ? atof(a[0].s) : 0);
+    if (!strcmp(nm, "strchr")) { if (na > 1 && a[0].t == 2) return VInt(strchr(a[0].s, (int)VI(a[1])) != NULL && VI(a[1]) != 0); return r; }
+    if (!strcmp(nm, "strstr")) { if (na > 1 && a[0].t == 2 && a[1].t == 2) return VInt(strstr(a[0].s, a[1].s) != NULL); return r; }
+    if (!strcmp(nm, "sort") || !strcmp(nm, "reverse")) {
+        if (na != 2 || a[0].t != 4 || a[1].t != 4 || a[0].i != a[1].i || a[0].i < 0) { StFail("sort/reverse need (first, last) of one array or container (no custom comparer yet)."); return r; }
+        StVar* sv = &stVar[a[0].i];
+        int lo = (int)a[0].d, hi = (int)a[1].d;
+        if (lo < 0 || hi > sv->an || lo > hi) { StFail("sort/reverse range is outside the array."); return r; }
+        if (nm[0] == 's') qsort(stArr + sv->ao + lo, (size_t)(hi - lo), sizeof(double), StCmpD);
+        else for (int i = lo, j = hi - 1; i < j; i++, j--) { double t = stArr[sv->ao + i]; stArr[sv->ao + i] = stArr[sv->ao + j]; stArr[sv->ao + j] = t; }
+        snprintf(stNote, sizeof stNote, "%s is %s", sv->name, nm[0] == 's' ? "sorted" : "reversed");
+        return r;
+    }
+    if (!strcmp(nm, "strlen")) { r.i = (na > 0 && a[0].t == 2) ? (long long)strlen(a[0].s) : 0; r.w = 1; return r; }
+    if (!strcmp(nm, "strcmp")) { if (na > 1 && a[0].t == 2 && a[1].t == 2) { int c = strcmp(a[0].s, a[1].s); r.i = c < 0 ? -1 : c > 0 ? 1 : 0; } return r; }
+    if (!strcmp(nm, "strcpy")) { if (na > 1 && a[0].lv >= 0) StWrite(a[0].lv, a[0].lidx, a[1]); return a[0].lv >= 0 ? a[0] : r; }
+    if (!strcmp(nm, "strcat")) { if (na > 1 && a[0].lv >= 0) StWrite(a[0].lv, a[0].lidx, StApply("+", a[0], a[1])); return r; }
+    if (!strcmp(nm, "abs") || !strcmp(nm, "labs")) { r.i = llabs(VI(a[0])); return a[0].t == 1 ? VDbl(fabs(a[0].d)) : r; }
+    if (na >= 1) {
+        double x = VD(a[0]);
+        if (!strcmp(nm, "fabs")) return VDbl(fabs(x));
+        if (!strcmp(nm, "sqrt")) { if (x < 0) StFail("sqrt of a negative number gives NaN."); return VDbl(sqrt(x)); }
+        if (!strcmp(nm, "floor")) return VDbl(floor(x));
+        if (!strcmp(nm, "ceil")) return VDbl(ceil(x));
+        if (!strcmp(nm, "round")) return VDbl(round(x));
+        if (!strcmp(nm, "trunc")) return VDbl(trunc(x));
+        if (!strcmp(nm, "sin")) return VDbl(sin(x));
+        if (!strcmp(nm, "cos")) return VDbl(cos(x));
+        if (!strcmp(nm, "tan")) return VDbl(tan(x));
+        if (!strcmp(nm, "atan")) return VDbl(atan(x));
+        if (!strcmp(nm, "log")) return VDbl(log(x));
+        if (!strcmp(nm, "log10")) return VDbl(log10(x));
+        if (!strcmp(nm, "exp")) return VDbl(exp(x));
+        if (!strcmp(nm, "toupper")) return VInt(toupper((int)VI(a[0])));
+        if (!strcmp(nm, "tolower")) return VInt(tolower((int)VI(a[0])));
+        if (!strcmp(nm, "isdigit")) return VInt(isdigit((int)VI(a[0])) != 0);
+        if (!strcmp(nm, "isalpha")) return VInt(isalpha((int)VI(a[0])) != 0);
+        if (!strcmp(nm, "isalnum")) return VInt(isalnum((int)VI(a[0])) != 0);
+        if (!strcmp(nm, "isspace")) return VInt(isspace((int)VI(a[0])) != 0);
+        if (!strcmp(nm, "isupper")) return VInt(isupper((int)VI(a[0])) != 0);
+        if (!strcmp(nm, "islower")) return VInt(islower((int)VI(a[0])) != 0);
+        if (!strcmp(nm, "ispunct")) return VInt(ispunct((int)VI(a[0])) != 0);
+        if (!strcmp(nm, "atoi")) return VInt(a[0].t == 2 ? (long long)atoi(a[0].s) : 0);
+        if (!strcmp(nm, "atof")) return VDbl(a[0].t == 2 ? atof(a[0].s) : 0);
+        if (!strcmp(nm, "srand")) { stRand = (unsigned)VI(a[0]); return r; }
+        if (!strcmp(nm, "setprecision")) { stPrec = (int)VI(a[0]); r.t = 7; return r; }
+        if (!strcmp(nm, "exit")) { stFlow = F_EXIT; stRet = VInt(VI(a[0])); return r; }
+    }
+    if (na >= 2) {
+        if (!strcmp(nm, "pow")) return VDbl(pow(VD(a[0]), VD(a[1])));
+        if (!strcmp(nm, "fmod")) return VDbl(fmod(VD(a[0]), VD(a[1])));
+        if (!strcmp(nm, "max") || !strcmp(nm, "fmax")) { bool fl = a[0].t == 1 || a[1].t == 1; return fl ? VDbl(VD(a[0]) > VD(a[1]) ? VD(a[0]) : VD(a[1])) : (VI(a[0]) > VI(a[1]) ? a[0] : a[1]); }
+        if (!strcmp(nm, "min") || !strcmp(nm, "fmin")) { bool fl = a[0].t == 1 || a[1].t == 1; return fl ? VDbl(VD(a[0]) < VD(a[1]) ? VD(a[0]) : VD(a[1])) : (VI(a[0]) < VI(a[1]) ? a[0] : a[1]); }
+    }
+    if (!strcmp(nm, "rand")) { stRand = stRand * 1103515245u + 12345u; return VInt((long long)((stRand >> 16) & 0x7fff)); }
+    if (!strcmp(nm, "time")) return VInt(1700000000);
+    if (!strcmp(nm, "fflush") || !strcmp(nm, "system")) return r;
+    *ok = false;
+    return r;
+}
+
+static int StNewVec(const char* name, int kind, int wide, int flavour, int size, int cap)
+{
+    if (cap < 64) cap = 64;
+    if (cap < size + 16) cap = size + 16;
+    int vi = StNewVar(name, kind, wide, 0);
+    if (vi < 0) return -1;
+    if (stArrN + cap > ST_ARR) { StFail("Not enough room for that container in the stepper."); return -1; }
+    StVar* v = &stVar[vi];
+    v->pad = (unsigned char)flavour; v->cap = (short)cap; v->ao = stArrN; v->an = (short)size; v->inited = 1;
+    for (int i = 0; i < cap; i++) stArr[stArrN + i] = 0;
+    stArrN += cap;
+    return vi;
+}
+
+
+static Val StMethod(Val b, const char* m, Val* a, int n)
+{
+    Val r = VZero();
+    int vi = b.lv, ix = b.lidx;
+    StVar* sv = NULL;
+    if (vi >= 0) { StResolve(&vi, &ix); sv = &stVar[vi]; }
+    if (b.t == 6) { if (!strcmp(m, "ignore")) { while (stIn[stInPos] && stIn[stInPos] != '\n') stInPos++; if (stIn[stInPos]) stInPos++; } r.t = 6; return r; }
+    if (sv && sv->pad && ix < 0) {
+        if (!strcmp(m, "size")) { r = VInt(sv->an); r.w = 1; return r; }
+        if (!strcmp(m, "empty")) return VInt(sv->an == 0);
+        if (!strcmp(m, "push_back") || !strcmp(m, "push")) {
+            if (n < 1) { StFail("push needs a value."); return r; }
+            if (sv->an >= sv->cap) { StFailF("The stepper's containers hold up to %d items.", sv->cap, 0); return r; }
+            sv->an++;
+            StWrite(vi, sv->an - 1, a[0]);
+            { char t[40]; StText(a[0], t, sizeof t); snprintf(stNote, sizeof stNote, "%s gets %s added (size %d)", sv->name, t, sv->an); }
+            return r;
+        }
+        if (!strcmp(m, "pop_back") || !strcmp(m, "pop")) {
+            if (sv->an == 0) { StFail("Removing from an empty container is undefined behaviour."); return r; }
+            if (sv->pad == 3) { for (int i = 1; i < sv->an; i++) stArr[sv->ao + i - 1] = stArr[sv->ao + i]; }
+            sv->an--;
+            snprintf(stNote, sizeof stNote, "%s loses one item (size %d)", sv->name, sv->an);
+            return r;
+        }
+        if (!strcmp(m, "back") || !strcmp(m, "top") || !strcmp(m, "front")) {
+            if (sv->an == 0) { StFail("Reading from an empty container is undefined behaviour."); return r; }
+            return StRead(vi, (!strcmp(m, "front") || sv->pad == 3) && strcmp(m, "back") ? 0 : sv->an - 1);
+        }
+        if (!strcmp(m, "clear")) { sv->an = 0; snprintf(stNote, sizeof stNote, "%s is emptied", sv->name); return r; }
+        if (!strcmp(m, "at")) return StRead(vi, n > 0 ? (int)VI(a[0]) : 0);
+        if (!strcmp(m, "begin")) { r.t = 4; r.i = vi; r.d = 0; return r; }
+        if (!strcmp(m, "end")) { r.t = 4; r.i = vi; r.d = sv->an; return r; }
+        if (!strcmp(m, "resize")) {
+            int ns = n > 0 ? (int)VI(a[0]) : 0;
+            if (ns < 0 || ns > sv->cap) { StFailF("The stepper's containers hold up to %d items.", sv->cap, 0); return r; }
+            for (int i = sv->an; i < ns; i++) stArr[sv->ao + i] = 0;
+            sv->an = (short)ns;
+            return r;
+        }
+        char em[100]; snprintf(em, sizeof em, "The stepper doesn't support .%s() on this container yet.", m);
+        StFail(em);
+        return r;
+    }
+    if (b.t == 2) {
+        if (!strcmp(m, "size") || !strcmp(m, "length")) { r = VInt((long long)strlen(b.s)); r.w = 1; return r; }
+        if (!strcmp(m, "empty")) return VInt(b.s[0] == 0);
+        if (!strcmp(m, "c_str")) { b.lv = b.lidx = -1; return b; }
+        if (!strcmp(m, "find")) {
+            char nd[80] = "";
+            if (n > 0) { if (a[0].t == 3) { nd[0] = (char)a[0].i; nd[1] = 0; } else if (a[0].t == 2) snprintf(nd, sizeof nd, "%s", a[0].s); }
+            const char* f = nd[0] ? strstr(b.s, nd) : NULL;
+            r = VInt(f ? (long long)(f - b.s) : -1); r.w = 1;
+            return r;
+        }
+        if (!strcmp(m, "substr")) {
+            int pos = n > 0 ? (int)VI(a[0]) : 0, len = n > 1 ? (int)VI(a[1]) : 80, sl = (int)strlen(b.s);
+            if (pos < 0 || pos > sl) { StFailF("substr: position %d is past the end of the text (length %d).", pos, sl); return r; }
+            r = VZero(); r.t = 2;
+            int k = 0;
+            for (int i = pos; i < sl && k < len && k < 79; i++) r.s[k++] = b.s[i];
+            r.s[k] = 0;
+            return r;
+        }
+        if (!strcmp(m, "at") || !strcmp(m, "back") || !strcmp(m, "front")) {
+            int sl = (int)strlen(b.s), k = !strcmp(m, "at") ? (n > 0 ? (int)VI(a[0]) : 0) : (!strcmp(m, "back") ? sl - 1 : 0);
+            if (k < 0 || k >= sl) { StFailF("Index %d is outside the text (length %d).", k, sl); return r; }
+            r = VInt((unsigned char)b.s[k]); r.t = 3;
+            return r;
+        }
+        if ((!strcmp(m, "push_back") || !strcmp(m, "append") || !strcmp(m, "clear")) && vi >= 0) {
+            if (!strcmp(m, "clear")) StWrite(vi, ix, VStr(""));
+            else if (n > 0) StWrite(vi, ix, StApply("+", b, a[0]));
+            return r;
+        }
+    }
+    { char em[100]; snprintf(em, sizeof em, "The stepper doesn't support .%s() here yet.", m); StFail(em); }
+    return r;
+}
+
+static Val StPrimary(bool run)
+{
+    Val z = VZero();
+    const StTok* t = &stTok[stP];
+    if (stFail) return z;
+    switch (t->k) {
+    case TK_NUM: {
+        stP++;
+        if (t->isf) return VDbl(t->num);
+        Val v = VInt((long long)t->num);
+        v.w = (v.i > 2147483647LL || v.i < -2147483648LL);
+        return v;
+    }
+    case TK_CHR: stP++; { Val v = VInt((long long)t->num); v.t = 3; return v; }
+    case TK_STR: {
+        Val v = VStr(t->s);
+        stP++;
+        while (stTok[stP].k == TK_STR) { size_t l = strlen(v.s); snprintf(v.s + l, sizeof v.s - l, "%.30s", stTok[stP].s); stP++; }
+        return v;
+    }
+    case TK_OP:
+        if (StEat("(")) { Val v = StComma(run); StExpect(")"); return v; }
+        { char m[80]; snprintf(m, sizeof m, "Unexpected '%s' here.", t->s); StFail(m); }
+        return z;
+    case TK_ID: break;
+    default: StFail("Unexpected end of the code."); return z;
+    }
+    char name[72];
+    snprintf(name, sizeof name, "%s", t->s);
+    stP++;
+    if (StOp("(")) {                                                  /* a call */
+        stP++;
+        Val args[10]; int na = 0;
+        for (int q = 0; q < 10; q++) args[q] = VZero();
+        if (!StOp(")")) {
+            for (;;) {
+                Val v = StAssign(run);
+                if (na < 10) args[na++] = v;
+                if (!StEat(",")) break;
+            }
+        }
+        StExpect(")");
+        if (!run || stFail) return z;
+        int fi = StFindFunc(name);
+        if (fi >= 0) return StCallUser(fi, args, na);
+        bool ok;
+        if (!strcmp(name, "malloc") || !strcmp(name, "calloc") || !strcmp(name, "realloc") || !strcmp(name, "free")) { stP--; StFail("malloc and free aren't followed by the stepper. The Memory Lab shows the heap."); return z; }
+        Val r = StBuiltin(name, args, na, &ok);
+        if (!ok && !stFail) { char m[120]; snprintf(m, sizeof m, "The stepper doesn't know the function '%s' yet.", name); stP--; StFail(m); }
+        return r;
+    }
+    if (!strcmp(name, "string") && StOp("::") && stTok[stP + 1].k == TK_ID && !strcmp(stTok[stP + 1].s, "npos")) { stP += 2; Val v = VInt(-1); v.w = 1; return v; }
+    if (!run) return z;
+    int vi = StFind(name);
+    if (vi >= 0) {
+        int ri = vi, rx = -1;
+        StResolve(&ri, &rx);
+        StVar* sv = &stVar[ri];
+        if (sv->an > 0 && !sv->pad && !StOp("[")) { Val p = VZero(); p.t = 4; p.i = ri; p.d = 0; return p; }   /* an array name decays to a pointer */
+        if (StOp("[")) { Val v = VZero(); v.lv = vi; v.lidx = -1; return v; }
+        return StRead(vi, -1);
+    }
+    if (!strcmp(name, "true")) return VInt(1);
+    if (!strcmp(name, "false")) return VInt(0);
+    if (!strcmp(name, "NULL") || !strcmp(name, "nullptr")) { Val p = VZero(); p.t = 4; p.i = -1; p.d = -1; return p; }
+    if (!strcmp(name, "cout") || !strcmp(name, "cerr")) { Val v = VZero(); v.t = 5; return v; }
+    if (!strcmp(name, "cin")) { Val v = VZero(); v.t = 6; return v; }
+    if (!strcmp(name, "endl")) return VStr("\n");
+    if (!strcmp(name, "fixed")) { stFixed = 1; Val v = VZero(); v.t = 7; return v; }
+    if (!strcmp(name, "INT_MAX")) return VInt(2147483647);
+    if (!strcmp(name, "INT_MIN")) return VInt(-2147483647 - 1);
+    if (!strcmp(name, "EOF")) return VInt(-1);
+    if (!strcmp(name, "RAND_MAX")) return VInt(32767);
+    if (!strcmp(name, "M_PI")) return VDbl(3.14159265358979323846);
+    for (int i = 0; i < stNMac; i++) if (!strcmp(stMacN[i], name)) { double d = stMacV[i]; if (d == (double)(long long)d) return VInt((long long)d); return VDbl(d); }
+    if (!strcmp(name, "malloc") || !strcmp(name, "calloc") || !strcmp(name, "realloc") || !strcmp(name, "free") || !strcmp(name, "new") || !strcmp(name, "delete")) {
+        stP--; StFail("malloc, free, new and delete aren't followed by the stepper. The Memory Lab shows the heap."); return z;
+    }
+    stP--;
+    { char m[120]; snprintf(m, sizeof m, "'%s' hasn't been declared (check the spelling and where it is declared).", name); StFail(m); }
+    return z;
+}
+
+static Val StPostfix(bool run)
+{
+    Val v = StPrimary(run);
+    for (;;) {
+        if (stFail) return v;
+        if (StOp("[")) {
+            stP++;
+            Val ix = StComma(run);
+            StExpect("]");
+            if (!run || stFail) continue;
+            long long k = VI(ix);
+            int bv = v.lv;
+            if (v.t == 4 && v.lv < 0) {
+                if (v.i < 0) { StFail("Indexing a NULL pointer (segmentation fault)."); return v; }
+                if (v.d < 0 && k != 0) { StFail("Pointer arithmetic only makes sense inside an array."); return v; }
+                if (v.d >= 0 && v.d + (double)k < 0) { StFailF("Index %d is outside the array (indexes start at 0).", (int)(v.d + (double)k), 0); return v; }
+                v = StRead((int)v.i, v.d < 0 ? -1 : (int)(v.d + (double)k));
+                continue;
+            }
+            if (bv < 0) { StFail("That value can't be indexed."); return v; }
+            int rv = bv, rx = -1;
+            StResolve(&rv, &rx);
+            StVar* sv = &stVar[rv];
+            if (ISARR(sv) || sv->kind == SK_STR) {
+                if (k < 0) { StFailF("Index %d is outside the array (indexes start at 0).", (int)k, 0); return v; }
+                v = StRead(rv, (int)k);
+            }
+            else if (sv->kind == SK_PTR) {
+                Val pv = sv->v;
+                if (pv.i < 0) { StFail("Indexing a NULL pointer (segmentation fault)."); return v; }
+                if (pv.d < 0 && k != 0) { StFail("Pointer arithmetic only makes sense inside an array."); return v; }
+                if (pv.d >= 0 && pv.d + (double)k < 0) { StFailF("Index %d is outside the array (indexes start at 0).", (int)(pv.d + (double)k), 0); return v; }
+                v = StRead((int)pv.i, pv.d < 0 ? -1 : (int)(pv.d + (double)k));
+            }
+            else { StFail("That value can't be indexed."); return v; }
+            continue;
+        }
+        if (StOp("++") || StOp("--")) {
+            bool inc = stTok[stP].s[0] == '+';
+            stP++;
+            if (run) {
+                if (v.lv < 0) { StFail("++ and -- need a variable."); return v; }
+                Val old = v;
+                Val nv = StApply(inc ? "+" : "-", v, VInt(1));
+                if (!stFail) StWrite(v.lv, v.lidx, nv);
+                old.lv = old.lidx = -1;
+                v = old;
+            }
+            continue;
+        }
+        if (StOp(".") && stTok[stP + 1].k == TK_ID) {
+            char mname[40];
+            snprintf(mname, sizeof mname, "%s", stTok[stP + 1].s);
+            stP += 2;
+            Val ma[3]; int mn = 0;
+            for (int q = 0; q < 3; q++) ma[q] = VZero();
+            if (StEat("(")) {
+                if (!StOp(")")) { for (;;) { Val av = StAssign(run); if (mn < 3) ma[mn++] = av; if (!StEat(",") || stFail) break; } }
+                StExpect(")");
+            }
+            if (!run || stFail) continue;
+            v = StMethod(v, mname, ma, mn);
+            continue;
+        }
+        if (StOp("->")) { StFail("Structs and the -> operator aren't supported by the stepper yet."); return v; }
+        break;
+    }
+    return v;
+}
+
+static Val StCast(Val v, StTy ty, int ptr)
+{
+    Val r = VZero();
+    if (ptr) return v;
+    if (ty.kind == SK_DBL) { r.t = 1; r.d = VD(v); return r; }
+    if (ty.kind == SK_CHAR) { r.t = 3; r.i = (long long)(signed char)VI(v); return r; }
+    if (ty.kind == SK_BOOL) { r.i = VT(v); return r; }
+    if (ty.kind == SK_STR) return v;
+    r.i = VI(v); r.w = (unsigned char)ty.wide;
+    if (!ty.wide) r.i = (long long)(int)r.i;
+    return r;
+}
+
+static int StSizeOf(StTy ty, int ptr)
+{
+    if (ptr) return 8;
+    if (ty.kind == SK_DBL) return ty.isFloat ? 4 : 8;
+    if (ty.kind == SK_CHAR || ty.kind == SK_BOOL) return 1;
+    return ty.wide ? 8 : 4;
+}
+
+static Val StUnary(bool run)
+{
+    if (stFail) return VZero();
+    if (stTok[stP].k == TK_OP) {
+        const char* s = stTok[stP].s;
+        if (!strcmp(s, "!")) { stP++; Val v = StUnary(run); return VInt(run ? !VT(v) : 0); }
+        if (!strcmp(s, "-")) {
+            stP++; Val v = StUnary(run);
+            if (!run) return v;
+            if (v.t == 1) return VDbl(-v.d);
+            { Val r = VInt(-VI(v)); r.w = v.w; return r; }
+        }
+        if (!strcmp(s, "+")) { stP++; return StUnary(run); }
+        if (!strcmp(s, "~")) { stP++; Val v = StUnary(run); return VInt(run ? ~VI(v) : 0); }
+        if (!strcmp(s, "++") || !strcmp(s, "--")) {
+            bool inc = s[0] == '+';
+            stP++;
+            Val v = StUnary(run);
+            if (!run || stFail) return v;
+            if (v.lv < 0) { StFail("++ and -- need a variable."); return v; }
+            Val nv = StApply(inc ? "+" : "-", v, VInt(1));
+            if (!stFail) StWrite(v.lv, v.lidx, nv);
+            return StRead(v.lv, v.lidx);
+        }
+        if (!strcmp(s, "&")) {
+            stP++;
+            Val v = StUnary(run);
+            if (!run || stFail) return VZero();
+            if (v.t == 4 && v.lv < 0) return v;
+            if (v.lv < 0) { StFail("& needs a variable."); return VZero(); }
+            int vi = v.lv, ix = v.lidx;
+            StResolve(&vi, &ix);
+            Val p = VZero(); p.t = 4; p.i = vi; p.d = ix < 0 ? -1 : ix;
+            return p;
+        }
+        if (!strcmp(s, "*")) {
+            stP++;
+            Val v = StUnary(run);
+            if (!run || stFail) return VZero();
+            if (v.t == 2) return VInt((unsigned char)v.s[0]);
+            if (v.t != 4) { StFail("* needs a pointer on its right."); return VZero(); }
+            if (v.i < 0) { StFail("Dereferencing a NULL pointer: in a real program this is a segmentation fault."); return VZero(); }
+            return StRead((int)v.i, v.d < 0 ? -1 : (int)v.d);
+        }
+        if (!strcmp(s, "(") && stTok[stP + 1].k == TK_ID && StIsTypeWord(stTok[stP + 1].s)) {
+            stP++;
+            StTy ty = StParseType();
+            int ptr = 0;
+            while (StEat("*")) ptr++;
+            StExpect(")");
+            Val v = StUnary(run);
+            return run ? StCast(v, ty, ptr) : v;
+        }
+    }
+    if (StId("sizeof")) {
+        stP++;
+        bool par = StEat("(");
+        long long sz = 4;
+        if (StAtType()) { StTy ty = StParseType(); int ptr = 0; while (StEat("*")) ptr++; sz = StSizeOf(ty, ptr); }
+        else if (stTok[stP].k == TK_ID && run) {
+            int vi = StFind(stTok[stP].s);
+            if (vi >= 0) {
+                StVar* sv = &stVar[vi];
+                int es = sv->kind == SK_DBL ? 8 : sv->kind == SK_CHAR || sv->kind == SK_BOOL ? 1 : sv->wide ? 8 : 4;
+                sz = sv->an > 0 ? (long long)sv->an * es : sv->kind == SK_STR ? (sv->cap > 0 ? sv->cap : 32) : sv->kind == SK_PTR ? 8 : es;
+            }
+            stP++;
+        }
+        else StUnary(false);
+        if (par) StExpect(")");
+        Val r = VInt(sz); r.w = 1;
+        return r;
+    }
+    return StPostfix(run);
+}
+
+static const char* StBinAt(int lvl)
+{
+    if (stTok[stP].k != TK_OP) return NULL;
+    const char* s = stTok[stP].s;
+    switch (lvl) {
+    case 1: return !strcmp(s, "||") ? s : NULL;
+    case 2: return !strcmp(s, "&&") ? s : NULL;
+    case 3: return !strcmp(s, "|") ? s : NULL;
+    case 4: return !strcmp(s, "^") ? s : NULL;
+    case 5: return !strcmp(s, "&") ? s : NULL;
+    case 6: return (!strcmp(s, "==") || !strcmp(s, "!=")) ? s : NULL;
+    case 7: return (!strcmp(s, "<") || !strcmp(s, ">") || !strcmp(s, "<=") || !strcmp(s, ">=")) ? s : NULL;
+    case 8: return (!strcmp(s, "<<") || !strcmp(s, ">>")) ? s : NULL;
+    case 9: return (!strcmp(s, "+") || !strcmp(s, "-")) ? s : NULL;
+    case 10: return (!strcmp(s, "*") || !strcmp(s, "/") || !strcmp(s, "%")) ? s : NULL;
+    }
+    return NULL;
+}
+
+static Val StBin(int lvl, bool run)
+{
+    if (lvl > 10) return StUnary(run);
+    Val l = StBin(lvl + 1, run);
+    for (;;) {
+        if (stFail) return l;
+        const char* op = StBinAt(lvl);
+        if (!op) break;
+        char opc[4];
+        snprintf(opc, sizeof opc, "%s", op);
+        stP++;
+        if (lvl == 1 || lvl == 2) {                                   /* short circuit */
+            bool lt = run && VT(l);
+            bool evalRight = run && (lvl == 1 ? !lt : lt);
+            Val r = StBin(lvl + 1, evalRight);
+            if (run) l = VInt(lvl == 1 ? (lt || (evalRight && VT(r))) : (lt && evalRight && VT(r)));
+            else l = VZero();
+            continue;
+        }
+        Val r = StBin(lvl + 1, run);
+        l = run ? StApply(opc, l, r) : VZero();
+    }
+    return l;
+}
+
+static Val StTernary(bool run)
+{
+    Val c = StBin(1, run);
+    if (StOp("?")) {
+        stP++;
+        bool t = run && VT(c);
+        Val a = StAssign(run && t);
+        StExpect(":");
+        Val b = StTernary(run && !t);
+        if (!run) return VZero();
+        Val r = t ? a : b;
+        r.lv = r.lidx = -1;
+        return r;
+    }
+    return c;
+}
+
+static Val StAssign(bool run)
+{
+    Val l = StTernary(run);
+    if (stFail || stTok[stP].k != TK_OP) return l;
+    const char* s = stTok[stP].s;
+    static const char* aops[] = { "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", NULL };
+    int ai = -1;
+    for (int i = 0; aops[i]; i++) if (!strcmp(s, aops[i])) ai = i;
+    if (ai < 0) return l;
+    stP++;
+    Val r = StAssign(run);
+    if (!run || stFail) return VZero();
+    if (l.lv < 0) { StFail("The left side of = must be a variable."); return VZero(); }
+    Val nv = r;
+    if (ai > 0) {
+        char op[4] = { 0, 0, 0, 0 };
+        size_t n = strlen(aops[ai]) - 1;
+        memcpy(op, aops[ai], n);
+        nv = StApply(op, l, r);
+    }
+    if (stFail) return VZero();
+    StWrite(l.lv, l.lidx, nv);
+    return StRead(l.lv, l.lidx);
+}
+
+static Val StComma(bool run)
+{
+    Val v = StAssign(run);
+    while (!stFail && StOp(",")) { stP++; v = StAssign(run); }
+    return v;
+}
+
+/* ---------------- function calls ---------------- */
+static Val StCallUser(int fi, Val* a, int na)
+{
+    StFunc* f = &stFunc[fi];
+    Val ret = VZero();
+    if (stDepth >= ST_MAXDEPTH) { StFail("Too many nested calls: the stack overflowed. Check your recursion's base case!"); return ret; }
+    int saveP = stP, saveBase = stBase, saveN = stNVar, saveArr = stArrN;
+    stBase = stNVar;
+    for (int i = 0; i < f->nparam && !stFail; i++) {
+        Val arg = i < na ? a[i] : VZero();
+        if (f->pvec[i]) {
+            int src = arg.lv, sx = -1;
+            if (src >= 0) StResolve(&src, &sx);
+            if (src < 0 || !stVar[src].pad) { StFail("That parameter needs a vector (or stack/queue)."); break; }
+            int vi2;
+            if (f->pref[i]) { vi2 = StNewVar(f->pname[i], f->pkind[i], f->pwide[i], 0); if (vi2 >= 0) { stVar[vi2].refv = src; stVar[vi2].refi = -1; stVar[vi2].inited = 1; } }
+            else {
+                vi2 = StNewVec(f->pname[i], f->pkind[i], f->pwide[i], stVar[src].pad, stVar[src].an, stVar[src].cap);
+                if (vi2 >= 0) memcpy(stArr + stVar[vi2].ao, stArr + stVar[src].ao, sizeof(double) * (size_t)stVar[src].an);
+            }
+            if (vi2 < 0) break;
+            continue;
+        }
+        int vi = StNewVar(f->pname[i], f->pkind[i], f->pwide[i], 0);
+        if (vi < 0) break;
+        StVar* pv = &stVar[vi];
+        if (f->pref[i] && arg.lv >= 0) {
+            int rv = arg.lv, ri = arg.lidx;
+            StResolve(&rv, &ri);
+            pv->refv = rv; pv->refi = ri; pv->inited = 1;
+        }
+        else if (i < na) {
+            if (pv->kind == SK_PTR && arg.t != 4 && VI(arg) != 0) { StFail("A pointer parameter needs an address (&x or an array)."); break; }
+            StWrite(vi, -1, arg);
+        }
+    }
+    stNote[0] = 0;
+    stCallFn[stDepth++] = fi;
+    stP = f->body;
+    {
+        char note[84], args[48] = "";
+        for (int i = 0; i < na && i < 4; i++) {
+            char t[24]; StText(a[i], t, sizeof t);
+            size_t l = strlen(args);
+            snprintf(args + l, sizeof args - l, "%s%s", i ? ", " : "", a[i].t == 4 ? "&..." : t);
+        }
+        if (fi == stMainFn) snprintf(note, sizeof note, "The program starts: main() runs first");
+        else snprintf(note, sizeof note, "Call %s(%s)", f->name, args);
+        StRec(f->line, note);
+    }
+    stFlow = F_NONE;
+    StExec(true);
+    if (stFlow == F_RET || stFlow == F_EXIT) { ret = stRet; if (stFlow == F_RET) stFlow = F_NONE; }
+    if (fi == stMainFn && !stFail) {
+        char note[84];
+        snprintf(note, sizeof note, "main() returned %lld: the program is finished", ret.t == 0 ? ret.i : 0LL);
+        StRec(stTok[stP > 0 ? stP - 1 : 0].line, note);
+    }
+    stDepth--;
+    if (!stNote[0] && !stFail && fi != stMainFn) snprintf(stNote, sizeof stNote, "%s() is finished: back in the caller", f->name);
+    stP = saveP; stNVar = saveN; stArrN = saveArr; stBase = saveBase;
+    if (!f->retVoid && !stFail) {
+        if (f->retKind == SK_DBL) ret = VDbl(VD(ret));
+        else if (f->retKind == SK_INT || f->retKind == SK_BOOL) { long long v = VI(ret); if (!f->retWide && f->retKind == SK_INT) v = (long long)(int)v; ret = VInt(f->retKind == SK_BOOL ? v != 0 : v); ret.w = (unsigned char)f->retWide; }
+    }
+    ret.lv = ret.lidx = -1;
+    return ret;
+}
+
+/* ---------------- statements ---------------- */
+static void StLoopGuard(void)
+{
+    if (++stOps > 400000) StFail("This loop ran too many times. Is it infinite?");
+}
+
+static void StDecl(bool run)
+{
+    StTy ty = StParseType();
+    if (ty.isStatic && run && stDepth > 1) { StFail("static local variables aren't supported by the stepper yet."); return; }
+    for (;;) {
+        int ptr = 0, ref = 0;
+        while (StOp("*")) { ptr++; stP++; }
+        if (StEat("&")) ref = 1;
+        if (stTok[stP].k != TK_ID) { StFail("Expected a variable name here."); return; }
+        char nm[24];
+        snprintf(nm, sizeof nm, "%s", stTok[stP].s);
+        stP++;
+        int kind = ty.kind, an = 0, isBuf = 0, unsized = 0;
+        if (StOp("[")) {
+            stP++;
+            if (StOp("]")) unsized = 1;
+            else { Val n = StTernary(run); if (run && !stFail) an = (int)VI(n); }
+            StExpect("]");
+            if (StOp("[")) { StFail("2-D arrays aren't supported by the stepper yet."); return; }
+            if (kind == SK_CHAR && !ptr) { isBuf = 1; kind = SK_STR; }
+            if (run && !stFail && !unsized && an <= 0) { StFail("An array needs a size greater than 0."); return; }
+        }
+        if (ty.isVec) {
+            int size = 0, cap = 0; double fill = 0; double tmpv[256]; int nl = 0; bool hasList = false; int src = -1;
+            if (StOp("(")) {
+                stP++;
+                if (!StOp(")")) { Val n0 = StAssign(run); size = (int)VI(n0); if (StEat(",")) fill = VD(StAssign(run)); }
+                StExpect(")");
+            }
+            else if (StEat("=")) {
+                if (StOp("{")) {
+                    stP++; hasList = true;
+                    while (!StOp("}") && stTok[stP].k != TK_END && !stFail) { Val e = StAssign(run); if (nl < 256) tmpv[nl++] = VD(e); if (!StEat(",")) break; }
+                    StExpect("}");
+                }
+                else { Val o = StAssign(run); src = o.lv; }
+            }
+            else if (StOp("{")) {
+                stP++; hasList = true;
+                while (!StOp("}") && stTok[stP].k != TK_END && !stFail) { Val e = StAssign(run); if (nl < 256) tmpv[nl++] = VD(e); if (!StEat(",")) break; }
+                StExpect("}");
+            }
+            if (run && !stFail) {
+                if (size < 0 || size > 1000) { StFail("That container size is too big for the stepper."); return; }
+                int sx = -1;
+                if (src >= 0) { StResolve(&src, &sx); if (!stVar[src].pad) { StFail("Can't copy from that."); return; } size = stVar[src].an; cap = stVar[src].cap; }
+                if (hasList) size = nl;
+                int vi = StNewVec(nm, kind, ty.wide, ty.isVec, size, cap);
+                if (vi >= 0) {
+                    StVar* v = &stVar[vi];
+                    for (int i = 0; i < size; i++) stArr[v->ao + i] = hasList ? tmpv[i] : src >= 0 ? stArr[stVar[src].ao + i] : fill;
+                    snprintf(stNote, sizeof stNote, "%s is created with %d item%s", nm, size, size == 1 ? "" : "s");
+                }
+            }
+            if (StEat(",")) continue;
+            StExpect(";");
+            return;
+        }
+        if (ptr) kind = (kind == SK_CHAR || kind == SK_STR) ? SK_STR : SK_PTR;
+        Val init = VZero();
+        bool hasInit = false, hasBrace = false;
+        double tmp[128]; int n = 0;
+        if (StEat("=")) {
+            if (StOp("{")) {
+                stP++;
+                hasBrace = true;
+                while (!StOp("}") && stTok[stP].k != TK_END && !stFail) {
+                    Val e = StAssign(run);
+                    if (n < 128) tmp[n++] = VD(e);
+                    if (!StEat(",")) break;
+                }
+                StExpect("}");
+            }
+            else { init = StAssign(run); hasInit = true; }
+        }
+        else if (StOp("(") && ty.kind != -1) {                       /* int x(5); */
+            stP++; init = StAssign(run); hasInit = true; StExpect(")");
+        }
+        if (run && !stFail) {
+            if (kind == -1) kind = init.t == 1 ? SK_DBL : init.t == 2 ? SK_STR : init.t == 3 ? SK_CHAR : init.t == 4 ? SK_PTR : SK_INT;
+            if (unsized) { an = hasBrace ? n : 0; }
+            int vi = StNewVar(nm, kind, ty.wide, (isBuf || an <= 0) ? 0 : an);
+            if (vi >= 0) {
+                StVar* v = &stVar[vi];
+                if (isBuf) v->cap = (short)(unsized ? (hasInit && init.t == 2 ? (int)strlen(init.s) + 1 : 0) : an);
+                if (ref && hasInit && init.lv >= 0) {
+                    int rv = init.lv, ri = init.lidx;
+                    StResolve(&rv, &ri);
+                    v->refv = rv; v->refi = ri; v->inited = 1;
+                    snprintf(stNote, sizeof stNote, "%s is another name for %s", nm, stVar[rv].name);
+                }
+                else if (hasBrace && v->an > 0) {
+                    for (int i = 0; i < n && i < v->an; i++) stArr[v->ao + i] = v->kind == SK_INT ? (double)(long long)tmp[i] : tmp[i];
+                    v->inited = 1;
+                    snprintf(stNote, sizeof stNote, "%s is an array of %d values", nm, v->an);
+                }
+                else if (hasInit) StWrite(vi, -1, init);
+                else if (v->an > 0) snprintf(stNote, sizeof stNote, "%s is an array of %d (not set yet)", nm, v->an);
+                else snprintf(stNote, sizeof stNote, "%s is declared (no value yet)", nm);
+            }
+        }
+        if (StEat(",")) continue;
+        StExpect(";");
+        break;
+    }
+}
+
+static void StSkipBlockTokens(void)                                    /* at '{': move to just after its matching '}' */
+{
+    int depth = 0;
+    while (stTok[stP].k != TK_END) {
+        if (StOp("{")) depth++;
+        else if (StOp("}")) { depth--; if (depth == 0) { stP++; return; } }
+        stP++;
+    }
+}
+
+static void StExec(bool run)
+{
+    if (stFail) return;
+    const StTok* t = &stTok[stP];
+    int line = t->line;
+    if (t->k == TK_END) { StFail("The code ended unexpectedly (a missing }?)."); return; }
+    if (StOp("{")) {
+        stP++;
+        int sn = stNVar, sa = stArrN;
+        while (!StOp("}") && stTok[stP].k != TK_END && !stFail) StExec(run && stFlow == F_NONE);
+        StExpect("}");
+        if (run) { stNVar = sn; stArrN = sa; }
+        return;
+    }
+    if (StOp(";")) { stP++; return; }
+    if (t->k == TK_ID) {
+        const char* s = t->s;
+        if (!strcmp(s, "if")) {
+            stP++; StExpect("(");
+            Val c = StComma(run);
+            StExpect(")");
+            bool taken = run && VT(c);
+            if (run && !stFail) StRec(line, taken ? "The if condition is true: its block runs" : "The if condition is false: its block is skipped");
+            StExec(taken);
+            if (StId("else")) { stP++; StExec(run && !VT(c)); }
+            return;
+        }
+        if (!strcmp(s, "while")) {
+            stP++; StExpect("(");
+            int condPos = stP;
+            StComma(false);
+            StExpect(")");
+            int bodyPos = stP;
+            while (run && !stFail) {
+                StLoopGuard();
+                stP = condPos;
+                bool c = VT(StComma(true));
+                if (stFail) break;
+                StRec(line, c ? "The while condition is true: the loop body runs" : "The while condition is false: the loop ends");
+                if (!c) break;
+                stP = bodyPos;
+                StExec(true);
+                if (stFlow == F_BREAK) { stFlow = F_NONE; break; }
+                if (stFlow == F_CONT) stFlow = F_NONE;
+                if (stFlow == F_RET || stFlow == F_EXIT) break;
+            }
+            stP = bodyPos;
+            StExec(false);
+            return;
+        }
+        if (!strcmp(s, "do")) {
+            stP++;
+            int bodyPos = stP;
+            StExec(false);
+            if (!StId("while")) { StFail("Expected 'while' after the do { } block."); return; }
+            stP++; StExpect("(");
+            int condPos = stP;
+            StComma(false);
+            StExpect(")"); StExpect(";");
+            int endPos = stP;
+            while (run && !stFail) {
+                StLoopGuard();
+                stP = bodyPos;
+                StExec(true);
+                if (stFlow == F_BREAK) { stFlow = F_NONE; break; }
+                if (stFlow == F_CONT) stFlow = F_NONE;
+                if (stFlow == F_RET || stFlow == F_EXIT) break;
+                stP = condPos;
+                bool c = VT(StComma(true));
+                if (stFail) break;
+                StRec(stTok[condPos].line, c ? "The do-while condition is true: go round again" : "The do-while condition is false: the loop ends");
+                if (!c) break;
+            }
+            stP = endPos;
+            return;
+        }
+        if (!strcmp(s, "for")) {
+            stP++; StExpect("(");
+            int sn = stNVar, sa = stArrN;
+            {
+                int save = stP;
+                if (StAtType()) {
+                    StTy rty = StParseType();
+                    bool rref = StEat("&");
+                    if (!stFail && stTok[stP].k == TK_ID && stTok[stP + 1].k == TK_OP && !strcmp(stTok[stP + 1].s, ":")) {
+                        char lname[24];
+                        snprintf(lname, sizeof lname, "%s", stTok[stP].s);
+                        stP += 2;
+                        Val cv = StAssign(run);
+                        StExpect(")");
+                        int bodyPos = stP;
+                        if (run && !stFail) {
+                            int cvi = cv.t == 4 ? (int)cv.i : cv.lv, cx = -1;
+                            if (cvi < 0) { StFail("The for loop needs an array, container or text to go through."); return; }
+                            StResolve(&cvi, &cx);
+                            StVar* cvar = &stVar[cvi];
+                            bool isStr = cvar->kind == SK_STR && !ISARR(cvar);
+                            if (!ISARR(cvar) && !isStr) { StFail("The for loop needs an array, container or text to go through."); return; }
+                            int cnt = isStr ? (int)strlen(cvar->v.s) : cvar->an;
+                            int ek = isStr ? SK_CHAR : cvar->kind;
+                            for (int i = 0; i < cnt && !stFail; i++) {
+                                StLoopGuard();
+                                int lk = rty.kind < 0 ? ek : rty.kind;
+                                int lvi = StNewVar(lname, lk, rty.wide, 0);
+                                if (lvi < 0) break;
+                                if (rref) { stVar[lvi].refv = cvi; stVar[lvi].refi = i; stVar[lvi].inited = 1; stNote[0] = 0; }
+                                else { Val ev = StRead(cvi, i); if (stFail) break; StWrite(lvi, -1, ev); }
+                                { char note[84]; snprintf(note, sizeof note, "Next item: %s (item %d of %d)", stNote[0] ? stNote : lname, i + 1, cnt); StRec(line, note); }
+                                stP = bodyPos;
+                                StExec(true);
+                                stNVar = lvi;
+                                if (stFlow == F_BREAK) { stFlow = F_NONE; break; }
+                                if (stFlow == F_CONT) stFlow = F_NONE;
+                                if (stFlow == F_RET || stFlow == F_EXIT) break;
+                            }
+                            stNVar = sn; stArrN = sa;
+                        }
+                        stP = bodyPos;
+                        StExec(false);
+                        return;
+                    }
+                    stP = save;
+                }
+            }
+            if (StAtType()) StDecl(run);
+            else { if (!StOp(";")) StComma(run); StExpect(";"); }
+            if (run && !stFail) StRec(line, stNote[0] ? stNote : "The for loop starts: the first part runs once");
+            int condPos = stP;
+            bool hasCond = !StOp(";");
+            if (hasCond) StComma(false);
+            StExpect(";");
+            int incPos = stP;
+            bool hasInc = !StOp(")");
+            if (hasInc) StComma(false);
+            StExpect(")");
+            int bodyPos = stP;
+            bool first = true;
+            while (run && !stFail) {
+                StLoopGuard();
+                if (!first && hasInc) { stP = incPos; StComma(true); if (stFail) break; }
+                stP = condPos;
+                bool c = hasCond ? VT(StComma(true)) : true;
+                if (stFail) break;
+                if (hasCond || !first) StRec(line, c ? (first ? "The for condition is true: the loop body runs" : "Step done, the condition is true: the loop runs again") : "The for condition is false: the loop ends");
+                first = false;
+                if (!c) break;
+                stP = bodyPos;
+                StExec(true);
+                if (stFlow == F_BREAK) { stFlow = F_NONE; break; }
+                if (stFlow == F_CONT) stFlow = F_NONE;
+                if (stFlow == F_RET || stFlow == F_EXIT) break;
+            }
+            stP = bodyPos;
+            StExec(false);
+            if (run) { stNVar = sn; stArrN = sa; }
+            return;
+        }
+        if (!strcmp(s, "switch")) {
+            stP++; StExpect("(");
+            Val sv = StComma(run);
+            StExpect(")");
+            if (!StOp("{")) { StFail("Expected { after switch (...)."); return; }
+            stP++;
+            int matchPos = -1, defPos = -1;
+            while (!StOp("}") && stTok[stP].k != TK_END && !stFail) {
+                if (StId("case")) {
+                    stP++;
+                    Val cv = StTernary(run);
+                    StExpect(":");
+                    if (run && matchPos < 0 && VI(cv) == VI(sv)) matchPos = stP;
+                    continue;
+                }
+                if (StId("default")) { stP++; StExpect(":"); defPos = stP; continue; }
+                StExec(false);
+            }
+            int endPos = stP + 1;
+            if (run && !stFail) {
+                int from = matchPos >= 0 ? matchPos : defPos;
+                StRec(line, matchPos >= 0 ? "switch jumps to the matching case" : defPos >= 0 ? "No case matches: switch goes to default" : "No case matches: switch does nothing");
+                if (from >= 0) {
+                    stP = from;
+                    int sn = stNVar, sa = stArrN;
+                    while (!StOp("}") && stTok[stP].k != TK_END && !stFail && stFlow == F_NONE) {
+                        if (StId("case")) { stP++; StTernary(false); StExpect(":"); continue; }
+                        if (StId("default")) { stP++; StExpect(":"); continue; }
+                        StExec(true);
+                    }
+                    if (stFlow == F_BREAK) stFlow = F_NONE;
+                    stNVar = sn; stArrN = sa;
+                }
+            }
+            stP = endPos;
+            return;
+        }
+        if (!strcmp(s, "return")) {
+            stP++;
+            Val v = VInt(0);
+            if (!StOp(";")) v = StComma(run);
+            StExpect(";");
+            if (run && !stFail) {
+                stRet = v; stFlow = F_RET;
+                char tx[40], note[84]; StText(v, tx, sizeof tx);
+                snprintf(note, sizeof note, "return %s: leaves the function", tx);
+                StRec(line, note);
+            }
+            return;
+        }
+        if (!strcmp(s, "break") || !strcmp(s, "continue")) {
+            bool b = s[0] == 'b';
+            stP++; StExpect(";");
+            if (run && !stFail) { stFlow = b ? F_BREAK : F_CONT; StRec(line, b ? "break: leaves the loop" : "continue: jumps to the next pass"); }
+            return;
+        }
+        if (!strcmp(s, "struct") || !strcmp(s, "class")) { StFail("Structs and classes aren't followed by the stepper yet. The Memory Lab shows how they sit in memory."); return; }
+        if (!strcmp(s, "union") || !strcmp(s, "enum") || !strcmp(s, "typedef") || !strcmp(s, "template") || !strcmp(s, "namespace")) {
+            char m[140]; snprintf(m, sizeof m, "'%s' isn't supported by the stepper yet. It follows variables, loops, functions, arrays and simple pointers.", s);
+            StFail(m); return;
+        }
+        if (!strcmp(s, "new") || !strcmp(s, "delete") || !strcmp(s, "malloc") || !strcmp(s, "free") || !strcmp(s, "map")) {
+            char m[140]; snprintf(m, sizeof m, (!strcmp(s, "map") ? "'%s' isn't followed by the stepper yet." : "'%s' isn't followed by the stepper. The Memory Lab shows the heap."), s);
+            StFail(m); return;
+        }
+    }
+    /* declaration or expression statement */
+    int outBefore = stOutLen;
+    stNote[0] = 0;
+    if (StAtType()) StDecl(run);
+    else { StComma(run); StExpect(";"); }
+    if (run && !stFail) {
+        if (!stNote[0] && stOutLen > outBefore) {
+            char b[64]; int k = 0;
+            for (int i = outBefore; i < stOutLen && k < 34; i++) { char c = stOutBuf[i]; if (c == '\n') { b[k++] = '\\'; b[k++] = 'n'; } else b[k++] = c; }
+            b[k] = 0;
+            snprintf(stNote, sizeof stNote, "Prints: %s%s", b, stOutLen - outBefore > 34 ? "..." : "");
+        }
+        StRec(line, NULL);
+    }
+}
+
+/* ---------------- program driver ---------------- */
+static void StParseParams(StFunc* f)
+{
+    f->nparam = 0;
+    if (StId("void") && stTok[stP + 1].k == TK_OP && !strcmp(stTok[stP + 1].s, ")")) { stP += 2; return; }
+    if (StOp(")")) { stP++; return; }
+    for (;;) {
+        StTy ty = StParseType();
+        int ptr = 0, ref = 0, arr = 0;
+        while (StOp("*")) { ptr++; stP++; }
+        if (StEat("&")) ref = 1;
+        char nm[24] = "";
+        if (stTok[stP].k == TK_ID) { snprintf(nm, sizeof nm, "%s", stTok[stP].s); stP++; }
+        while (StEat("[")) { while (!StOp("]") && stTok[stP].k != TK_END) stP++; StExpect("]"); arr = 1; }
+        if (f->nparam < 8) {
+            int i = f->nparam++;
+            snprintf(f->pname[i], 24, "%s", nm[0] ? nm : "arg");
+            int kind = ty.kind < 0 ? SK_INT : ty.kind;
+            if ((ptr || arr) && kind == SK_CHAR) kind = SK_STR;
+            else if (ptr || arr) kind = SK_PTR;
+            f->pkind[i] = (unsigned char)kind; f->pwide[i] = (unsigned char)ty.wide; f->pref[i] = (unsigned char)(ref && kind != SK_PTR); f->pvec[i] = (unsigned char)ty.isVec;
+        }
+        if (!StEat(",")) break;
+    }
+    StExpect(")");
+}
+
+static bool StRun(const char* src, const char* input)
+{
+    stFail = false; stTrunc = false; stErr[0] = 0; stNote[0] = 0; stErrLine = 0;
+    stNStep = 0; stNSnap = 0; stOutLen = 0; stOutBuf[0] = 0;
+    stNVar = 0; stBase = 0; stGlobN = 0; stArrN = 0; stDepth = 0; stNFunc = 0; stFlow = F_NONE;
+    stIn = input ? input : ""; stInPos = 0; stFixed = 0; stPrec = 6; stRand = 1; stOps = 0; stMainFn = -1;
+    StLex(src);
+    stP = 0;
+    while (stTok[stP].k != TK_END && !stFail) {
+        if (StOp(";")) { stP++; continue; }
+        if (StAtType()) {
+            int save = stP;
+            StTy ty = StParseType();
+            int ptr = 0;
+            while (StOp("*")) { ptr++; stP++; }
+            if (stTok[stP].k == TK_ID && stTok[stP + 1].k == TK_OP && !strcmp(stTok[stP + 1].s, "(")) {
+                if (stNFunc >= ST_FUNCS) { StFail("Too many functions for the stepper."); break; }
+                StFunc* f = &stFunc[stNFunc];
+                memset(f, 0, sizeof * f);
+                snprintf(f->name, sizeof f->name, "%s", stTok[stP].s);
+                f->line = stTok[stP].line;
+                f->retKind = ptr ? SK_PTR : (ty.kind < 0 ? SK_INT : ty.kind); f->retVoid = ty.isVoid && !ptr; f->retWide = ty.wide;
+                stP += 2;
+                StParseParams(f);
+                if (stFail) break;
+                if (StOp("{")) { f->body = stP; StSkipBlockTokens(); stNFunc++; }
+                else if (StEat(";")) { /* prototype */ }
+                else StFail("Expected { or ; after the function header.");
+            }
+            else { stP = save; StDecl(true); }
+        }
+        else {
+            char m[160];
+            if (StId("struct") || StId("class")) snprintf(m, sizeof m, "Structs and classes aren't followed by the stepper yet. The Memory Lab shows how they sit in memory.");
+            else snprintf(m, sizeof m, "'%s' isn't supported by the stepper yet. It follows variables, loops, functions, arrays and simple pointers.", stTok[stP].s);
+            StFail(m);
+        }
+    }
+    if (stFail) return false;
+    stMainFn = StFindFunc("main");
+    if (stMainFn < 0) { StFail("There's no main() function to start from."); return false; }
+    stGlobN = stNVar;
+    stBase = stNVar;
+    StCallUser(stMainFn, NULL, 0);
+    return !stFail;
+}
+
+
+/* ======================================================================
+   SETTINGS
+   ====================================================================== */
+static int setConfirm = 0;
+
+static void SaveCfg(void) { FILE* f = fopen("settings.dat", "wb"); if (f) { fwrite(&cfg, sizeof cfg, 1, f); fclose(f); } }
+static void LoadCfg(void)
+{
+    FILE* f = fopen("settings.dat", "rb");
+    if (f) { Cfg t; if (fread(&t, sizeof t, 1, f) == 1 && t.magic == 0x5E77) cfg = t; fclose(f); }
+}
+static void OpenSettings(void) { setConfirm = 0; screen = SCR_SETTINGS; }
+
+/* an on/off switch with a sliding knob; returns true when clicked */
+static bool Switch(Rectangle r, bool on, Color accent)
+{
+    bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+    if (hov) hand = true;
+    float k = BtnHot(r, on);                                           /* 0..1, eased toward the target */
+    Color off = { 50, 64, 56, 255 };
+    Color c = { (unsigned char)(off.r + (accent.r - off.r) * k), (unsigned char)(off.g + (accent.g - off.g) * k), (unsigned char)(off.b + (accent.b - off.b) * k), 255 };
+    DrawRectangleRounded((Rectangle) { r.x - 1, r.y - 1, r.width + 2, r.height + 2 }, 0.5f, 10, Fade(BLACK, 0.35f));
+    DrawRectangleRounded(r, 0.5f, 10, c);
+    DrawRectangleRounded((Rectangle) { r.x + 2, r.y + 2, r.width - 4, r.height * 0.42f }, 0.5f, 8, Fade(WHITE, 0.10f));
+    float rad = r.height / 2 - 3, kx = r.x + r.height / 2 + k * (r.width - r.height);
+    DrawCircle((int)kx, (int)(r.y + r.height / 2 + 2), rad, Fade(BLACK, 0.30f));
+    DrawCircle((int)kx, (int)(r.y + r.height / 2), rad, (Color) { 246, 241, 226, 255 });
+    DrawCircle((int)(kx - rad * 0.25f), (int)(r.y + r.height / 2 - rad * 0.3f), rad * 0.45f, Fade(WHITE, 0.5f));
+    return hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+}
+
+static void DrawGear(float cx, float cy, float r, Color c)
+{
+    for (int i = 0; i < 8; i++) {
+        float a = i * (PI / 4);
+        DrawLineEx((Vector2) { cx + cosf(a) * r * 0.7f, cy + sinf(a) * r * 0.7f }, (Vector2) { cx + cosf(a) * r * 1.12f, cy + sinf(a) * r * 1.12f }, r * 0.42f, c);
+    }
+    DrawCircle((int)cx, (int)cy, r * 0.82f, c);
+    DrawCircle((int)cx, (int)cy, r * 0.36f, (Color) { 20, 34, 28, 255 });
+}
+
+/* a round gear button, drawn in the corner of the menu */
+static void SettingsButton(float unusedX, float y)
+{
+    (void)unusedX;
+    float x = W - 32 - (TxtW(fBold, TextFormat("%d", gm.credits), 18) + 62) - 52;           /* just left of the credits chip */
+    Rectangle r = { x, y, 40, 40 };
+    bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+    if (hov) hand = true;
+    float hot = BtnHot(r, hov);
+    Panel(r, 0.5f, Fade(SURF, 0.96f), hov ? ACCENTS[lang] : BORDER);
+    DrawGear(x + 20, y + 20, 9.5f, ColorBrightness(hov ? ACCENTS[lang] : DIM, 0.1f * hot));
+    if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) OpenSettings();
+}
+
+static void ResetLearning(void)
+{
+    int d = pro.lastDay, s = pro.streak, b = pro.bestStreak;
+    ResetProgress();
+    memset(&pro, 0, sizeof pro);
+    pro.magic = (int)0xC0DE0002; pro.lastDay = d; pro.streak = s; pro.bestStreak = b;
+    int bg = sd.bg;
+    StudyInit(); sd.bg = bg;
+    memset(notes, 0, sizeof notes);
+    SaveProgress(); SaveProfile(); SaveStudy(); SaveNotes();
+}
+
+static void DrawSettings(Color accent)
+{
+    Vector2 m = GetMousePosition();
+    TopBar();
+    if (Button((Rectangle) { 24, 14, 104, 44 }, BACKL, SURF2, 16)) { GoMenu(); return; }
+    Txt(fBold, "Settings", 150, 14, 30, TXT);
+    if (Button((Rectangle) { 700, 14, 290, 44 }, "Restart (show loading screen)", SURF2, 16)) { WorldEnter(); bootT = 0; screen = SCR_BOOT; return; }
+    DrawCreditsChip(W - 32, 16);
+
+    /* ---- left: display and feel ---- */
+    Rectangle L = { 40, 96, 620, 520 };
+    Panel(L, 0.03f, SURF, BORDER);
+    Txt(fBold, "Display and feel", L.x + 24, L.y + 16, 22, accent);
+    DrawLine((int)L.x + 24, (int)L.y + 50, (int)(L.x + L.width - 24), (int)L.y + 50, Fade(BORDER, 0.7f));
+    const char* rt[5] = { "Fullscreen", "Intro screen", "Screen transitions", "Credit pop-ups and confetti", "Show frame rate" };
+    const char* rd[5] = { "Fill the whole display. F11 or Alt+Enter does the same anywhere.", "The snowy valley loading scene when the game starts.",
+        "The shutters that slide open between screens.", "The +N and the little burst when you earn credits.", "A small FPS counter in the corner." };
+    bool rv[5] = { IsWindowFullscreen(), cfg.boot != 0, cfg.trans != 0, cfg.fx != 0, cfg.fps != 0 };
+    for (int i = 0; i < 5; i++) {
+        Rectangle row = { L.x + 14, L.y + 58 + i * 62.0f, L.width - 28, 58 };
+        bool hov = CheckCollisionPointRec(m, row);
+        if (hov) DrawRectangleRounded(row, 0.18f, 8, Fade(WHITE, 0.035f));
+        Txt(fBold, rt[i], row.x + 14, row.y + 7, 19, TXT);
+        TxtFit(fReg, rd[i], row.x + 14, row.y + 32, 14, row.width - 120, DIM);
+        Rectangle sw = { row.x + row.width - 76, row.y + 15, 58, 28 };
+        bool hit = Switch(sw, rv[i], accent);
+        if (hit || (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !CheckCollisionPointRec(m, sw))) {
+            if (i == 0) ToggleFull();
+            else if (i == 1) cfg.boot = !cfg.boot;
+            else if (i == 2) cfg.trans = !cfg.trans;
+            else if (i == 3) cfg.fx = !cfg.fx;
+            else cfg.fps = !cfg.fps;
+            SaveCfg();
+        }
+    }
+    float by = L.y + 58 + 5 * 62.0f + 10;
+    Txt(fBold, "Living background", L.x + 28, by, 19, TXT);
+    Txt(fReg, "The faint moving scene behind menus and lessons.", L.x + 28, by + 26, 14, DIM);
+    for (int i = 0; i < 5; i++) {
+        float cw = (L.width - 56 - 4 * 8) / 5.0f;
+        Rectangle r = { L.x + 28 + i * (cw + 8), by + 54, cw, 38 };
+        bool hov = CheckCollisionPointRec(m, r), on = sd.bg == i;
+        if (hov) hand = true;
+        Panel(r, 0.3f, on ? Fade(accent, 0.25f) : (hov ? SURF2 : (Color) { 20, 36, 28, 255 }), on ? accent : BORDER);
+        CenterFit(fMed, BG_NAMES[i], r.x + r.width / 2, r.y + 9, 15, r.width - 10, on ? TXT : DIM);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { sd.bg = i; SaveStudy(); }
+    }
+
+    /* ---- right: controls ---- */
+    Rectangle R = { 684, 96, 476, 300 };
+    Panel(R, 0.03f, SURF, BORDER);
+    Txt(fBold, "Controls", R.x + 24, R.y + 16, 22, accent);
+    DrawLine((int)R.x + 24, (int)R.y + 50, (int)(R.x + R.width - 24), (int)R.y + 50, Fade(BORDER, 0.7f));
+    static const char* keys[7] = { "Esc", "F11", "F5", "Arrows / WASD", "Shift", "Space", "Left / Right" };
+    static const char* what[7] = { "Go back, or close a dialog", "Fullscreen on or off", "Run the code in an editor", "Walk around the Campus", "Hold to run", "Talk, or continue", "Step through code" };
+    for (int i = 0; i < 7; i++) {
+        float y = R.y + 62 + i * 33.0f;
+        float kw = TxtW(fCode, keys[i], 14) + 20;
+        Panel((Rectangle) { R.x + 24, y, kw, 28 }, 0.25f, (Color) { 20, 34, 28, 255 }, BORDER);
+        Txt(fCode, keys[i], R.x + 34, y + 5, 14, TXT);
+        Txt(fReg, what[i], R.x + 24 + 150 + 12, y + 4, 15, DIM);
+    }
+
+    /* ---- right: your data ---- */
+    Rectangle D = { 684, 412, 476, 204 };
+    Panel(D, 0.03f, SURF, BORDER);
+    Txt(fBold, "Your data", D.x + 24, D.y + 16, 22, accent);
+    DrawLine((int)D.x + 24, (int)D.y + 50, (int)(D.x + D.width - 24), (int)D.y + 50, Fade(BORDER, 0.7f));
+    float ty = Wrapped(fReg, "Everything saves automatically in .dat files next to the game. Copy them to keep your progress on another computer.", D.x + 24, D.y + 60, D.width - 48, 14, DIM);
+    (void)ty;
+    if (!setConfirm) {
+        if (Button((Rectangle) { D.x + 24, D.y + D.height - 62, D.width - 48, 44 }, "Reset lessons and study progress", (Color) { 130, 50, 46, 255 }, 16)) setConfirm = 1;
+    }
+    else {
+        CenterTxt(fBold, "Erase lesson, practice and study progress?", D.x + D.width / 2, D.y + D.height - 104, 16, (Color) { 255, 190, 140, 255 });
+        if (Button((Rectangle) { D.x + 24, D.y + D.height - 62, 210, 44 }, "Yes, erase it", (Color) { 170, 56, 50, 255 }, 16)) { ResetLearning(); setConfirm = 0; Notify("Lessons and study progress were reset", (Color) { 255, 190, 140, 255 }); }
+        if (Button((Rectangle) { D.x + 246, D.y + D.height - 62, D.width - 270, 44 }, "Cancel", SURF2, 16)) setConfirm = 0;
+    }
+    CenterTxt(fReg, "Settings are saved as soon as you change them.", W / 2.0f, 636, 14, DIM);
+}
+
+/* ======================================================================
+   GLOSSARY: terms of C and C++ with a one-line meaning and an example
+   ====================================================================== */
+typedef struct { const char* term; int lg, cat; const char* meaning, * ex; } GTerm;     /* lg: 0 both, 1 C only, 2 C++ only */
+static const char* const GCATS[10] = { "All", "Basics", "Types", "Operators", "Control", "Functions", "Memory", "Text & arrays", "Structs & classes", "Library & I/O" };
+static const GTerm GLOSS[] = {
+    { "main", 0, 1, "Where the program starts. Its return value goes back to the operating system.", "int main(void) { return 0; }" },
+    { "return", 0, 1, "Leaves the current function and hands a value back to the caller.", "return a + b;" },
+    { "variable", 0, 1, "A named box in memory that holds one value of one type.", "int age = 12;" },
+    { "const", 0, 1, "Marks a variable that can't change after it is set.", "const int MAX = 100;" },
+    { "comment", 0, 1, "Text the compiler ignores, written for people.", "// one line     /* many lines */" },
+    { "semicolon", 0, 1, "Ends a statement. A missing one is the most common compile error.", "x = 5;" },
+    { "scope", 0, 1, "Where a name can be used: from its declaration to the closing brace of its block.", "for (int i = 0; i < 3; i++) { }   /* i ends here */" },
+    { "undefined behavior", 0, 1, "Code the language gives no rules for, like reading outside an array. Anything can happen.", "int a[5]; a[10] = 1;" },
+    { "compile error", 0, 1, "The compiler refuses to build the program. Read the first error first.", "error: expected ';' before 'return'" },
+    { "int", 0, 2, "Whole numbers, usually 4 bytes (about plus or minus 2 billion).", "int n = 42;" },
+    { "double", 0, 2, "Decimal numbers with about 15 digits of precision.", "double pi = 3.14159;" },
+    { "float", 0, 2, "A smaller decimal type (about 7 digits). Prefer double.", "float f = 1.5f;" },
+    { "char", 0, 2, "One byte, usually one letter. 'A' is really the number 65.", "char c = 'A';" },
+    { "bool", 0, 2, "true or false. In C it needs #include <stdbool.h>.", "bool done = true;" },
+    { "long long", 0, 2, "A bigger integer, at least 64 bits.", "long long big = 9000000000LL;" },
+    { "unsigned", 0, 2, "An integer with no negative values. It wraps around at zero.", "unsigned u = 0; u--;   /* 4294967295 */" },
+    { "size_t", 0, 2, "The unsigned type for sizes and indexes. sizeof and strlen give one.", "size_t n = strlen(s);" },
+    { "cast", 0, 2, "Convert a value from one type to another by hand.", "(double)total / count" },
+    { "integer division", 0, 2, "int / int drops the remainder. Cast one side to keep the decimals.", "7 / 2 == 3      7 / 2.0 == 3.5" },
+    { "auto", 2, 2, "Lets the compiler work out the type from the value.", "auto x = 3.5;" },
+    { "enum", 0, 2, "A set of named integer constants.", "enum Color { RED, GREEN, BLUE };" },
+    { "% (modulo)", 0, 3, "The remainder after division. Handy for even/odd and wrapping around.", "17 % 5 == 2" },
+    { "++ and --", 0, 3, "Add or subtract 1. i++ gives the old value, ++i the new one.", "i++;   --count;" },
+    { "== versus =", 0, 3, "== compares, = assigns. if (x = 5) is a classic bug.", "if (x == 5)" },
+    { "&& || !", 0, 3, "Logical AND, OR and NOT. && and || stop early once the answer is known.", "if (a > 0 && b > 0)" },
+    { "?: (ternary)", 0, 3, "A one-line if/else that produces a value.", "int m = a > b ? a : b;" },
+    { "sizeof", 0, 3, "The number of bytes a type or variable takes.", "sizeof(int) == 4" },
+    { "bitwise operators", 0, 3, "& | ^ ~ << >> work on the individual bits of an integer.", "flags & 4     1 << 3" },
+    { "if / else", 0, 4, "Run code only when a condition is true.", "if (x > 0) { ... } else { ... }" },
+    { "for", 0, 4, "A loop with its start, condition and step on one line.", "for (int i = 0; i < n; i++) { ... }" },
+    { "while", 0, 4, "Repeats while a condition stays true. Checks before every pass.", "while (n > 0) { n--; }" },
+    { "do-while", 0, 4, "Like while, but it always runs once because it checks at the end.", "do { ... } while (x < 5);" },
+    { "break / continue", 0, 4, "break leaves the loop. continue jumps to the next pass.", "if (x == 0) break;" },
+    { "switch", 0, 4, "Chooses between many exact values. Remember break at the end of each case.", "switch (c) { case 'a': ... break; default: ... }" },
+    { "range-for", 2, 4, "Goes through every item of an array or container.", "for (int x : v) cout << x;" },
+    { "function", 0, 5, "A named block of code you can call with inputs to get a result.", "int add(int a, int b) { return a + b; }" },
+    { "prototype", 0, 5, "A declaration that lets you call a function before its definition.", "int add(int a, int b);" },
+    { "parameter / argument", 0, 5, "The parameter is the name in the definition. The argument is the value you pass in.", "add(2, 3)" },
+    { "pass by value", 0, 5, "The function gets a copy, so changing it doesn't change the caller's variable.", "void f(int x) { x = 9; }" },
+    { "pass by pointer", 1, 5, "Pass an address so the function can change the original.", "void inc(int *p) { (*p)++; }   inc(&n);" },
+    { "reference (&)", 2, 5, "A second name for the same variable. Changing it changes the original.", "void inc(int &x) { x++; }" },
+    { "recursion", 0, 5, "A function that calls itself. It needs a base case to stop.", "int f(int n) { return n <= 1 ? 1 : n * f(n - 1); }" },
+    { "overloading", 2, 5, "Several functions with the same name and different parameter types.", "int add(int, int);  double add(double, double);" },
+    { "default argument", 2, 5, "A value used when the caller leaves that parameter out.", "void greet(string s = \"friend\");" },
+    { "pointer", 0, 6, "A variable that holds a memory address.", "int *p = &x;" },
+    { "& (address-of)", 0, 6, "Gets the address of a variable.", "&x" },
+    { "* (dereference)", 0, 6, "Follows a pointer to the value it points at.", "*p = 10;" },
+    { "NULL / nullptr", 0, 6, "A pointer that points at nothing. Check for it before you use a pointer.", "if (p != NULL) { ... }" },
+    { "pointer arithmetic", 0, 6, "p + 1 moves to the next element, not the next byte.", "*(arr + 2) == arr[2]" },
+    { "malloc / free", 1, 6, "Ask for heap memory, then give it back exactly once.", "int *a = malloc(5 * sizeof *a);  free(a);" },
+    { "new / delete", 2, 6, "C++ heap memory. Use delete[] for arrays made with new[].", "int *a = new int[5];  delete[] a;" },
+    { "stack and heap", 0, 6, "Stack: automatic locals, freed at the closing brace. Heap: manual, lives until you free it.", "int x;   /* stack */    malloc(...)   /* heap */" },
+    { "memory leak", 0, 6, "Heap memory you never freed and can no longer reach.", "p = NULL;   /* the block is lost */" },
+    { "dangling pointer", 0, 6, "A pointer to memory that was freed or has gone out of scope.", "free(p);  *p = 1;   /* bug */" },
+    { "segmentation fault", 0, 6, "The crash from touching memory you don't own: NULL, freed or out of range.", "int *p = NULL;  *p = 1;" },
+    { "smart pointer", 2, 6, "A pointer object that frees its memory for you.", "unique_ptr<int> p = make_unique<int>(5);" },
+    { "array", 0, 7, "A fixed-size row of values of one type, counted from 0.", "int a[5] = {1, 2, 3, 4, 5};" },
+    { "array decay", 0, 7, "Passing an array to a function gives just a pointer to its first element. The size is lost.", "void f(int a[], int n)" },
+    { "2D array", 0, 7, "An array of arrays, like a grid.", "int g[3][4];  g[1][2] = 7;" },
+    { "C string", 1, 7, "A char array that ends with a '\\0' byte.", "char s[] = \"hi\";   /* 3 bytes */" },
+    { "strlen", 1, 7, "The number of characters before the '\\0'.", "strlen(\"hello\") == 5" },
+    { "strcmp", 1, 7, "Compares two C strings. 0 means equal. Never use == on them.", "if (strcmp(a, b) == 0)" },
+    { "strcpy / strcat", 1, 7, "Copy or append a C string. The destination must be big enough.", "strcpy(dst, src);" },
+    { "string", 2, 7, "A resizable text type with handy methods.", "string s = \"hi\";  s += \"!\";" },
+    { ".size() / .length()", 2, 7, "The number of characters in a string or items in a container.", "s.size()" },
+    { "vector", 2, 7, "A resizable array that manages its own memory.", "vector<int> v = {1, 2};  v.push_back(3);" },
+    { "struct", 0, 8, "Groups related variables into one new type.", "struct Point { int x, y; };" },
+    { "typedef", 1, 8, "Gives a type a shorter name.", "typedef struct { int x; } P;" },
+    { "member access (. and ->)", 0, 8, ". reaches a member of an object. -> does it through a pointer.", "p->x   is the same as   (*p).x" },
+    { "class", 2, 8, "Like a struct, but members are private unless you say otherwise.", "class Dog { public: void bark(); };" },
+    { "constructor", 2, 8, "A special function that sets up a new object.", "Dog(string n) : name(n) {}" },
+    { "destructor", 2, 8, "Runs when an object is destroyed. It releases what the object owns.", "~Dog() { }" },
+    { "public / private", 2, 8, "Who may use a member: anyone, or only the class itself.", "private: int age;" },
+    { "this", 2, 8, "A pointer to the object a member function is running on.", "this->age = age;" },
+    { "inheritance", 2, 8, "A class built on another one, reusing its members.", "class Puppy : public Dog { };" },
+    { "virtual", 2, 8, "Lets a derived class replace a function. The right one is chosen at run time.", "virtual void speak();" },
+    { "printf", 1, 9, "Prints formatted text. %d int, %f double, %s string, %c char.", "printf(\"%d + %d\\n\", a, b);" },
+    { "scanf", 1, 9, "Reads formatted input into variables. Pass their addresses.", "scanf(\"%d\", &n);" },
+    { "cout and cin", 2, 9, "Stream output (<<) and input (>>).", "cout << n << endl;   cin >> n;" },
+    { "endl", 2, 9, "A newline that also flushes the output. \"\\n\" is faster.", "cout << \"hi\" << endl;" },
+    { "getline", 2, 9, "Reads a whole line, spaces included.", "getline(cin, line);" },
+    { "#include", 0, 9, "Pastes in a header so you can use a library.", "#include <stdio.h>    #include <iostream>" },
+    { "#define", 0, 9, "A text replacement made before the code is compiled.", "#define MAX 100" },
+    { "namespace and std::", 2, 9, "A named group of names. The standard library lives in std.", "using namespace std;" },
+    { "rand / srand", 0, 9, "Pseudo-random numbers. Seed once with srand(time(NULL)).", "rand() % 6 + 1" },
+    { "math functions", 0, 9, "sqrt, pow, floor, ceil, fabs and friends from math.h / cmath.", "sqrt(16.0) == 4" },
+    { "sort", 2, 9, "Sorts a range in place (from <algorithm>).", "sort(v.begin(), v.end());" },
+    { "qsort", 1, 9, "C's generic sort. You supply the compare function.", "qsort(a, n, sizeof a[0], cmp);" },
+    { "exit code", 0, 9, "The number main returns. 0 means everything went fine.", "return 0;" },
+};
+#define NGLOSS ((int)(sizeof GLOSS / sizeof GLOSS[0]))
+
+static char glQuery[40] = "";
+static int glCat = 0;
+static float glScroll = 0;
+
+static void DrawGlossary(float top, Color accent)
+{
+    Vector2 m = GetMousePosition();
+    /* search box and language switch */
+    Rectangle box = { 40, top, W - 80 - 170, 46 };
+    bool bhov = CheckCollisionPointRec(m, box);
+    Panel(box, 0.2f, SURF, glFocus ? accent : BORDER);
+    if (bhov) ibeam = true;
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) glFocus = bhov;
+    if (glFocus) {
+        int ch, len = (int)strlen(glQuery);
+        while ((ch = GetCharPressed()) > 0) if (ch >= 32 && ch <= 126 && len < (int)sizeof glQuery - 1) { glQuery[len++] = (char)ch; glQuery[len] = 0; glScroll = 0; }
+        static float bs = 0;
+        if (IsKeyPressed(KEY_BACKSPACE)) { if (len > 0) glQuery[len - 1] = 0; bs = 0; glScroll = 0; }
+        else if (IsKeyDown(KEY_BACKSPACE)) { bs += GetFrameTime(); if (bs > 0.4f && len > 0) { glQuery[len - 1] = 0; bs = 0.36f; } }
+    }
+    if (glQuery[0]) Txt(fReg, glQuery, box.x + 18, box.y + 10, 21, TXT);
+    else Txt(fReg, "Search terms: try \"pointer\", \"loop\" or \"malloc\"", box.x + 18, box.y + 12, 18, DIM);
+    if (glFocus && ((int)(GetTime() * 2) & 1)) DrawRectangle((int)(box.x + 20 + TxtW(fReg, glQuery, 21)), (int)box.y + 9, 2, 28, TXT);
+    LangToggle(W - 40 - 150, top + 2);
+
+    /* category chips */
+    float cx = 40;
+    for (int i = 0; i < 10; i++) {
+        float cw = TxtW(fMed, GCATS[i], 14) + 26;
+        Rectangle r = { cx, top + 58, cw, 32 };
+        bool hov = CheckCollisionPointRec(m, r), on = glCat == i;
+        if (hov) hand = true;
+        DrawRectangleRounded(r, 0.5f, 10, on ? accent : (hov ? SURF2 : SURF));
+        CenterTxt(fMed, GCATS[i], r.x + r.width / 2, r.y + 6, 14, on ? (Color) { 30, 22, 12, 255 } : (hov ? TXT : DIM));
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { glCat = i; glScroll = 0; }
+        cx += cw + 6;
+    }
+
+    /* the matching terms */
+    int idx[256], n = 0;
+    for (int i = 0; i < NGLOSS && n < 256; i++) {
+        const GTerm* g = &GLOSS[i];
+        if (g->lg != 0 && g->lg != lang + 1) continue;
+        if (glCat && g->cat != glCat) continue;
+        if (glQuery[0] && !ContainsCI(g->term, glQuery) && !ContainsCI(g->meaning, glQuery) && !ContainsCI(g->ex, glQuery)) continue;
+        idx[n++] = i;
+    }
+    const float y0 = top + 104, rowH = 72;
+    Txt(fReg, TextFormat("%d term%s for %s", n, n == 1 ? "" : "s", LANG_NAME[lang]), 40, y0 - 2, 14, DIM);
+    const char* hint = "Click a row to copy its example";
+    Txt(fReg, hint, W - 40 - TxtW(fReg, hint, 13), y0, 13, DIM);
+    float listTop = y0 + 24, viewH = H - listTop - 10;
+    glScroll -= GetMouseWheelMove() * 56;
+    float maxS = n * rowH - viewH + 8; if (maxS < 0) maxS = 0;
+    if (glScroll < 0) glScroll = 0;
+    if (glScroll > maxS) glScroll = maxS;
+    if (!n) { CenterTxt(fBold, "No terms match", W / 2.0f, listTop + 60, 24, TXT); CenterTxt(fReg, "Try a shorter word, or switch between C and C++.", W / 2.0f, listTop + 96, 15, DIM); return; }
+    ScissorT(0, (int)listTop, W, (int)viewH);
+    for (int k = 0; k < n; k++) {
+        const GTerm* g = &GLOSS[idx[k]];
+        Rectangle r = { 40, listTop + k * rowH - glScroll, W - 80, rowH - 6 };
+        if (r.y > H || r.y + r.height < listTop) continue;
+        bool hov = CheckCollisionPointRec(m, r) && m.y > listTop;
+        if (hov) hand = true;
+        Panel(r, 0.12f, hov ? SURF2 : SURF, hov ? accent : BORDER);
+        DrawRectangleRounded((Rectangle) { r.x, r.y + 8, 4, r.height - 16 }, 0.5f, 4, g->lg == 0 ? accent : ACCENTS[g->lg - 1]);
+        TxtFit(fBold, g->term, r.x + 20, r.y + 8, 19, 236, TXT);
+        Txt(fReg, TextFormat("%s%s", GCATS[g->cat], g->lg == 1 ? "  -  C only" : g->lg == 2 ? "  -  C++ only" : ""), r.x + 20, r.y + 36, 12, DIM);
+        TxtFit(fReg, g->meaning, r.x + 270, r.y + 7, 15, r.width - 290, (Color) { 224, 216, 192, 255 });
+        Rectangle eb = { r.x + 270, r.y + 31, r.width - 290, 27 };
+        DrawRectangleRounded(eb, 0.25f, 6, CODEBG);
+        TxtFit(fCode, g->ex, eb.x + 10, eb.y + 4, 14, eb.width - 20, (Color) { 150, 214, 196, 255 });
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && m.y > listTop) { SetClipboardText(g->ex); Notify("Example copied", accent); }
+    }
+    EndScissorMode();
+}
+
+/* ======================================================================
+   SKILL MAP: every lesson as a node on a trail, ringed by how well you know it
+   ====================================================================== */
+static Vector2 SkillNodePos(int lg, int les, float top)
+{
+    float x = 150 + les * 196.0f;
+    float y = top + (lg ? 322 : 138) + (les % 2 ? 26.0f : -22.0f) * (lg ? -1 : 1);
+    return (Vector2) { x, y };
+}
+
+static int SkillWeakest(int* out, int max)                     /* skills with enough answers and low accuracy, weakest first */
+{
+    int n = 0;
+    for (int s = 0; s < NSKILL - 1; s++) {
+        float a = SkillAccuracy(s);
+        if (a >= 0 && a < 0.6f && sd.nrecent[s] >= 5 && n < 16) out[n++] = s;
+    }
+    for (int i = 0; i < n; i++) for (int j = i + 1; j < n; j++) if (SkillAccuracy(out[j]) < SkillAccuracy(out[i])) { int t = out[i]; out[i] = out[j]; out[j] = t; }
+    return n < max ? n : max;
+}
+
+static void DrawSkillMap(float top, Color accent)
+{
+    Vector2 m = GetMousePosition();
+    float tm = (float)GetTime();
+    Txt(fReg, "Each node is a lesson. The ring fills as you read it, pass its quiz and solve its challenges. Click a node to open it.", 40, top - 4, 15, (Color) { 217, 209, 187, 255 });
+    /* legend */
+    {
+        static const int lv[5] = { 0, 20, 50, 80, 100 };
+        float lx = 40;
+        for (int i = 0; i < 5; i++) {
+            Color c = MasteryCol(lv[i] ? lv[i] : 0);
+            DrawCircle((int)lx + 6, (int)top + 34, 6, c);
+            Txt(fReg, MasteryName(lv[i]), lx + 18, top + 25, 13, DIM);
+            lx += 18 + TxtW(fReg, MasteryName(lv[i]), 13) + 22;
+        }
+    }
+    int hover = -1;
+    int nextLes[2] = { NextLesson(0), NextLesson(1) };
+    /* trails and their paths */
+    for (int lg = 0; lg < 2; lg++) {
+        Txt(fBold, lg ? "C++ trail" : "C trail", 40, SkillNodePos(lg, 0, top).y - 62, 20, ACCENTS[lg]);
+        for (int les = 0; les + 1 < NLESSONS; les++) {
+            Vector2 a = SkillNodePos(lg, les, top), b = SkillNodePos(lg, les + 1, top);
+            bool done = Mastery(lg, les) >= 65;
+            Vector2 prev = a;
+            for (int k = 1; k <= 24; k++) {
+                float u = k / 24.0f, e = u * u * (3 - 2 * u);
+                Vector2 p = { a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * e };
+                DrawLineEx(prev, p, done ? 5.0f : 3.0f, done ? Fade(ACCENTS[lg], 0.65f) : Fade(BORDER, 0.9f));
+                prev = p;
+            }
+        }
+        /* a path to the tracing node */
+        Vector2 a = SkillNodePos(lg, NLESSONS - 1, top), b = { 1100, top + 240 };
+        Vector2 prev = a;
+        for (int k = 1; k <= 24; k++) {
+            float u = k / 24.0f, e = u * u * (3 - 2 * u);
+            Vector2 p = { a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * e };
+            DrawLineEx(prev, p, 3, Fade(BORDER, 0.55f));
+            prev = p;
+        }
+    }
+    /* lesson nodes */
+    for (int lg = 0; lg < 2; lg++) {
+        for (int les = 0; les < NLESSONS; les++) {
+            Vector2 c = SkillNodePos(lg, les, top);
+            int mast = Mastery(lg, les), s = lg * NLESSONS + les;
+            Color col = mast <= 0 ? (Color) { 96, 110, 92, 255 } : MasteryCol(mast);
+            float rad = 36;
+            bool hov = CheckCollisionPointCircle(m, c, rad + 4);
+            if (hov) { hand = true; hover = s; }
+            if (les == nextLes[lg] && mast < 100) {                                  /* the lesson to do next pulses */
+                float pu = 0.5f + 0.5f * sinf(tm * 3.0f);
+                DrawCircle((int)c.x, (int)c.y, rad + 12 + pu * 6, Fade(accent, 0.10f + 0.10f * pu));
+                DrawRing(c, rad + 7, rad + 9, 0, 360, 40, Fade(accent, 0.6f));
+            }
+            DrawCircle((int)c.x, (int)c.y + 4, rad + 2, Fade(BLACK, 0.35f));
+            DrawCircle((int)c.x, (int)c.y, rad, hov ? SURF2 : SURF);
+            DrawRing(c, rad - 7, rad, 0, 360, 48, (Color) { 20, 32, 26, 255 });
+            if (mast > 0) DrawRing(c, rad - 7, rad, -90, -90 + 360.0f * mast / 100.0f, 48, col);
+            DrawCircle((int)c.x, (int)c.y, rad - 9, Fade(WHITE, hov ? 0.05f : 0.02f));
+            CenterTxt(fBold, TextFormat("%d", les + 1), c.x, c.y - 15, 26, mast >= 100 ? (Color) { 255, 214, 90, 255 } : TXT);
+            if (mast >= 100) { DrawCircle((int)(c.x + 26), (int)(c.y - 26), 11, (Color) { 255, 200, 70, 255 }); DrawCheck(c.x + 26, c.y - 26, 15, (Color) { 60, 40, 10, 255 }); }
+            TxtFit(fBold, LESSONS[lg][les].name + 3, c.x - 90, c.y + 44, 15, 180, TXT);
+            const char* st = TextFormat("%s  %d%%", MasteryName(mast), mast);
+            CenterTxt(fReg, st, c.x, c.y + 63, 12, mast <= 0 ? DIM : col);
+            if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { SetLang(lg); StartLesson(les); }
+        }
+    }
+    /* the tracing node */
+    {
+        Vector2 c = { 1100, top + 240 };
+        int s = NSKILL - 1, xp = sd.xp[s], lv = LevelOf(xp);
+        bool hov = CheckCollisionPointCircle(m, c, 44);
+        if (hov) { hand = true; hover = s; }
+        DrawPoly(c, 6, 46, 30, Fade(BLACK, 0.35f));
+        DrawPoly((Vector2) { c.x, c.y - 3 }, 6, 44, 30, hov ? SURF2 : SURF);
+        for (int q = 0; q < 6; q++) {
+            float a0 = (30 + q * 60) * (PI / 180), a1 = (30 + (q + 1) * 60) * (PI / 180);
+            DrawLineEx((Vector2) { c.x + cosf(a0) * 44, c.y - 3 + sinf(a0) * 44 }, (Vector2) { c.x + cosf(a1) * 44, c.y - 3 + sinf(a1) * 44 }, 4, hov ? accent : (Color) { 70, 190, 180, 255 });
+        }
+        CenterTxt(fBold, "Lv", c.x, c.y - 36, 13, DIM);
+        CenterTxt(fBold, TextFormat("%d", lv), c.x, c.y - 24, 28, TXT);
+        CenterTxt(fBold, "Tracing", c.x, c.y + 54, 15, TXT);
+        CenterTxt(fReg, "Speed rounds", c.x, c.y + 73, 12, DIM);
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { hubTab = 1; hubScroll = 0; }
+    }
+    /* bottom: what to do next and weak spots */
+    {
+        Rectangle P = { 40, top + 444, W - 80, 148 };
+        Panel(P, 0.05f, SURF, BORDER);
+        Txt(fBold, "Up next", P.x + 22, P.y + 12, 19, accent);
+        for (int lg = 0; lg < 2; lg++) {
+            Rectangle r = { P.x + 22, P.y + 44 + lg * 48.0f, 430, 42 };
+            bool done = Mastery(lg, nextLes[lg]) >= 100;
+            bool hov = CheckCollisionPointRec(m, r);
+            if (hov) hand = true;
+            DrawRectangleRounded(r, 0.25f, 8, hov ? SURF2 : (Color) { 20, 36, 28, 255 });
+            Pill(LANG_NAME[lg], r.x + 8, r.y + 7, ACCENTS[lg]);
+            TxtFit(fBold, done ? "Every lesson mastered. Nice!" : TextFormat("%d. %s", nextLes[lg] + 1, LESSONS[lg][nextLes[lg]].name + 3), r.x + 84, r.y + 10, 16, 330, TXT);
+            if (hov && !done && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { SetLang(lg); StartLesson(nextLes[lg]); }
+        }
+        Txt(fBold, "Weak spots", P.x + 490, P.y + 12, 19, (Color) { 255, 160, 120, 255 });
+        int weak[3], nw = SkillWeakest(weak, 3);
+        if (!nw) Wrapped(fReg, "None yet. Answer some questions in the Review tab and any topic you often miss shows up here.", P.x + 490, P.y + 44, P.width - 490 - 24, 14, DIM);
+        for (int i = 0; i < nw; i++) {
+            Rectangle r = { P.x + 490, P.y + 44 + i * 33.0f, P.width - 490 - 24, 30 };
+            bool hov = CheckCollisionPointRec(m, r);
+            if (hov) hand = true;
+            DrawRectangleRounded(r, 0.3f, 8, hov ? SURF2 : (Color) { 20, 36, 28, 255 });
+            TxtFit(fBold, SkillName(weak[i]), r.x + 12, r.y + 5, 15, r.width - 130, TXT);
+            const char* t = TextFormat("%d%% recent", (int)(SkillAccuracy(weak[i]) * 100 + 0.5f));
+            Txt(fBold, t, r.x + r.width - 12 - TxtW(fBold, t, 13), r.y + 7, 13, BAD);
+            if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { SetLang(weak[i] / NLESSONS); StartLesson(weak[i] % NLESSONS); }
+        }
+    }
+    /* tooltip */
+    if (hover >= 0) {
+        int s = hover;
+        Rectangle t = { m.x + 18, m.y + 14, 268, s == NSKILL - 1 ? 92 : 176 };
+        if (t.x + t.width > W - 10) t.x = m.x - 18 - t.width;
+        if (t.y + t.height > H - 10) t.y = H - 10 - t.height;
+        Panel(t, 0.07f, (Color) { 18, 32, 26, 250 }, accent);
+        int xp = sd.xp[s], lv = LevelOf(xp);
+        TxtFit(fBold, SkillName(s), t.x + 14, t.y + 10, 16, t.width - 28, TXT);
+        if (s == NSKILL - 1) {
+            Txt(fReg, TextFormat("Level %d  -  %d XP", lv, xp), t.x + 14, t.y + 38, 14, DIM);
+            Txt(fReg, "Click to open the speed rounds", t.x + 14, t.y + 62, 13, accent);
+        }
+        else {
+            int lg = s / NLESSONS, les = s % NLESSONS, mast = Mastery(lg, les), nq = LESSONS[lg][les].nQ, np = ProbsInLesson(les);
+            Txt(fBold, TextFormat("%s  %d%%", MasteryName(mast), mast), t.x + 14, t.y + 36, 15, mast <= 0 ? DIM : MasteryCol(mast));
+            Txt(fReg, TextFormat("Lesson read: %s", prog.read[lg][les] ? "yes" : "not yet"), t.x + 14, t.y + 62, 14, DIM);
+            Txt(fReg, prog.best[lg][les] >= 0 ? TextFormat("Quiz best: %d / %d", prog.best[lg][les], nq) : "Quiz: not taken", t.x + 14, t.y + 84, 14, DIM);
+            Txt(fReg, np ? TextFormat("Challenges: %d / %d solved", SolvedInLesson(lg, les), np) : "Challenges: none for this lesson", t.x + 14, t.y + 106, 14, DIM);
+            float acc = SkillAccuracy(s);
+            Txt(fReg, TextFormat("Skill level %d  -  %d XP", lv, xp), t.x + 14, t.y + 128, 14, DIM);
+            if (acc < 0) Txt(fReg, "No review answers yet", t.x + 14, t.y + 150, 13, DIM);
+            else Txt(fBold, TextFormat("%d%% of recent answers right", (int)(acc * 100 + 0.5f)), t.x + 14, t.y + 150, 13, acc < 0.6f && sd.nrecent[s] >= 5 ? BAD : (acc >= 0.8f ? GOOD : DIM));
+        }
+    }
+}
+
+/* ======================================================================
+   STEPPER SCREEN
+   ====================================================================== */
+static char stSrc[LAB_CAP + 1];
+static char stInput[400];
+static int stInLen, spCur, stSpeed = 1, stNLines;
+static Screen stBack = SCR_MENU;
+static int stLineOff[600];
+static bool stPlay, stInFocus;
+static float stPlayT, stCodeScroll, stVarScroll;
+
+static void StepRerun(void)
+{
+    char conv[200];
+    ProbText(stInput, conv, sizeof conv);
+    StRun(stSrc, conv);
+    if (spCur >= stNStep) spCur = stNStep > 0 ? stNStep - 1 : 0;
+    stPlay = false;
+}
+
+static void StepOpen(const char* code, const char* input, int back)
+{
+    snprintf(stSrc, sizeof stSrc, "%s", code);
+    snprintf(stInput, sizeof stInput, "%s", input ? input : "");
+    stInLen = (int)strlen(stInput);
+    stNLines = 0;
+    stLineOff[stNLines++] = 0;
+    for (int i = 0; stSrc[i] && stNLines < 599; i++) if (stSrc[i] == '\n') stLineOff[stNLines++] = i + 1;
+    spCur = 0; stBack = (Screen)back; stCodeScroll = 0; stVarScroll = 0; stInFocus = false;
+    StepRerun();
+    screen = SCR_STEP;
+}
+
+static bool StepSeen(int line, int upto)
+{
+    for (int i = 0; i <= upto && i < stNStep; i++) if (stSteps[i].line == line) return true;
+    return false;
+}
+
+static void DrawStep(Color accent)
+{
+    Vector2 m = GetMousePosition();
+    float dt = GetFrameTime(); if (dt > 0.05f) dt = 0.05f;
+    TopBar();
+    if (Button((Rectangle) { 24, 14, 104, 44 }, "< Back", SURF2, 16)) { screen = stBack; return; }
+    Txt(fBold, "Step through your code", 150, 14, 30, TXT);
+    {
+        const char* info = stNStep ? TextFormat("%d steps recorded", stNStep) : "Nothing to step through";
+        Txt(fReg, info, W - 36 - TxtW(fReg, info, 15), 26, 15, DIM);
+    }
+    const float lh = 25, fs = 16;
+    float cw = MeasureTextEx(fCode, "M", fs, 0).x;
+    Rectangle cp = { 24, 88, 672, 470 };
+    Panel(cp, 0.03f, CODEBG, BORDER);
+
+    /* the program could not be followed at all */
+    if (stNStep == 0) {
+        Panel((Rectangle) { 24, 88, 1152, 650 }, 0.03f, SURF, BORDER);
+        CenterTxt(fBold, "The stepper can't follow this program yet", W / 2.0f, 180, 30, TXT);
+        Wrapped(fReg, stErr[0] ? stErr : "Something went wrong.", W / 2.0f - 380, 240, 760, 19, (Color) { 255, 190, 140, 255 });
+        if (stErrLine > 0) CenterTxt(fCode, TextFormat("line %d", stErrLine), W / 2.0f, 310, 18, DIM);
+        Wrapped(fReg, "It follows variables, if/else, loops, functions, arrays, vectors, strings, references and simple pointers, with printf / scanf and cout / cin. Structs, classes, malloc / new and maps aren't followed yet (the Memory Lab shows those). If the message above sounds like a typo, press Run in the editor to see the compiler's own error.", W / 2.0f - 380, 360, 760, 17, DIM);
+        if (Button((Rectangle) { W / 2.0f - 90, 520, 180, 48 }, "Back to the editor", accent, 17)) screen = stBack;
+        return;
+    }
+    if (spCur >= stNStep) spCur = stNStep - 1;
+    const StStep* cs = &stSteps[spCur];
+
+    /* ---- keys ---- */
+    if (!stInFocus) {
+        static float held = 0;
+        bool r = IsKeyDown(KEY_RIGHT), l = IsKeyDown(KEY_LEFT);
+        bool fire = IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_LEFT);
+        if (r || l) { held += dt; if (held > 0.4f) { fire = true; held = 0.34f; } }
+        else held = 0;
+        if (fire) { stPlay = false; if (r && spCur < stNStep - 1) spCur++; else if (l && spCur > 0) spCur--; }
+        if (IsKeyPressed(KEY_HOME)) { stPlay = false; spCur = 0; }
+        if (IsKeyPressed(KEY_END)) { stPlay = false; spCur = stNStep - 1; }
+        if (IsKeyPressed(KEY_SPACE)) { if (spCur >= stNStep - 1) spCur = 0; stPlay = !stPlay; stPlayT = 0; }
+    }
+    if (stPlay) {
+        static const float gap[4] = { 1.0f, 0.55f, 0.25f, 0.09f };
+        stPlayT += dt;
+        if (stPlayT >= gap[stSpeed]) { stPlayT = 0; if (spCur < stNStep - 1) spCur++; else stPlay = false; }
+    }
+    cs = &stSteps[spCur];
+
+    /* ---- code ---- */
+    int curLine = cs->line;
+    bool errHere = stFail && spCur == stNStep - 1;
+    float viewH = cp.height - 16, maxS = stNLines * lh - viewH; if (maxS < 0) maxS = 0;
+    float target = (curLine - 1) * lh - viewH * 0.4f;
+    if (target < 0) target = 0; if (target > maxS) target = maxS;
+    if (CheckCollisionPointRec(m, cp) && GetMouseWheelMove() != 0) { target = stCodeScroll - GetMouseWheelMove() * 75; if (target < 0) target = 0; if (target > maxS) target = maxS; stCodeScroll = target; }
+    stCodeScroll += (target - stCodeScroll) * fminf(1.0f, dt * 9.0f);
+    ScissorT((int)cp.x + 1, (int)cp.y + 1, (int)cp.width - 2, (int)cp.height - 2);
+    for (int i = 0; i < stNLines; i++) {
+        float y = cp.y + 8 + i * lh - stCodeScroll;
+        if (y < cp.y - lh || y > cp.y + cp.height) continue;
+        int ln = i + 1;
+        bool cur = ln == curLine, bad = errHere && ln == stErrLine;
+        if (cur) { DrawRectangle((int)cp.x + 2, (int)y - 2, (int)cp.width - 4, (int)lh, Fade(accent, 0.20f)); DrawRectangle((int)cp.x + 2, (int)y - 2, 4, (int)lh, accent); }
+        if (bad) { DrawRectangle((int)cp.x + 2, (int)y - 2, (int)cp.width - 4, (int)lh, Fade(BAD, 0.30f)); DrawRectangle((int)cp.x + 2, (int)y - 2, 4, (int)lh, BAD); }
+        Txt(fCode, TextFormat("%d", ln), cp.x + 46 - TxtW(fCode, TextFormat("%d", ln), 13), y + 3, 13, cur ? accent : Fade(DIM, 0.7f));
+        if (cur) DrawTriangle((Vector2) { cp.x + 12, y + 3 }, (Vector2) { cp.x + 12, y + 17 }, (Vector2) { cp.x + 24, y + 10 }, accent);
+        else if (StepSeen(ln, spCur)) DrawCircle((int)cp.x + 18, (int)y + 10, 2.5f, Fade(GOOD, 0.7f));
+        char lb[220]; int k = 0;
+        int a = stLineOff[i];
+        for (int q = a; stSrc[q] && stSrc[q] != '\n' && k < 200; q++) {
+            if (stSrc[q] == '\t') { for (int z = 0; z < 4 && k < 200; z++) lb[k++] = ' '; }
+            else if (stSrc[q] != '\r') lb[k++] = stSrc[q];
+        }
+        lb[k] = 0;
+        HighlightLine(lb, cp.x + 58, y + 2, fs, cw);
+    }
+    EndScissorMode();
+
+    /* ---- what just happened ---- */
+    Rectangle nb = { 24, 568, 672, 72 };
+    Panel(nb, 0.1f, SURF, errHere ? BAD : BORDER);
+    if (errHere) {
+        Txt(fBold, "The program stops here", nb.x + 18, nb.y + 8, 15, BAD);
+        Wrapped(fReg, stErr, nb.x + 18, nb.y + 30, nb.width - 36, 15, (Color) { 255, 200, 180, 255 });
+    }
+    else {
+        Txt(fBold, spCur == 0 ? "Start" : "Just ran", nb.x + 18, nb.y + 8, 13, DIM);
+        TxtFit(fBold, cs->note[0] ? cs->note : "This line ran.", nb.x + 18, nb.y + 26, 19, nb.width - 36, TXT);
+        if (cs->chain[0]) Txt(fCode, TextFormat("in %s", cs->chain), nb.x + 18, nb.y + 50, 13, DIM);
+        const char* sn = TextFormat("line %d", curLine);
+        Txt(fCode, sn, nb.x + nb.width - 18 - TxtW(fCode, sn, 13), nb.y + 50, 13, DIM);
+    }
+
+    /* ---- variables ---- */
+    Rectangle vp = { 708, 88, 468, 300 };
+    Panel(vp, 0.04f, SURF, BORDER);
+    Txt(fBold, "Variables", vp.x + 20, vp.y + 12, 19, accent);
+    Txt(fReg, cs->nv ? "highlighted = changed by the last step" : "none yet", vp.x + vp.width - 20 - TxtW(fReg, cs->nv ? "highlighted = changed by the last step" : "none yet", 12), vp.y + 18, 12, DIM);
+    {
+        const StStep* ps = spCur > 0 ? &stSteps[spCur - 1] : NULL;
+        const float rh = 30;
+        int shown = (int)((vp.height - 54) / rh);
+        float maxV = (cs->nv - shown) * rh; if (maxV < 0) maxV = 0;
+        if (CheckCollisionPointRec(m, vp)) stVarScroll -= GetMouseWheelMove() * 30;
+        if (stVarScroll < 0) stVarScroll = 0; if (stVarScroll > maxV) stVarScroll = maxV;
+        ScissorT((int)vp.x + 1, (int)vp.y + 46, (int)vp.width - 2, (int)vp.height - 52);
+        for (int i = 0; i < cs->nv; i++) {
+            const StSnapV* v = &stSnap[cs->v0 + i];
+            float y = vp.y + 50 + i * rh - stVarScroll;
+            bool changed = ps == NULL ? false : true;
+            if (ps) {
+                changed = true;
+                for (int q = 0; q < ps->nv; q++) {
+                    const StSnapV* o = &stSnap[ps->v0 + q];
+                    if (!strcmp(o->name, v->name) && ps->depth == cs->depth) { changed = strcmp(o->val, v->val) != 0; break; }
+                }
+            }
+            Rectangle row = { vp.x + 10, y, vp.width - 20, rh - 4 };
+            DrawRectangleRounded(row, 0.25f, 6, changed ? Fade(accent, 0.22f) : (Color) { 20, 36, 28, 255 });
+            if (changed) DrawRectangle((int)row.x, (int)row.y + 4, 3, (int)row.height - 8, accent);
+            Color nc = (v->flags & 4) ? (Color) { 190, 150, 255, 255 } : (v->flags & 2) ? (Color) { 128, 192, 208, 255 } : (Color) { 150, 214, 196, 255 };
+            TxtFit(fCode, v->name, row.x + 14, row.y + 4, 15, 132, nc);
+            TxtFit(fCode, v->val, row.x + 156, row.y + 4, 15, row.width - 170 - ((v->flags & 1) ? 44 : 0), changed ? TXT : (Color) { 214, 208, 186, 255 });
+            if (v->flags & 1) Txt(fReg, "global", row.x + row.width - 44, row.y + 6, 11, DIM);
+        }
+        EndScissorMode();
+        if (maxV > 0) DrawRectangleRounded((Rectangle) { vp.x + vp.width - 7, vp.y + 50 + (vp.height - 60) * stVarScroll / (maxV + vp.height), 3, 50 }, 0.5f, 4, Fade(DIM, 0.5f));
+    }
+
+    /* ---- output ---- */
+    Rectangle op = { 708, 400, 468, 158 };
+    Panel(op, 0.04f, SURF, BORDER);
+    Txt(fBold, "Output", op.x + 20, op.y + 10, 19, accent);
+    {
+        char ob[ST_OUT]; int n = cs->outLen; if (n > ST_OUT - 1) n = ST_OUT - 1;
+        memcpy(ob, stOutBuf, (size_t)n); ob[n] = 0;
+        int nl = 1; for (int i = 0; i < n; i++) if (ob[i] == '\n') nl++;
+        int skip = nl > 5 ? nl - 5 : 0, line = 0;
+        const char* p = ob;
+        while (line < skip && *p) { if (*p == '\n') line++; p++; }
+        float y = op.y + 42; int shown = 0;
+        ScissorT((int)op.x + 1, (int)op.y + 38, (int)op.width - 2, (int)op.height - 42);
+        while (shown < 5) {
+            const char* e = strchr(p, '\n');
+            char row[200]; int len = e ? (int)(e - p) : (int)strlen(p);
+            if (len > 199) len = 199;
+            memcpy(row, p, (size_t)len); row[len] = 0;
+            Txt(fCode, row, op.x + 20, y + shown * 22, 15, (Color) { 214, 236, 214, 255 });
+            if (!e) {
+                if (((int)(GetTime() * 2)) & 1) DrawRectangle((int)(op.x + 21 + TxtW(fCode, row, 15)), (int)(y + shown * 22) + 2, 9, 17, Fade(GOOD, 0.8f));
+                break;
+            }
+            p = e + 1; shown++;
+        }
+        EndScissorMode();
+    }
+
+    /* ---- input ---- */
+    Rectangle ip = { 708, 566, 468, 74 };
+    Panel(ip, 0.1f, SURF, stInFocus ? accent : BORDER);
+    Txt(fBold, "Input for scanf / cin", ip.x + 18, ip.y + 6, 13, DIM);
+    Rectangle ib = { ip.x + 12, ip.y + 28, ip.width - 24, 38 };
+    bool ihov = CheckCollisionPointRec(m, ib);
+    DrawRectangleRounded(ib, 0.2f, 6, CODEBG);
+    if (ihov) ibeam = true;
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) stInFocus = ihov;
+    if (stInFocus) {
+        bool changed = false;
+        int ch;
+        while ((ch = GetCharPressed()) > 0) if (ch >= 32 && ch <= 126 && stInLen < (int)sizeof stInput - 2) { stInput[stInLen++] = (char)ch; stInput[stInLen] = 0; changed = true; }
+        if (IsKeyPressed(KEY_ENTER) && stInLen < (int)sizeof stInput - 3) { stInput[stInLen++] = '\\'; stInput[stInLen++] = 'n'; stInput[stInLen] = 0; changed = true; }
+        static float bs = 0;
+        if (IsKeyPressed(KEY_BACKSPACE) || (IsKeyDown(KEY_BACKSPACE) && (bs += dt) > 0.4f)) { if (stInLen > 0) { stInLen--; stInput[stInLen] = 0; changed = true; } if (IsKeyDown(KEY_BACKSPACE)) bs = 0.36f; }
+        if (!IsKeyDown(KEY_BACKSPACE)) bs = 0;
+        if (changed) StepRerun();
+    }
+    if (stInput[0]) TxtFit(fCode, stInput, ib.x + 10, ib.y + 8, 15, ib.width - 24, TXT);
+    else Txt(fReg, "Type what the program should read (Enter adds a new line)", ib.x + 10, ib.y + 9, 14, DIM);
+    if (stInFocus && ((int)(GetTime() * 2) & 1)) DrawRectangle((int)(ib.x + 11 + TxtW(fCode, stInput, 15)), (int)ib.y + 7, 2, 24, TXT);
+
+    /* ---- controls ---- */
+    Rectangle bp = { 24, 650, 1152, 88 };
+    Panel(bp, 0.08f, SURF, BORDER);
+    if (Button((Rectangle) { bp.x + 16, bp.y + 16, 56, 56 }, "|<", SURF2, 20)) { stPlay = false; spCur = 0; }
+    if (Button((Rectangle) { bp.x + 80, bp.y + 16, 56, 56 }, "<", SURF2, 22)) { stPlay = false; if (spCur > 0) spCur--; }
+    if (Button((Rectangle) { bp.x + 144, bp.y + 16, 132, 56 }, stPlay ? "Pause" : (spCur >= stNStep - 1 ? "Replay" : "Play"), stPlay ? (Color) { 190, 120, 40, 255 } : (Color) { 36, 160, 100, 255 }, 20)) {
+        if (!stPlay && spCur >= stNStep - 1) spCur = 0;
+        stPlay = !stPlay; stPlayT = 0;
+    }
+    if (Button((Rectangle) { bp.x + 284, bp.y + 16, 56, 56 }, ">", accent, 22)) { stPlay = false; if (spCur < stNStep - 1) spCur++; }
+    if (Button((Rectangle) { bp.x + 348, bp.y + 16, 56, 56 }, ">|", SURF2, 20)) { stPlay = false; spCur = stNStep - 1; }
+    /* speed */
+    {
+        static const char* sp[4] = { "Slow", "Normal", "Fast", "Zoom" };
+        Txt(fReg, "Speed", bp.x + 424, bp.y + 10, 12, DIM);
+        for (int i = 0; i < 4; i++) {
+            Rectangle r = { bp.x + 424 + i * 62.0f, bp.y + 30, 58, 32 };
+            bool hov = CheckCollisionPointRec(m, r), on = stSpeed == i;
+            if (hov) hand = true;
+            if (on) DrawRectangleRounded((Rectangle) { r.x - 2, r.y - 2, r.width + 4, r.height + 4 }, 0.35f, 8, accent);
+            DrawRectangleRounded(r, 0.35f, 8, on ? (Color) { 52, 72, 52, 255 } : (hov ? SURF2 : (Color) { 20, 36, 28, 255 }));
+            CenterTxt(fMed, sp[i], r.x + r.width / 2, r.y + 6, 13, on ? TXT : DIM);
+            if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) stSpeed = i;
+        }
+    }
+    /* scrubber */
+    {
+        Rectangle tr = { bp.x + 690, bp.y + 38, 430, 12 };
+        Rectangle hit = { tr.x - 8, tr.y - 14, tr.width + 16, tr.height + 28 };
+        bool hov = CheckCollisionPointRec(m, hit);
+        if (hov) hand = true;
+        static bool drag = false;
+        if (hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { drag = true; stPlay = false; }
+        if (drag) {
+            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) { float u = (m.x - tr.x) / tr.width; if (u < 0) u = 0; if (u > 1) u = 1; spCur = (int)(u * (stNStep - 1) + 0.5f); }
+            else drag = false;
+        }
+        DrawRectangleRounded(tr, 0.5f, 6, (Color) { 14, 26, 20, 255 });
+        float u = stNStep > 1 ? (float)spCur / (stNStep - 1) : 1.0f;
+        DrawRectangleRounded((Rectangle) { tr.x, tr.y, fmaxf(tr.height, tr.width * u), tr.height }, 0.5f, 6, accent);
+        DrawCircle((int)(tr.x + tr.width * u), (int)(tr.y + tr.height / 2), hov || drag ? 10 : 8, (Color) { 246, 241, 226, 255 });
+        Txt(fBold, TextFormat("Step %d of %d", spCur + 1, stNStep), tr.x, bp.y + 8, 16, TXT);
+        const char* hk = "Left / Right arrows step, Space plays";
+        Txt(fReg, hk, tr.x + tr.width - TxtW(fReg, hk, 12), bp.y + 12, 12, DIM);
+        if (stFail) Txt(fReg, stTrunc ? "Stopped early (step limit)" : "The program stops with an error at the end", tr.x, bp.y + 62, 12, stTrunc ? DIM : BAD);
+        else Txt(fReg, "The whole run is recorded: drag the bar to jump anywhere", tr.x, bp.y + 62, 12, DIM);
+    }
+}
+
+
 int main(void)
 {
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);      /* smoother rounded corners */
@@ -12058,8 +16977,10 @@ int main(void)
     LoadGame();
     LoadFarm();
     LoadStudy();
+    LoadJobs();
+    LoadCfg();
     WorldEnter();                           /* start in the campus sim */
-    screen = SCR_BOOT;                      /* ...after the loading screen */
+    if (cfg.boot) screen = SCR_BOOT;        /* ...after the loading screen */
 
     while (!quit && !WindowShouldClose()) {
         if (IsKeyPressed(KEY_ESCAPE)) {
@@ -12067,7 +16988,9 @@ int main(void)
             else if (screen == SCR_STUDYRUN || screen == SCR_SPEED) { screen = SCR_STUDY; bgBoost = 0; }
             else if (screen == SCR_NOTES) screen = SCR_LESSON;
             else if (screen == SCR_ANSREV) screen = SCR_RESULT;
-            else if (screen == SCR_BUG) screen = SCR_MEM;
+            else if (screen == SCR_BUG) { if (bugPick) GoMenu(); else { bugPick = true; BugCartReset(); } }
+            else if (screen == SCR_JOB) { JobSync(); SaveJobCode(); screen = SCR_JOBS; }
+            else if (screen == SCR_STEP) screen = stBack;
             else if (screen == SCR_LAB) LabBack();
             else if (screen == SCR_MENU) quit = true;
             else if (screen == SCR_WORLD) {
@@ -12094,7 +17017,7 @@ int main(void)
         if (screen != SCR_WORLD) DrawRectangleGradientV(0, 0, W, H, (Color) { 22, 44, 38, 255 }, (Color) { 10, 22, 17, 255 });
         if (screen != SCR_SPEED) bgBoost = 0;
         if (screen == SCR_MENU || screen == SCR_LESSON || screen == SCR_QUIZ || screen == SCR_RESULT || screen == SCR_MEM ||
-            screen == SCR_STUDY || screen == SCR_STUDYRUN || screen == SCR_SPEED || screen == SCR_NOTES || screen == SCR_ANSREV || screen == SCR_BUG)
+            screen == SCR_STUDY || screen == SCR_STUDYRUN || screen == SCR_SPEED || screen == SCR_NOTES || screen == SCR_ANSREV || screen == SCR_BUG || screen == SCR_JOBS || screen == SCR_SETTINGS)
             DrawLiveBg(accent);                                  /* the faint living background */
         switch (screen) {
         case SCR_MENU:   DrawMenu(accent);   break;
@@ -12116,14 +17039,21 @@ int main(void)
         case SCR_NOTES:    DrawNotes(accent);        break;
         case SCR_ANSREV:   DrawAnswerReview(accent); break;
         case SCR_BUG:      DrawBug();         break;
+        case SCR_JOBS:     DrawJobs();        break;
+        case SCR_JOB:      DrawJob(accent);   break;
+        case SCR_SETTINGS: DrawSettings(accent); break;
+        case SCR_STEP:     DrawStep(accent);  break;
         }
         {
             static int prevScreen = -1;
-            if ((int)screen != prevScreen) { if (prevScreen >= 0) trP = 0.0f; prevScreen = (int)screen; }
+            if ((int)screen != prevScreen) { if (prevScreen >= 0 && cfg.trans) trP = 0.0f; prevScreen = (int)screen; }
             float tdt = GetFrameTime(); if (tdt > 0.05f) tdt = 0.05f;
             DrawTransition(tdt, accent);
         }
+        DrawVignette();
+        DrawFx(GetFrameTime() > 0.05f ? 0.05f : GetFrameTime());
         DrawNotices(GetFrameTime());
+        if (cfg.fps) Txt(fCode, TextFormat("%d FPS", GetFPS()), 12, H - 26, 13, Fade(WHITE, 0.55f));
         EndMode2D();
         if (gOffX > 0 || gOffY > 0) {                         /* black letterbox bars hide anything drawn past the edges */
             int sw = GetScreenWidth(), sh = GetScreenHeight(), ox = (int)gOffX, oy = (int)gOffY;
@@ -12134,7 +17064,7 @@ int main(void)
         SetMouseCursor(hand ? MOUSE_CURSOR_POINTING_HAND : (ibeam ? MOUSE_CURSOR_IBEAM : MOUSE_CURSOR_DEFAULT));
     }
 
-    SaveProgress(); SaveFarm(); SaveProbCode();
+    SaveProgress(); SaveFarm(); SaveProbCode(); SaveJobs(); SaveJobCode(); SaveCfg();
     UnloadFont(fReg); UnloadFont(fBold); UnloadFont(fCode);
     CloseWindow();
     return 0;
